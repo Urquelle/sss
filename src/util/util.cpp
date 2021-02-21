@@ -351,6 +351,9 @@ void *
 arena_alloc(Arena *arena, size_t size) {
     Arena_Block *curr = arena->curr_block;
 
+    /* @AUFGABE: größe der angeforderten menge des speichers speichern, damit später
+     *           realloc weiß wieviel speicher kopiert werden muß.
+     */
     if ( (curr->ptr + size) > curr->size ) {
         size_t new_size = MAX(ARENA_SIZE, size*2);
         curr->next = arena_block(new_size);
@@ -360,6 +363,13 @@ arena_alloc(Arena *arena, size_t size) {
 
     void *result = curr->mem + curr->ptr;
     curr->ptr += size;
+
+    return result;
+}
+
+void *
+arena_realloc(Arena *arena, void *mem, size_t size) {
+    void *result = realloc(mem, size);
 
     return result;
 }

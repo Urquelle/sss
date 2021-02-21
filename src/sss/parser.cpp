@@ -3,6 +3,7 @@ char *keyword_api;
 char *keyword_as;
 char *keyword_break;
 char *keyword_const;
+char *keyword_free;
 char *keyword_else;
 char *keyword_enum;
 char *keyword_export;
@@ -14,9 +15,11 @@ char *keyword_impl;
 char *keyword_import;
 char *keyword_load;
 char *keyword_match;
+char *keyword_new;
 char *keyword_note;
 char *keyword_proc;
 char *keyword_return;
+char *keyword_run;
 char *keyword_struct;
 char *keyword_true;
 char *keyword_type;
@@ -31,12 +34,14 @@ struct Expr;
 struct Match_Line;
 struct Module_Sym;
 struct Note;
+struct Operand;
 struct Parsed_File;
 struct Proc_Param;
 struct Proc_Sign;
 struct Stmt;
 struct Stmt_Block;
 struct Stmt_If;
+struct Stmt_For;
 struct Stmt_Match;
 struct Struct_Field;
 struct Sym;
@@ -60,8 +65,9 @@ Parsed_File * parse(Token_List *tokens);
 Typespec    * parse_typespec(Token_List *tokens);
 Expr        * parse_expr(Token_List *tokens, bool with_stmt = false);
 Stmt        * parse_stmt(Token_List *tokens);
-Stmt_Block  * parse_stmt_block(Token_List *tokens);
+Stmt_Block  * parse_stmt_block(Token_List *tokens, Proc_Sign *sign = NULL);
 Stmt_If     * parse_stmt_if(Token_List *tokens);
+Stmt_For    * parse_stmt_for(Token_List *tokens);
 Stmt_Match  * parse_stmt_match(Token_List *tokens);
 
 #define STRUCT(Struct) \
@@ -102,7 +108,10 @@ enum Expr_Kind {
     EXPR_STR,
     EXPR_INT,
     EXPR_FLOAT,
+    EXPR_BOOL,
     EXPR_IDENT,
+    EXPR_NEW,
+    EXPR_RUN,
     EXPR_KEYWORD,
 
     EXPR_BIN,
@@ -120,23 +129,45 @@ struct Expr : Ast_Elem {
     Type      * type;
 };
 
+#define AS_INT(Expr) ((Expr_Int *)(Expr))
 struct Expr_Int : Expr {
     int64_t val;
 };
 
+#define AS_FLOAT(Expr) ((Expr_Float *)(Expr))
 struct Expr_Float : Expr {
     float val;
 };
 
+#define AS_BOOL(Expr) ((Expr_Bool *)(Expr))
+struct Expr_Bool : Expr {
+    bool val;
+};
+
+#define AS_STR(Expr) ((Expr_Str *)(Expr))
 struct Expr_Str : Expr {
-    char *val;
+    uint32_t   len;
+    char     * val;
 };
 
+#define AS_IDENT(Expr) ((Expr_Ident *)(Expr))
 struct Expr_Ident : Expr {
-    Sym  * sym;
-    char * val;
+    uint32_t   len;
+    Sym      * sym;
+    char     * val;
 };
 
+#define AS_NEW(Expr) ((Expr_New *)(Expr))
+struct Expr_New : Expr {
+    Expr *expr;
+};
+
+#define AS_RUN(Expr) ((Expr_Run *)(Expr))
+struct Expr_Run : Expr {
+    Expr *expr;
+};
+
+#define AS_KEYWORD(Expr) ((Expr_Keyword *)(Expr))
 struct Expr_Keyword : Expr {
     Sym  * sym;
     char * val;
@@ -165,47 +196,56 @@ enum Op_Kind {
     OP_OR,
     OP_LOGIC_END = OP_OR,
 };
+#define AS_BIN(Expr) ((Expr_Bin *)(Expr))
 struct Expr_Bin : Expr {
     Op_Kind op;
     Expr * left;
     Expr * right;
 };
 
+#define AS_CALL(Expr) ((Expr_Call *)(Expr))
 struct Expr_Call : Expr {
     Expr  *base;
     Exprs  args;
     size_t num_args;
 };
 
+#define AS_FIELD(Expr) ((Expr_Field *)(Expr))
 struct Expr_Field : Expr {
     Expr *base;
     char *field;
 };
 
+#define AS_INDEX(Expr) ((Expr_Index *)(Expr))
 struct Expr_Index : Expr {
-    Expr *expr;
+    Expr *base;
     Expr *index;
 };
 
+#define AS_PAREN(Expr) ((Expr_Paren *)(Expr))
 struct Expr_Paren : Expr {
     Expr *expr;
 };
 
+#define AS_RANGE(Expr) ((Expr_Range *)(Expr))
 struct Expr_Range : Expr {
     Expr *left;
     Expr *right;
 };
 
+#define AS_TUPLE(Expr) ((Expr_Tuple *)(Expr))
 struct Expr_Tuple : Expr {
     Exprs exprs;
     size_t num_exprs;
 };
 
+#define AS_COMPOUND(Expr) ((Expr_Compound *)(Expr))
 struct Expr_Compound : Expr {
     Compound_Elems elems;
     size_t num_elems;
 };
 
+#define AS_STMT(Expr) ((Expr_Stmt *)(Expr))
 struct Expr_Stmt : Expr {
     Stmt *stmt;
 };
@@ -226,28 +266,40 @@ struct Stmt : Ast_Elem {
     Notes notes;
 };
 
+#define AS_EXPR(Stmt) ((Stmt_Expr *)(Stmt))
 struct Stmt_Expr : Stmt {
     Expr *expr;
 };
 
+#define AS_DECL(Stmt) ((Stmt_Decl *)(Stmt))
 struct Stmt_Decl : Stmt {
     Decl *decl;
 };
 
+#define AS_ASSIGN(Stmt) ((Stmt_Assign *)(Stmt))
 struct Stmt_Assign : Stmt {
     Expr *lhs;
     Expr *rhs;
 };
 
+#define AS_BLOCK(Stmt) ((Stmt_Block *)(Stmt))
 struct Stmt_Block : Stmt {
     Stmts stmts;
     size_t num_stmts;
 };
 
+#define AS_IF(Stmt) ((Stmt_If *)(Stmt))
 struct Stmt_If : Stmt {
     Expr *cond;
     Stmt *stmt;
     Stmt_If *stmt_else;
+};
+
+#define AS_FOR(Stmt) ((Stmt_For *)(Stmt))
+struct Stmt_For : Stmt {
+    Expr *it;
+    Expr *cond;
+    Stmt *stmt;
 };
 
 struct Module_Sym : Ast_Elem {
@@ -265,6 +317,7 @@ struct Directive : Ast_Elem {
     Directive_Kind kind;
 };
 
+#define AS_IMPORT(Directive) ((Directive_Import *)(Directive))
 struct Directive_Import : Directive {
     char        * scope_name;
     bool          wildcard;
@@ -273,11 +326,13 @@ struct Directive_Import : Directive {
     Parsed_File * parsed_file;
 };
 
+#define AS_EXPORT(Directive) ((Directive_Export *)(Directive))
 struct Directive_Export : Directive {
     Module_Syms syms;
     size_t      num_syms;
 };
 
+#define AS_LOAD(Directive) ((Directive_Load *)(Directive))
 struct Directive_Load : Directive {
     Parsed_File *parsed_file;
 };
@@ -288,6 +343,7 @@ struct Match_Line : Ast_Elem {
     Stmt *stmt;
 };
 
+#define AS_MATCH(Stmt) ((Stmt_Match *)(Stmt))
 struct Stmt_Match : Stmt {
     Expr *expr;
     Match_Lines lines;
@@ -311,12 +367,18 @@ struct Enum_Field : Ast_Elem {
 struct Struct_Field : Ast_Elem {
     char     * name;
     Sym      * sym;
+    Type     * type;
     Typespec * typespec;
     Expr     * default_value;
+    Operand  * operand;
+    int32_t    offset;
 };
 
+#define AS_RET(Stmt) ((Stmt_Ret *)(Stmt))
 struct Stmt_Ret : Stmt {
-    Expr *expr;
+    Exprs       exprs;
+    uint32_t    num_exprs;
+    Proc_Sign * sign;
 };
 
 enum Decl_Kind {
@@ -333,33 +395,40 @@ enum Decl_Kind {
 struct Decl : Ast_Elem {
     Decl_Kind   kind;
     char      * name;
+    uint32_t    len;
     Sym       * sym;
 };
 
+#define AS_VAR(Decl) ((Decl_Var *)(Decl))
 struct Decl_Var : Decl {
     Typespec *typespec;
     Expr     *expr;
 };
 
+#define AS_TYPE(Decl) ((Decl_Type *)(Decl))
 struct Decl_Type : Decl {
-    Expr *expr;
+    Typespec *typespec;
 };
 
+#define AS_CONST(Decl) ((Decl_Const *)(Decl))
 struct Decl_Const : Decl {
     Typespec *typespec;
     Expr *expr;
 };
 
+#define AS_ENUM(Decl) ((Decl_Enum *)(Decl))
 struct Decl_Enum : Decl {
     Enum_Fields fields;
     size_t num_fields;
 };
 
+#define AS_STRUCT(Decl) ((Decl_Struct *)(Decl))
 struct Decl_Struct : Decl {
     Struct_Fields fields;
     size_t num_fields;
 };
 
+#define AS_PROC(Decl) ((Decl_Proc *)(Decl))
 struct Decl_Proc : Decl {
     Typespec *typespec;
     Proc_Sign *sign;
@@ -405,21 +474,25 @@ struct Typespec_Array : Typespec {
 
 struct Typespec_Proc : Typespec {
     Proc_Params  params;
-    size_t       num_params;
-    Proc_Param * ret;
+    uint32_t     num_params;
+    Proc_Params  rets;
+    uint32_t     num_rets;
 };
 
 struct Proc_Param {
     char     * name;
     Sym      * sym;
     Typespec * typespec;
+    Type     * type;
     Expr     * default_value;
 };
 
 struct Proc_Sign : Ast_Elem {
     Proc_Params params;
-    size_t num_params;
-    Proc_Param *ret;
+    uint32_t    num_params;
+    Proc_Params rets;
+    uint32_t    num_rets;
+    bool        sys_call;
 };
 
 struct Compound_Elem {
@@ -618,21 +691,50 @@ expr_float(Ast_Elem *loc, float val) {
     return result;
 }
 
+Expr_Bool *
+expr_bool(Ast_Elem *loc, bool val) {
+    STRUCTK(Expr_Bool, EXPR_BOOL);
+
+    result->val = val;
+
+    return result;
+}
+
 Expr_Str *
-expr_str(Ast_Elem *loc, char *val) {
+expr_str(Ast_Elem *loc, char *val, uint32_t len) {
     STRUCTK(Expr_Str, EXPR_STR);
 
-    result->val  = val;
+    result->val = val;
+    result->len = len;
 
     return result;
 }
 
 Expr_Ident *
-expr_ident(Ast_Elem *loc, char *val) {
+expr_ident(Ast_Elem *loc, char *val, uint32_t len) {
     STRUCTK(Expr_Ident, EXPR_IDENT);
 
     result->sym = NULL;
     result->val = val;
+    result->len = len;
+
+    return result;
+}
+
+Expr_New *
+expr_new(Ast_Elem *loc, Expr *expr) {
+    STRUCTK(Expr_New, EXPR_NEW);
+
+    result->expr = expr;
+
+    return result;
+}
+
+Expr_Run *
+expr_run(Ast_Elem *loc, Expr *expr) {
+    STRUCTK(Expr_Run, EXPR_RUN);
+
+    result->expr = expr;
 
     return result;
 }
@@ -679,10 +781,10 @@ expr_field(Ast_Elem *loc, Expr *base, char *field) {
 }
 
 Expr_Index *
-expr_index(Ast_Elem *loc, Expr *expr, Expr *index) {
+expr_index(Ast_Elem *loc, Expr *base, Expr *index) {
     STRUCTK(Expr_Index, EXPR_INDEX);
 
-    result->expr  = expr;
+    result->base  = base;
     result->index = index;
 
     return result;
@@ -752,6 +854,15 @@ parse_expr_tuple(Token_List *tokens) {
     return expr_tuple(curr, exprs, buf_len(exprs));
 }
 
+char *
+parse_expr_ident(Token_List *tokens) {
+    Expr *expr = parse_expr(tokens);
+
+    assert(expr->kind == EXPR_IDENT);
+
+    return AS_IDENT(expr)->val;
+}
+
 Expr *
 parse_expr_base(Token_List *tokens) {
     Expr *result = NULL;
@@ -762,20 +873,33 @@ parse_expr_base(Token_List *tokens) {
         result = expr_int(curr, t->val_int);
     } else if ( token_is(tokens, T_STR) ) {
         Token *t = token_read(tokens);
-        result = expr_str(curr, t->val_str);
+        result = expr_str(curr, t->val_str, t->len);
     } else if ( token_is(tokens, T_FLOAT) ) {
         Token *t = token_read(tokens);
         result = expr_float(curr, t->val_float);
     } else if ( token_is(tokens, T_IDENT) ) {
         if ( token_is_keyword(tokens) ) {
-            Token *t = token_read(tokens);
-            result = expr_keyword(curr, t->val_str);
+            if ( keyword_matches(tokens, keyword_false) ) {
+                result = expr_bool(curr, false);
+            } else if ( keyword_matches(tokens, keyword_true) ) {
+                result = expr_bool(curr, true);
+            } else if ( keyword_matches(tokens, keyword_new) ) {
+                result = expr_new(tokens, parse_expr(tokens));
+            } else {
+                Token *t = token_read(tokens);
+
+                result = expr_keyword(curr, t->val_str);
+            }
         } else {
             Token *t = token_read(tokens);
-            result = expr_ident(curr, t->val_str);
+            result = expr_ident(curr, t->val_str, t->len);
         }
     } else if ( token_match(tokens, T_LPAREN) ) {
         result = expr_paren(curr, parse_expr(tokens));
+    } else if ( token_match(tokens, T_HASH) ) {
+        if ( keyword_matches(tokens, keyword_run) ) {
+            result = expr_run(curr, parse_expr(tokens));
+        }
     } else if ( token_match(tokens, T_LBRACE) ) {
         Compound_Elems elems = NULL;
 
@@ -943,12 +1067,16 @@ parse_expr(Token_List *tokens, bool with_stmt) {
 /* }}} */
 
 Proc_Sign *
-proc_sign(Ast_Elem *loc, Proc_Params params, size_t num_params, Proc_Param *ret) {
+proc_sign(Ast_Elem *loc, Proc_Params params, uint32_t num_params, Proc_Params rets,
+        uint32_t num_rets)
+{
     STRUCT(Proc_Sign);
 
     result->params     = params;
     result->num_params = num_params;
-    result->ret        = ret;
+    result->rets       = rets;
+    result->num_rets   = num_rets;
+    result->sys_call   = false;
 
     return result;
 }
@@ -993,16 +1121,19 @@ struct_field(Ast_Elem *loc, char *name, Typespec *typespec, Expr *default_value)
     result->name          = name;
     result->typespec      = typespec;
     result->default_value = default_value;
+    result->type          = NULL;
+    result->operand       = NULL;
+    result->offset        = 0;
 
     return result;
 }
 
 Decl_Type *
-decl_type(Ast_Elem *loc, char *name, Expr *expr) {
+decl_type(Ast_Elem *loc, char *name, Typespec *typespec) {
     STRUCTK(Decl_Type, DECL_TYPE);
 
-    result->name = name;
-    result->expr = expr;
+    result->name     = name;
+    result->typespec = typespec;
 
     return result;
 }
@@ -1012,6 +1143,7 @@ decl_var(Ast_Elem *loc, char *name, Typespec *typespec, Expr *expr) {
     STRUCTK(Decl_Var, DECL_VAR);
 
     result->name     = name;
+    result->len      = (uint32_t)utf8_str_size(name);
     result->typespec = typespec;
     result->expr     = expr;
 
@@ -1056,6 +1188,7 @@ decl_proc(Ast_Elem *loc, char *name, Typespec *typespec, Proc_Sign *sign, Stmt *
     STRUCTK(Decl_Proc, DECL_PROC);
 
     result->name     = name;
+    result->len      = (uint32_t)utf8_str_size(name);
     result->typespec = typespec;
     result->sign     = sign;
     result->block    = block;
@@ -1132,6 +1265,17 @@ stmt_if(Ast_Elem *loc, Expr *cond, Stmt *stmt, Stmt_If *stmt_else) {
     return result;
 }
 
+Stmt_For *
+stmt_for(Ast_Elem *loc, Expr *it, Expr *cond, Stmt *stmt) {
+    STRUCTK(Stmt_For, STMT_FOR);
+
+    result->it   = it;
+    result->cond = cond;
+    result->stmt = stmt;
+
+    return result;
+}
+
 Stmt_Block *
 stmt_block(Ast_Elem *loc, Stmts stmts, size_t num_stmts) {
     STRUCTK(Stmt_Block, STMT_BLOCK);
@@ -1143,10 +1287,11 @@ stmt_block(Ast_Elem *loc, Stmts stmts, size_t num_stmts) {
 }
 
 Stmt_Ret *
-stmt_ret(Ast_Elem *loc, Expr *expr) {
+stmt_ret(Ast_Elem *loc, Exprs exprs, uint32_t num_exprs) {
     STRUCTK(Stmt_Ret, STMT_RET);
 
-    result->expr = expr;
+    result->exprs     = exprs;
+    result->num_exprs = num_exprs;
 
     return result;
 }
@@ -1200,8 +1345,9 @@ Proc_Param *
 proc_param(char *name, Typespec *typespec, Expr *default_value = NULL) {
     Proc_Param *result = urq_allocs(Proc_Param);
 
-    result->name = name;
+    result->name     = name;
     result->typespec = typespec;
+    result->type     = NULL;
 
     return result;
 }
@@ -1263,12 +1409,13 @@ typespec_array(Ast_Elem *loc, Typespec *base, Expr *num_elems) {
 }
 
 Typespec_Proc *
-typespec_proc(Ast_Elem *loc, Proc_Params params, size_t num_params, Proc_Param *ret) {
+typespec_proc(Ast_Elem *loc, Proc_Params params, uint32_t num_params, Proc_Params rets, uint32_t num_rets) {
     STRUCTK(Typespec_Proc, TYPESPEC_PROC);
 
     result->params     = (Proc_Params)MEMDUP(params);
     result->num_params = num_params;
-    result->ret        = ret;
+    result->rets       = (Proc_Params)rets;
+    result->num_rets   = num_rets;
 
     return result;
 }
@@ -1307,12 +1454,15 @@ parse_typespec(Token_List *tokens) {
 
         token_expect(tokens, T_RPAREN);
 
-        Proc_Param *ret = NULL;
+        Proc_Params rets = NULL;
         if ( token_match(tokens, T_ARROW) ) {
-            ret = parse_proc_param(tokens);
+            do {
+                buf_push(rets, parse_proc_param(tokens));
+                token_match(tokens, T_COMMA);
+            } while ( !token_is(tokens, T_SEMICOLON) && !token_is(tokens, T_COLON) );
         }
 
-        result = typespec_proc(curr, params, buf_len(params), ret);
+        result = typespec_proc(curr, params, (uint32_t)buf_len(params), rets, (uint32_t)buf_len(rets));
     } else if ( curr->kind == T_IDENT ) {
         Token *ident = token_read(tokens);
         result = typespec_name(curr, ident->val_str);
@@ -1323,9 +1473,9 @@ parse_typespec(Token_List *tokens) {
 
 Decl_Type *
 parse_decl_type(Token_List *tokens, char *name) {
-    Expr *expr = parse_expr(tokens);
+    Typespec *typespec = parse_typespec(tokens);
 
-    return decl_type(expr, name, expr);
+    return decl_type(typespec, name, typespec);
 }
 
 Decl_Const *
@@ -1441,12 +1591,16 @@ parse_proc_sign(Token_List *tokens) {
     }
     token_expect(tokens, T_RPAREN);
 
-    Proc_Param *ret = NULL;
+    Proc_Params rets = NULL;
     if ( token_match(tokens, T_ARROW) ) {
-        ret = parse_proc_param(tokens);
+        buf_push(rets, parse_proc_param(tokens));
     }
 
-    return proc_sign(curr, params, buf_len(params), ret);
+    if ( buf_len(rets) == 0 ) {
+        buf_push(rets, proc_param(NULL, typespec_name(curr, intern_str("void")), NULL));
+    }
+
+    return proc_sign(curr, params, (uint32_t)buf_len(params), rets, (uint32_t)buf_len(rets));
 }
 
 Decl_Proc *
@@ -1454,7 +1608,21 @@ parse_decl_proc(Token_List *tokens, char *name, Typespec *typespec) {
     Token *curr = token_get(tokens);
 
     Proc_Sign *sign = parse_proc_sign(tokens);
-    Stmt *block = parse_stmt_block(tokens);
+
+    if ( token_match(tokens, T_HASH) ) {
+        char *dir = parse_expr_ident(tokens);
+
+        if ( dir == intern_str("sys_call") ) {
+            sign->sys_call = true;
+        } else {
+            assert(!"unbekannte direktive");
+        }
+    }
+
+    Stmt *block = NULL;
+    if ( !token_match(tokens, T_SEMICOLON) ) {
+        block = parse_stmt_block(tokens, sign);
+    }
 
     return decl_proc(curr, name, typespec, sign, block);
 }
@@ -1501,14 +1669,20 @@ parse_decl_impl(Token_List *tokens, char *name) {
 }
 
 Stmt_Block *
-parse_stmt_block(Token_List *tokens) {
+parse_stmt_block(Token_List *tokens, Proc_Sign *sign) {
     Token *curr = token_get(tokens);
 
     Stmts stmts = NULL;
     token_expect(tokens, T_LBRACE);
     if ( !token_is(tokens, T_RBRACE) ) {
         do {
-            buf_push(stmts, parse_stmt(tokens));
+            Stmt *stmt = parse_stmt(tokens);
+
+            if ( stmt->kind == STMT_RET ) {
+                AS_RET(stmt)->sign = sign;
+            }
+
+            buf_push(stmts, stmt);
         } while ( !token_is(tokens, T_RBRACE) );
     }
     token_expect(tokens, T_RBRACE);
@@ -1579,13 +1753,36 @@ parse_stmt_if(Token_List *tokens) {
     return stmt_if(curr, cond, stmt, stmt_else);
 }
 
+Stmt_For *
+parse_stmt_for(Token_List *tokens) {
+    Token *curr = token_get(tokens);
+
+    Expr *it    = NULL;
+    Expr *cond  = parse_expr(tokens);
+
+    if ( token_match(tokens, T_COLON) ) {
+        it = cond;
+        cond = parse_expr(tokens);
+    }
+
+    Stmt *stmt  = parse_stmt_block(tokens);
+
+    return stmt_for(curr, it, cond, stmt);
+}
+
 Stmt_Ret *
 parse_stmt_ret(Token_List *tokens) {
     Token *curr = token_get(tokens);
-    Expr *expr = parse_expr(tokens);
+    Exprs exprs = NULL;
+
+    while ( !token_is(tokens, T_SEMICOLON) ) {
+        buf_push(exprs, parse_expr(tokens));
+        token_match(tokens, T_COMMA);
+    }
+
     token_expect(tokens, T_SEMICOLON);
 
-    return stmt_ret(curr, expr);
+    return stmt_ret(curr, exprs, (uint32_t)buf_len(exprs));
 }
 
 Stmt_Match *
@@ -1660,6 +1857,8 @@ parse_directive_import(Token_List *tokens) {
 
     Expr *module = parse_expr(tokens);
     assert(module->kind == EXPR_IDENT);
+
+    token_expect(tokens, T_SEMICOLON);
 
     char *ident = ((Expr_Ident *)module)->val;
     size_t len = utf8_str_size(ident);
@@ -1784,6 +1983,8 @@ parse_stmt(Token_List *tokens) {
 
                 if ( keyword->val == keyword_if ) {
                     result = parse_stmt_if(tokens);
+                } else if ( keyword->val == keyword_for ) {
+                    result = parse_stmt_for(tokens);
                 } else if ( keyword->val == keyword_return ) {
                     result = parse_stmt_ret(tokens);
                 } else if ( keyword->val == keyword_match ) {
@@ -1825,15 +2026,18 @@ parse(Token_List *tokens) {
     KEYWORD(export);
     KEYWORD(false);
     KEYWORD(for);
+    KEYWORD(free);
     KEYWORD(from);
     KEYWORD(if);
     KEYWORD(impl);
     KEYWORD(import);
     KEYWORD(load);
     KEYWORD(match);
+    KEYWORD(new);
     KEYWORD(note);
     KEYWORD(proc);
     KEYWORD(return);
+    KEYWORD(run);
     KEYWORD(struct);
     KEYWORD(true);
     KEYWORD(type);

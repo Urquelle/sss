@@ -72,6 +72,7 @@ enum Token_Kind {
 
 struct Token : Ast_Elem {
     Token_Kind kind;
+    uint32_t   len;
 
     char *   val_str;
     int64_t  val_int;
@@ -108,10 +109,11 @@ token_push(Token_List *list, Token *token) {
 }
 
 Token *
-token_str(Token_Kind kind, char *val_str, char *file, size_t line, size_t col) {
+token_str(Token_Kind kind, char *val_str, uint32_t len, char *file, size_t line, size_t col) {
     Token *result = token_new(kind, file, line, col);
 
     result->val_str = val_str;
+    result->len     = len;
 
     return result;
 }
@@ -233,16 +235,16 @@ recurse:
             break;
         } else if ( AT(0) == ';' ) {
             NEXT();
-            token_push(&result, token_str(T_SEMICOLON, ";", file, line, col));
+            token_push(&result, token_str(T_SEMICOLON, ";", 1, file, line, col));
         } else if ( AT(0) == '#' ) {
             NEXT();
-            token_push(&result, token_str(T_HASH, "#", file, line, col));
+            token_push(&result, token_str(T_HASH, "#", 1, file, line, col));
         } else if ( AT(0) == ',' ) {
             NEXT();
-            token_push(&result, token_str(T_COMMA, ",", file, line, col));
+            token_push(&result, token_str(T_COMMA, ",", 1, file, line, col));
         } else if ( AT(0) == ':' ) {
             NEXT();
-            token_push(&result, token_str(T_COLON, ":", file, line, col));
+            token_push(&result, token_str(T_COLON, ":", 1, file, line, col));
         } else if ( AT(0) == '.' ) {
             NEXT();
 
@@ -251,147 +253,147 @@ recurse:
 
                 if ( AT(0) == '.' ) {
                     NEXT();
-                    token_push(&result, token_str(T_ELLIPSIS, "...", file, line, col));
+                    token_push(&result, token_str(T_ELLIPSIS, "...", 3, file, line, col));
                 } else {
-                    token_push(&result, token_str(T_RANGE, "..", file, line, col));
+                    token_push(&result, token_str(T_RANGE, "..", 2, file, line, col));
                 }
             } else {
-                token_push(&result, token_str(T_DOT, ".", file, line, col));
+                token_push(&result, token_str(T_DOT, ".", 1, file, line, col));
             }
         } else if ( AT(0) == '(' ) {
             NEXT();
-            token_push(&result, token_str(T_LPAREN, "(", file, line, col));
+            token_push(&result, token_str(T_LPAREN, "(", 1, file, line, col));
         } else if ( AT(0) == ')' ) {
             NEXT();
-            token_push(&result, token_str(T_RPAREN, ")", file, line, col));
+            token_push(&result, token_str(T_RPAREN, ")", 1, file, line, col));
         } else if ( AT(0) == '[' ) {
             NEXT();
-            token_push(&result, token_str(T_LBRACKET, "[", file, line, col));
+            token_push(&result, token_str(T_LBRACKET, "[", 1, file, line, col));
         } else if ( AT(0) == ']' ) {
             NEXT();
-            token_push(&result, token_str(T_RBRACKET, "]", file, line, col));
+            token_push(&result, token_str(T_RBRACKET, "]", 1, file, line, col));
         } else if ( AT(0) == '{' ) {
             NEXT();
-            token_push(&result, token_str(T_LBRACE, "{", file, line, col));
+            token_push(&result, token_str(T_LBRACE, "{", 1, file, line, col));
         } else if ( AT(0) == '}' ) {
             NEXT();
-            token_push(&result, token_str(T_RBRACE, "}", file, line, col));
+            token_push(&result, token_str(T_RBRACE, "}", 1, file, line, col));
         } else if ( AT(0) == '+' ) {
             NEXT();
 
             if ( AT(0) == '=' ) {
-                token_push(&result, token_str(T_PLUS_ASSIGN, "+=", file, line, col));
+                token_push(&result, token_str(T_PLUS_ASSIGN, "+=", 2, file, line, col));
                 NEXT();
             } else {
-                token_push(&result, token_str(T_PLUS, "+", file, line, col));
+                token_push(&result, token_str(T_PLUS, "+", 1, file, line, col));
             }
         } else if ( AT(0) == '-' ) {
             NEXT();
 
             if ( AT(0) == '=' ) {
-                token_push(&result, token_str(T_MINUS_ASSIGN, "-=", file, line, col));
+                token_push(&result, token_str(T_MINUS_ASSIGN, "-=", 2, file, line, col));
                 NEXT();
             } else if ( AT(0) == '>' ) {
-                token_push(&result, token_str(T_ARROW, "->", file, line, col));
+                token_push(&result, token_str(T_ARROW, "->", 2, file, line, col));
                 NEXT();
             } else {
-                token_push(&result, token_str(T_MINUS, "-", file, line, col));
+                token_push(&result, token_str(T_MINUS, "-", 1, file, line, col));
             }
         } else if ( AT(0) == '*' ) {
             NEXT();
 
             if ( AT(0) == '=' ) {
-                token_push(&result, token_str(T_ASTERISK_ASSIGN, "*=", file, line, col));
+                token_push(&result, token_str(T_ASTERISK_ASSIGN, "*=", 2, file, line, col));
                 NEXT();
             } else {
-                token_push(&result, token_str(T_ASTERISK, "*", file, line, col));
+                token_push(&result, token_str(T_ASTERISK, "*", 1, file, line, col));
             }
         } else if ( AT(0) == '/' ) {
             NEXT();
 
             if ( AT(0) == '=' ) {
-                token_push(&result, token_str(T_SLASH_ASSIGN, "/=", file, line, col));
+                token_push(&result, token_str(T_SLASH_ASSIGN, "/=", 2, file, line, col));
                 NEXT();
             } else {
-                token_push(&result, token_str(T_SLASH, "/", file, line, col));
+                token_push(&result, token_str(T_SLASH, "/", 1, file, line, col));
             }
         } else if ( AT(0) == '%' ) {
             NEXT();
 
             if ( AT(0) == '=' ) {
-                token_push(&result, token_str(T_MODULO_ASSIGN, "/=", file, line, col));
+                token_push(&result, token_str(T_MODULO_ASSIGN, "/=", 2, file, line, col));
                 NEXT();
             } else {
-                token_push(&result, token_str(T_MODULO, "%", file, line, col));
+                token_push(&result, token_str(T_MODULO, "%", 1, file, line, col));
             }
         } else if ( AT(0) == '^' ) {
             NEXT();
 
             if ( AT(0) == '=' ) {
-                token_push(&result, token_str(T_XOR_ASSIGN, "^=", file, line, col));
+                token_push(&result, token_str(T_XOR_ASSIGN, "^=", 2, file, line, col));
                 NEXT();
             } else {
-                token_push(&result, token_str(T_XOR, "^", file, line, col));
+                token_push(&result, token_str(T_XOR, "^", 1, file, line, col));
             }
         } else if ( AT(0) == '|' ) {
             NEXT();
 
             if ( AT(0) == '=' ) {
-                token_push(&result, token_str(T_OR_ASSIGN, "|=", file, line, col));
+                token_push(&result, token_str(T_OR_ASSIGN, "|=", 2, file, line, col));
                 NEXT();
             } else if ( AT(0) == '|' ) {
-                token_push(&result, token_str(T_OR, "||", file, line, col));
+                token_push(&result, token_str(T_OR, "||", 2, file, line, col));
                 NEXT();
             } else {
-                token_push(&result, token_str(T_BIT_OR, "|", file, line, col));
+                token_push(&result, token_str(T_BIT_OR, "|", 1, file, line, col));
             }
         } else if ( AT(0) == '&' ) {
             NEXT();
 
             if ( AT(0) == '=' ) {
-                token_push(&result, token_str(T_AND_ASSIGN, "&=", file, line, col));
+                token_push(&result, token_str(T_AND_ASSIGN, "&=", 2, file, line, col));
                 NEXT();
             } else if ( AT(0) == '&' ) {
-                token_push(&result, token_str(T_AND, "&&", file, line, col));
+                token_push(&result, token_str(T_AND, "&&", 2, file, line, col));
                 NEXT();
             } else {
-                token_push(&result, token_str(T_BIT_AND, "&", file, line, col));
+                token_push(&result, token_str(T_BIT_AND, "&", 1, file, line, col));
             }
         } else if ( AT(0) == '!' ) {
             NEXT();
 
             if ( AT(0) == '=' ) {
-                token_push(&result, token_str(T_NEQ, "!=", file, line, col));
+                token_push(&result, token_str(T_NEQ, "!=", 2, file, line, col));
                 NEXT();
             } else {
-                token_push(&result, token_str(T_BANG, "!", file, line, col));
+                token_push(&result, token_str(T_BANG, "!", 1, file, line, col));
             }
         } else if ( AT(0) == '<' ) {
             NEXT();
 
             if ( AT(0) == '=' ) {
-                token_push(&result, token_str(T_LTE, "<=", file, line, col));
+                token_push(&result, token_str(T_LTE, "<=", 2, file, line, col));
                 NEXT();
             } else {
-                token_push(&result, token_str(T_LT, "<", file, line, col));
+                token_push(&result, token_str(T_LT, "<", 1, file, line, col));
             }
         } else if ( AT(0) == '>' ) {
             NEXT();
 
             if ( AT(0) == '=' ) {
-                token_push(&result, token_str(T_GTE, "<=", file, line, col));
+                token_push(&result, token_str(T_GTE, "<=", 2, file, line, col));
                 NEXT();
             } else {
-                token_push(&result, token_str(T_GT, ">", file, line, col));
+                token_push(&result, token_str(T_GT, ">", 1, file, line, col));
             }
         } else if ( AT(0) == '=' ) {
             NEXT();
 
             if ( AT(0) && AT(0) == '=' ) {
-                token_push(&result, token_str(T_EQ, "==", file, line, col));
+                token_push(&result, token_str(T_EQ, "==", 2, file, line, col));
                 NEXT();
             } else {
-                token_push(&result, token_str(T_EQL_ASSIGN, "=", file, line, col));
+                token_push(&result, token_str(T_EQL_ASSIGN, "=", 1, file, line, col));
             }
         } else if ( AT(0) == '"' ) {
             NEXT();
@@ -413,10 +415,10 @@ recurse:
                 NEXT();
             }
 
-            size_t len = c - start - 1;
+            uint32_t len = (uint32_t)(c - start - 1);
             char *val = token_val(start, len);
 
-            token_push(&result, token_str(T_STR, val, file, line, col));
+            token_push(&result, token_str(T_STR, val, len, file, line, col));
         } else if ( utf8_char_isalpha(c) || AT(0) == '_' ) {
             char *start = c;
             NEXT();
@@ -425,10 +427,10 @@ recurse:
                 NEXT();
             }
 
-            size_t len = c - start;
+            uint32_t len = (uint32_t)(c - start);
             char *val = token_val(start, len);
 
-            token_push(&result, token_str(T_IDENT, val, file, line, col));
+            token_push(&result, token_str(T_IDENT, val, len, file, line, col));
         } else if ( utf8_char_isnum(c) ) {
             size_t val = 0;
 
@@ -467,7 +469,7 @@ recurse:
             }
 
             /* @AUFGABE: fließkomma parsen */
-            if ( AT(0) == '.' ) {
+            if ( AT(0) == '.' && AT(1) != '.' ) {
                 NEXT();
 
                 float fracture = 0.0f;

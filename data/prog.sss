@@ -1,2 +1,26 @@
-a := 5;
-b := a;
+#import Sys = (print) from sys;
+
+a : s32 = 5 + 3;
+b := a + 1;
+c := false;
+d : s32 = 0;
+
+if b < a {
+    b = 10;
+}
+
+hallo :: proc(x: s32) -> s32 {
+    result := x + 10;
+
+    return result, 7.5;
+}
+
+hallo(15);
+
+a = 30;
+
+for 1..b {
+    d = d + it;
+}
+
+e := d;

@@ -27,7 +27,7 @@ ALLOCATOR(custom_alloct) {
 }
 
 REALLOCATOR(custom_realloc) {
-    void *result = realloc(mem, size);
+    void *result = arena_realloc(perm_arena, mem, size);
 
     return result;
 }
@@ -55,17 +55,20 @@ int main(int argc, char* argv[]) {
 
     using namespace Urq::Sss::api;
 
-    char *content = "";
-    os_file_read(argv[1], &content);
+    if ( argc < 2 ) {
+        sss_repl();
+    } else {
+        char *content = "";
+        os_file_read(argv[1], &content);
 
-    auto tokens = tokenize(argv[1], content);
-    auto parsed = parse(&tokens);
-    resolver_init();
-    resolve(parsed);
-    Bytecode *bc = build(parsed);
+        resolver_init();
+        auto tokens   = tokenize(argv[1], content);
+        auto parsed   = parse(&tokens);
+        auto resolved = resolve(parsed);
+        auto code     = build(resolved);
 
-    Env *env = env_new("global");
-    eval(bc, env);
+        eval(code);
+    }
 
     return 0;
 }

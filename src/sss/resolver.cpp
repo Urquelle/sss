@@ -1,20 +1,34 @@
 struct Operand;
+struct Proc_Sign;
+struct Resolved_Stmt;
 struct Scope;
 struct Type_Field;
+struct Type_Proc;
+struct Type_Struct;
 
-typedef Sym**        Syms;
-typedef Type_Field** Type_Fields;
+typedef Operand       ** Operands;
+typedef Resolved_Stmt ** Resolved_Stmts;
+typedef Sym           ** Syms;
+typedef Type          ** Types;
+typedef Type_Field    ** Type_Fields;
 
-Syms      resolve(Parsed_File *parsed_file);
-Type    * resolve_decl(Decl *d);
-Operand * resolve_stmt(Stmt *stmt);
-Scope   * scope_new(char *name, Scope *parent = NULL);
+Resolved_Stmts   resolve(Parsed_File *parsed_file);
+Type           * resolve_decl(Decl *d);
+Type           * resolve_decl_const(Decl *decl);
+Type_Proc      * resolve_decl_proc(Decl *decl);
+Type           * resolve_decl_type(Decl *decl);
+Type           * resolve_decl_var(Decl *decl);
+Resolved_Stmts   resolve_stmt(Stmt *stmt);
+Scope          * scope_new(char *name, Scope *parent = NULL);
+void             type_complete(Type *type);
 
 enum Sym_Kind {
     SYM_NONE,
     SYM_TYPE,
     SYM_VAR,
+    SYM_CONST,
     SYM_PROC,
+    SYM_NAMESPACE,
 };
 enum Sym_State {
     SYMSTATE_NONE,
@@ -50,25 +64,45 @@ struct Operand {
 
 enum Type_Kind {
     TYPE_NONE,
-    TYPE_NAME,
+    TYPE_INCOMPLETE,
+    TYPE_COMPLETING,
+
+    TYPE_VOID,
+
+    TYPE_U8,
+    TYPE_U16,
+    TYPE_U32,
+    TYPE_U64,
+
+    TYPE_S8,
+    TYPE_S16,
+    TYPE_S32,
+    TYPE_S64,
+
+    TYPE_F32,
+    TYPE_F64,
+
+    TYPE_TYPEID,
+    TYPE_STRING,
+    TYPE_BOOL,
     TYPE_PTR,
     TYPE_STRUCT,
     TYPE_ENUM,
     TYPE_PROC,
+    TYPE_ARRAY,
+    TYPE_NAMESPACE,
 };
-enum Type_State {
-    TYPESTATE_INCOMPLETE,
-    TYPESTATE_COMPLETING,
-    TYPESTATE_COMPLETE,
-};
+
 struct Type {
     Type_Kind kind;
-    Type_State state;
 
-    size_t size;
+    uint32_t size;
+    uint32_t align;
     uint32_t id;
 
-    Scope *scope;
+    Sym   * sym;
+    char  * name;
+    Scope * scope;
 };
 
 struct Type_Ptr : Type {
@@ -76,17 +110,18 @@ struct Type_Ptr : Type {
 };
 
 struct Type_Array : Type {
-    Type *base;
-    size_t num_elems;
+    Type   * base;
+    size_t   num_elems;
 };
 
 struct Type_Field {
-    char *name;
-    Type *type;
+    char    * name;
+    Type    * type;
+    Operand * operand;
 };
 struct Type_Struct : Type {
-    Type_Fields fields;
-    size_t num_fields;
+    Struct_Fields fields;
+    size_t        num_fields;
 };
 
 struct Type_Enum : Type {
@@ -95,9 +130,17 @@ struct Type_Enum : Type {
 };
 
 struct Type_Proc : Type {
-    Type_Fields params;
-    size_t num_params;
-    Type *ret;
+    Proc_Params params;
+    uint32_t    num_params;
+    Proc_Params rets;
+    uint32_t    num_rets;
+};
+
+struct Resolved_Stmt {
+    Stmt    * stmt;
+    Sym     * sym;
+    Type    * type;
+    Operand * operand;
 };
 
 enum { PTR_SIZE = 8 };
@@ -115,21 +158,91 @@ Type *type_s64;
 Type *type_f32;
 Type *type_f64;
 Type *type_bool;
-Type *type_usize;
-Type *type_ssize;
 Type *type_typeid;
 Type *type_string;
 
+Resolved_Stmt *
+resolved_stmt(Stmt *stmt, Sym *sym, Type *type, Operand *operand) {
+    Resolved_Stmt *result = urq_allocs(Resolved_Stmt);
+
+    result->stmt    = stmt;
+    result->sym     = sym;
+    result->type    = type;
+    result->operand = operand;
+
+    return result;
+}
+
 Type *
-type_new( size_t size ) {
+type_new( uint32_t size, Type_Kind kind ) {
     Type *result = urq_allocs(Type);
 
-    result->kind  = TYPE_NAME;
+    result->kind  = kind;
+    result->sym   = NULL;
     result->size  = size;
+    result->align = 0;
     result->id    = type_id++;
     result->scope = scope_new("type");
 
     return result;
+}
+
+Type_Struct *
+type_incomplete_struct(Sym *sym) {
+    Type_Struct *result = urq_allocs(Type_Struct);
+
+    result->kind  = TYPE_INCOMPLETE;
+    result->sym   = sym;
+    result->size  = 0;
+    result->align = 0;
+    result->id    = type_id++;
+    result->scope = scope_new(sym->name);
+
+    return result;
+}
+
+Type *
+type_namespace() {
+    Type *result = type_new(0, TYPE_NAMESPACE);
+
+    return result;
+}
+
+bool
+type_isint(Type *type) {
+    bool result = type->kind >= TYPE_U8 && type->kind <= TYPE_S64;
+
+    return result;
+}
+
+bool
+type_issigned(Type *type) {
+    bool result = type->kind >= TYPE_S8 && type->kind <= TYPE_S64;
+
+    return result;
+}
+
+bool
+type_iscastable(Type *left, Type *right) {
+    if ( left == right ) {
+        return true;
+    }
+
+    if ( type_isint(left) && type_isint(right) ) {
+        if ( type_issigned(left) && type_issigned(right) ) {
+            if ( left->size >= right->size ) {
+                return true;
+            }
+        } else if ( !type_issigned(left) && !type_issigned(right) ) {
+            if ( left->size >= right->size ) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    return false;
 }
 
 Operand *
@@ -151,6 +264,17 @@ operand_const(Type *type) {
     return result;
 }
 
+void
+operand_cast(Type *type, Operand *op) {
+    if ( type_iscastable(type, op->type) ) {
+        op->type = type;
+    } else {
+        if ( op->is_const ) {
+            op->type = type;
+        }
+    }
+}
+
 Type_Ptr *
 type_ptr(Type *base) {
     Type_Ptr *result = urq_allocs(Type_Ptr);
@@ -165,14 +289,16 @@ Type_Array *
 type_array(Type *base, size_t num_elems) {
     Type_Array *result = urq_allocs(Type_Array);
 
-    result->base = base;
+    result->kind      = TYPE_ARRAY;
+    result->base      = base;
     result->num_elems = num_elems;
 
     return result;
 }
 
+#if 0
 Type_Struct *
-type_struct(Type_Fields fields, size_t num_fields) {
+type_struct(Struct_Fields fields, size_t num_fields) {
     Type_Struct *result = urq_allocs(Type_Struct);
 
     result->kind       = TYPE_STRUCT;
@@ -181,6 +307,7 @@ type_struct(Type_Fields fields, size_t num_fields) {
 
     return result;
 }
+#endif
 
 Type_Enum *
 type_enum(Type_Fields fields, size_t num_fields) {
@@ -194,33 +321,36 @@ type_enum(Type_Fields fields, size_t num_fields) {
 }
 
 Type_Field *
-type_field(char *name, Type *type) {
+type_field(char *name, Type *type, Operand *operand = NULL) {
     Type_Field *result = urq_allocs(Type_Field);
 
-    result->name = name;
-    result->type = type;
+    result->name    = name;
+    result->type    = type;
+    result->operand = operand;
 
     return result;
 }
 
 Type_Proc *
-type_proc(Type_Fields params, size_t num_params, Type *ret) {
+type_proc(Proc_Params params, uint32_t num_params, Proc_Params rets, uint32_t num_rets) {
     Type_Proc *result = urq_allocs(Type_Proc);
 
     result->kind       = TYPE_PROC;
-    result->params     = (Type_Fields)MEMDUP(params);
+    result->params     = (Proc_Params)MEMDUP(params);
     result->num_params = num_params;
+    result->rets       = (Proc_Params)MEMDUP(rets);
+    result->num_rets   = num_rets;
 
     return result;
 }
 
 void
 type_resolve(Type *type) {
-    if ( type->state == TYPESTATE_COMPLETING ) {
+    if ( type->kind == TYPE_COMPLETING ) {
         assert(!"zirkuläre abhängigkeit festgestellt");
     }
 
-    type->state = TYPESTATE_COMPLETING;
+    type->kind = TYPE_COMPLETING;
 }
 
 Scope *
@@ -262,7 +392,9 @@ scope_leave() {
 
 void
 scope_push(Scope *scope, Sym *sym) {
-    if ( map_get(&scope->syms, sym->name) ) {
+    Sym *s = (Sym *)map_get(&scope->syms, sym->name);
+
+    if ( s ) {
         assert(!"symbol bereits registriert");
     }
 
@@ -298,6 +430,17 @@ sym_push(char *name, Decl *decl) {
 }
 
 Sym *
+sym_push_namespace(char *name, Type *type) {
+    Sym *result = sym_push(name, NULL);
+
+    result->kind  = SYM_NAMESPACE;
+    result->state = SYMSTATE_RESOLVED;
+    result->type  = type;
+
+    return result;
+}
+
+Sym *
 sym_push_type(char *name, Decl *decl) {
     Sym *result = sym_push(name, decl);
 
@@ -328,6 +471,8 @@ sym_push_var(char *name, Type *type) {
 Sym *
 sym_push_sys(char *name, Type *type) {
     Sym *result = sym_new(intern_str(name));
+
+    type->name = result->name;
 
     result->kind  = SYM_TYPE;
     result->state = SYMSTATE_RESOLVED;
@@ -372,7 +517,29 @@ sym_resolve(Sym *sym) {
     }
 
     sym->state = SYMSTATE_RESOLVING;
-    resolve_decl(sym->decl);
+
+    switch ( sym->kind ) {
+        case SYM_TYPE: {
+            sym->type = resolve_decl_type(sym->decl);
+        } break;
+
+        case SYM_VAR: {
+            sym->type = resolve_decl_var(sym->decl);
+        } break;
+
+        case SYM_CONST: {
+            sym->type = resolve_decl_const(sym->decl);
+        } break;
+
+        case SYM_PROC: {
+            sym->type = resolve_decl_proc(sym->decl);
+        } break;
+
+        default: {
+            assert(!"nicht unterstütztes symbol");
+        } break;
+    }
+
     sym->state = SYMSTATE_RESOLVED;
 }
 
@@ -384,14 +551,14 @@ resolve_name(char *name) {
 }
 
 Operand *
-resolve_expr(Expr *e) {
+resolve_expr(Expr *expr) {
     Operand *result = NULL;
 
-    if ( !e ) {
+    if ( !expr ) {
         return result;
     }
 
-    switch ( e->kind ) {
+    switch ( expr->kind ) {
         case EXPR_STR: {
             result = operand_const(type_string);
         } break;
@@ -404,15 +571,18 @@ resolve_expr(Expr *e) {
             result = operand_const(type_f32);
         } break;
 
+        case EXPR_BOOL: {
+            result = operand_const(type_bool);
+        } break;
+
         case EXPR_IDENT: {
-            Expr_Ident *expr = (Expr_Ident *)e;
-            Sym *sym = resolve_name(expr->val);
+            Sym *sym = resolve_name(AS_IDENT(expr)->val);
 
             if ( !sym ) {
                 assert(!"unbekanntes symbol");
             }
 
-            expr->sym = sym;
+            AS_IDENT(expr)->sym = sym;
             result = operand(sym->type);
         } break;
 
@@ -420,37 +590,71 @@ resolve_expr(Expr *e) {
         } break;
 
         case EXPR_BIN: {
-            Expr_Bin *expr = (Expr_Bin *)e;
+            Operand *left = resolve_expr(AS_BIN(expr)->left);
+            Operand *right = resolve_expr(AS_BIN(expr)->right);
 
-            Operand *left = resolve_expr(expr->left);
-            Operand *right = resolve_expr(expr->right);
-
-            if ( expr->op >= OP_CMP_START || expr->op <= OP_CMP_END ) {
+            if ( AS_BIN(expr)->op >= OP_CMP_START && AS_BIN(expr)->op <= OP_CMP_END ) {
                 result = operand(type_bool);
-            } else if ( expr->op >= OP_MATH_START || expr->op <= OP_MATH_END ) {
-                result = operand(left->type);
+            } else if ( AS_BIN(expr)->op >= OP_MATH_START && AS_BIN(expr)->op <= OP_MATH_END ) {
+                if ( left->is_const && right->is_const ) {
+                    result = operand_const(left->type);
+                } else {
+                    result = operand(left->type);
+                }
             }
         } break;
 
         case EXPR_FIELD: {
+            Operand *base = resolve_expr(AS_FIELD(expr)->base);
+            assert(base->type);
+            assert( base->type->kind == TYPE_NAMESPACE || base->type->kind == TYPE_STRUCT);
+
+            Sym *sym = sym_get(base->type->scope, AS_FIELD(expr)->field);
+            assert(sym);
+
+            result = operand(sym->type);
         } break;
 
         case EXPR_INDEX: {
+            Operand *base = resolve_expr(AS_INDEX(expr)->base);
+            assert(base->type && base->type->kind == TYPE_ARRAY);
+            result = operand(((Type_Array *)base->type)->base);
         } break;
 
         case EXPR_PAREN: {
+            result = resolve_expr(AS_PAREN(expr)->expr);
         } break;
 
         case EXPR_CALL: {
+            Operand *op = resolve_expr(AS_CALL(expr)->base);
+            assert(op->type && op->type->kind == TYPE_PROC);
+
+            for ( uint32_t i = 0; i < ((Type_Proc *)op->type)->num_params; ++i ) {
+                Operand    *arg   = resolve_expr(AS_CALL(expr)->args[i]);
+                Proc_Param *param = ((Type_Proc *)op->type)->params[i];
+
+                operand_cast(param->type, arg);
+                if ( param->type != arg->type ) {
+                    assert(!"datentyp des übergebenen arguments passt nicht");
+                }
+            }
+
+            result = op;
         } break;
 
         case EXPR_RANGE: {
+            Operand *left  = resolve_expr(AS_RANGE(expr)->left);
+            Operand *right = resolve_expr(AS_RANGE(expr)->right);
+
+            result = operand(left->type);
         } break;
 
         case EXPR_TUPLE: {
+            assert(!"in arbeit");
         } break;
 
         case EXPR_COMPOUND: {
+            assert(!"in arbeit");
         } break;
 
         default: {
@@ -508,25 +712,85 @@ resolve_typespec(Typespec *t) {
     return result;
 }
 
+Type_Proc *
+resolve_decl_proc(Decl *decl) {
+    assert(decl->kind == DECL_PROC);
+
+    Proc_Sign *sign = AS_PROC(decl)->sign;
+    for ( size_t i = 0; i < sign->num_params; ++i ) {
+        sign->params[i]->type = resolve_typespec(sign->params[i]->typespec);
+    }
+
+    for ( size_t i = 0; i < AS_PROC(decl)->sign->num_rets; ++i ) {
+        sign->rets[i]->type = resolve_typespec(sign->rets[i]->typespec);
+    }
+
+    return type_proc(sign->params, sign->num_params, sign->rets, sign->num_rets);
+}
+
 Type *
-resolve_decl(Decl *d) {
+resolve_decl_const(Decl *decl) {
+    assert(decl->kind == DECL_CONST);
+
+    Type *type = resolve_typespec(AS_VAR(decl)->typespec);
+    Operand *op = resolve_expr(AS_VAR(decl)->expr);
+
+    if ( !op->is_const ) {
+        assert(!"konstanten wert erwartet");
+    }
+
+    if ( !type ) {
+        type = op->type;
+    }
+
+    /* @AUFGABE: prüfen ob type aus dem typespec und dem op passen */
+    operand_cast(type, op);
+    if ( type != op->type ) {
+        assert(!"typespec stimmt mit dem zugewiesenem datentyp nicht überein");
+    }
+
+    type_complete(type);
+
+    return type;
+}
+
+Type *
+resolve_decl_type(Decl *decl) {
+    Type *result = resolve_typespec(AS_TYPE(decl)->typespec);
+
+    return result;
+}
+
+Type *
+resolve_decl_var(Decl *decl) {
+    assert(decl->kind == DECL_VAR);
+
+    Type *type = resolve_typespec(AS_VAR(decl)->typespec);
+    Operand *op = resolve_expr(AS_VAR(decl)->expr);
+
+    if ( !type ) {
+        type = op->type;
+    }
+
+    /* @AUFGABE: prüfen ob type aus dem typespec und dem op passen */
+    operand_cast(type, op);
+    if ( type != op->type ) {
+        assert(!"typespec stimmt mit dem zugewiesenem datentyp nicht überein");
+    }
+
+    type_complete(type);
+
+    return type;
+}
+
+Type *
+resolve_decl(Decl *decl) {
     Type *result = NULL;
 
-    switch ( d->kind ) {
-        case DECL_VAR: {
-            Decl_Var *decl = (Decl_Var *)d;
-            Type *type = resolve_typespec(decl->typespec);
-            Operand *op = resolve_expr(decl->expr);
-
-            /* @AUFGABE: prüfen ob type aus dem typespec und dem op passen */
-
-            result = type;
-        } break;
-
+    switch ( decl->kind ) {
         case DECL_CONST: {
-            Decl_Const *decl = (Decl_Const *)d;
-            Type *type = resolve_typespec(decl->typespec);
-            Operand *op = resolve_expr(decl->expr);
+            Type *type = resolve_typespec(AS_CONST(decl)->typespec);
+            Operand *op = resolve_expr(AS_CONST(decl)->expr);
 
             if ( !type && op->type ) {
                 type = op->type;
@@ -535,67 +799,6 @@ resolve_decl(Decl *d) {
             /* @AUFGABE: prüfen ob type aus dem typespec und dem op passen */
 
             result = type;
-        } break;
-
-        case DECL_TYPE: {
-            Decl_Type *decl = (Decl_Type *)d;
-            Operand *op = resolve_expr(decl->expr);
-
-            assert(op->type);
-            result = op->type;
-        } break;
-
-        case DECL_ENUM: {
-            Decl_Enum *decl = (Decl_Enum *)d;
-
-            Type_Fields fields = NULL;
-            for ( int i = 0; i < decl->num_fields; ++i ) {
-                Enum_Field *field = decl->fields[i];
-                buf_push(fields, type_field(field->name, type_u32));
-            }
-
-            result = type_enum(fields, buf_len(fields));
-        } break;
-
-        case DECL_STRUCT: {
-            Decl_Struct *decl = (Decl_Struct *)d;
-
-            Type_Fields fields = NULL;
-            for ( int i = 0; i < decl->num_fields; ++i ) {
-                Struct_Field *field = decl->fields[i];
-                Type *type = resolve_typespec(field->typespec);
-                buf_push(fields, type_field(field->name, type));
-            }
-
-            result = type_struct(fields, buf_len(fields));
-        } break;
-
-        case DECL_PROC: {
-            Decl_Proc *decl = (Decl_Proc *)d;
-
-            Type_Fields params = NULL;
-            for ( int i = 0; i < decl->sign->num_params; ++i ) {
-                Proc_Param *param = decl->sign->params[i];
-                Type *param_type = resolve_typespec(param->typespec);
-                Operand *param_expr = resolve_expr(param->default_value);
-                buf_push(params, type_field(param->name, param_type /*, param_expr->val */));
-            }
-
-            Type *ret = resolve_typespec(decl->sign->ret->typespec);
-            if ( !ret ) {
-                ret = type_void;
-            }
-
-            Scope *scope = scope_enter();
-            for ( int i = 0; i < buf_len(params); ++i ) {
-                Type_Field *field = params[i];
-                sym_push_var(field->name, field->type);
-            }
-
-            resolve_stmt(decl->block);
-            scope_leave();
-
-            result = type_proc(params, buf_len(params), ret);
         } break;
 
         case DECL_API: {
@@ -612,32 +815,70 @@ resolve_decl(Decl *d) {
     return result;
 }
 
-Operand *
+Resolved_Stmts
 resolve_stmt(Stmt *stmt) {
-    Operand *result = NULL;
+    Resolved_Stmts result = NULL;
 
     switch ( stmt->kind ) {
         case STMT_ASSIGN: {
+            Operand *lhs = resolve_expr(AS_ASSIGN(stmt)->lhs);
+            Operand *rhs = resolve_expr(AS_ASSIGN(stmt)->rhs);
+
+            operand_cast(lhs->type, rhs);
+            if ( lhs->type != rhs->type ) {
+                assert(!"zuweisung eines falschen datentyps");
+            }
+
+            buf_push(result, resolved_stmt(stmt, NULL, rhs->type, rhs));
         } break;
 
         case STMT_BLOCK: {
-            Stmt_Block *s = (Stmt_Block *)stmt;
-            for ( int i = 0; i < s->num_stmts; ++i ) {
-                result = resolve_stmt(s->stmts[i]);
+            for ( int i = 0; i < AS_BLOCK(stmt)->num_stmts; ++i ) {
+                result = resolve_stmt(AS_BLOCK(stmt)->stmts[i]);
             }
         } break;
 
         case STMT_DECL: {
-            Stmt_Decl *s = (Stmt_Decl *)stmt;
-            Type *type = resolve_decl(s->decl);
+            Decl *decl = AS_DECL(stmt)->decl;
+
+            switch ( decl->kind ) {
+                case DECL_VAR: {
+                    Type *type = resolve_decl_var(decl);
+                    type_complete(type);
+                    Sym *sym = sym_push_var(decl->name, type);
+
+                    buf_push(result, resolved_stmt(stmt, sym, type, NULL));
+                } break;
+
+                default: {
+                    assert(!"unbekannte deklaration");
+                } break;
+            }
         } break;
 
         case STMT_EXPR: {
-            Stmt_Expr *s = (Stmt_Expr *)stmt;
-            result = resolve_expr(s->expr);
+            Operand *operand = resolve_expr(AS_EXPR(stmt)->expr);
+
+            buf_push(result, resolved_stmt(stmt, NULL, operand->type, operand));
         } break;
 
         case STMT_FOR: {
+            char *it = NULL;
+            if ( AS_FOR(stmt)->it ) {
+                assert(AS_FOR(stmt)->it->kind == EXPR_IDENT);
+                it = AS_IDENT(AS_FOR(stmt)->it)->val;
+            } else {
+                it = intern_str("it");
+            }
+
+            Operand *cond = resolve_expr(AS_FOR(stmt)->cond);
+
+            scope_enter("for-loop");
+            Sym *sym = sym_push_var(it, cond->type);
+            resolve_stmt(AS_FOR(stmt)->stmt);
+            scope_leave();
+
+            buf_push(result, resolved_stmt(stmt, NULL, NULL, NULL));
         } break;
 
         case STMT_IF: {
@@ -648,17 +889,41 @@ resolve_stmt(Stmt *stmt) {
                 assert(!"boolischen ausdruck erwartet");
             }
 
-            result = resolve_stmt(s->stmt);
+            scope_enter();
+            resolve_stmt(s->stmt);
+            scope_leave();
+
+            buf_push(result, resolved_stmt(stmt, NULL, NULL, NULL));
         } break;
 
         case STMT_MATCH: {
             /* @AUFGABE: match kann result setzen */
+            assert(!"in arbeit");
         } break;
 
         case STMT_RET: {
-            Stmt_Ret *s = (Stmt_Ret *)stmt;
+            if ( curr_scope == global_scope ) {
+                assert(!"return an dieser stelle nicht erlaubt.");
+            }
 
-            result = resolve_expr(s->expr);
+            if ( AS_RET(stmt)->num_exprs < AS_RET(stmt)->sign->num_rets ) {
+                assert(!"zu wenig rückgabewerte");
+            }
+
+            if ( AS_RET(stmt)->num_exprs > 0 ) {
+                for ( uint32_t i = 0; i < AS_RET(stmt)->sign->num_rets; ++i ) {
+                    Operand *operand = resolve_expr(AS_RET(stmt)->exprs[i]);
+
+                    operand_cast(AS_RET(stmt)->sign->rets[i]->type, operand);
+                    if ( AS_RET(stmt)->sign->rets[i]->type != operand->type ) {
+                        assert(!"falscher rückgabetyp");
+                    }
+
+                    buf_push(result, resolved_stmt(stmt, NULL, operand->type, operand));
+                }
+            } else {
+                buf_push(result, resolved_stmt(stmt, NULL, type_void, operand(type_void)));
+            }
         } break;
 
         default: {
@@ -669,20 +934,32 @@ resolve_stmt(Stmt *stmt) {
     return result;
 }
 
-void
-resolve_directive(Directive *d) {
-    switch ( d->kind ) {
-        case DIRECTIVE_IMPORT: {
-            Directive_Import *dir = (Directive_Import *)d;
+Resolved_Stmts
+resolve_directive(Directive *dir) {
+    Resolved_Stmts result = NULL;
 
+    switch ( dir->kind ) {
+        case DIRECTIVE_IMPORT: {
             Scope *scope = scope_new("import", sys_scope);
             Scope *prev_scope = scope_set(scope);
-            resolve(dir->parsed_file);
+            Resolved_Stmts stmts = resolve(AS_IMPORT(dir)->parsed_file);
             scope_set(prev_scope);
 
+            for ( int i = 0; i < buf_len(stmts); ++i ) {
+                buf_push(result, stmts[i]);
+            }
+
             Scope *push_scope = curr_scope;
-            if ( dir->scope_name ) {
-                push_scope = scope_enter(dir->scope_name);
+            if ( AS_IMPORT(dir)->scope_name ) {
+                Type *type = type_namespace();
+                Sym *sym   = sym_push_namespace(AS_IMPORT(dir)->scope_name, type);
+
+                type->sym = sym;
+                type->scope->name = AS_IMPORT(dir)->scope_name;
+                type->scope->parent = curr_scope;
+
+                curr_scope = type->scope;
+                push_scope = type->scope;
             }
 
             /* @INFO: überprüfen ob export_syms im scope gesetzt wurden */
@@ -708,10 +985,10 @@ resolve_directive(Directive *d) {
                 for ( int i = 0; i < buf_len(scope->sym_list); ++i ) {
                     Sym *sym = scope->sym_list[i];
 
-                    for ( int j = 0; j < dir->num_syms; ++j ) {
-                        Module_Sym *mod_sym = dir->syms[j];
+                    for ( int j = 0; j < AS_IMPORT(dir)->num_syms; ++j ) {
+                        Module_Sym *mod_sym = AS_IMPORT(dir)->syms[j];
 
-                        if ( mod_sym->name == sym->name || dir->wildcard ) {
+                        if ( mod_sym->name == sym->name || AS_IMPORT(dir)->wildcard ) {
                             Sym *push_sym = sym;
 
                             if ( mod_sym->alias ) {
@@ -726,29 +1003,148 @@ resolve_directive(Directive *d) {
                 }
             }
 
-            if ( dir->scope_name ) {
+            if ( AS_IMPORT(dir)->scope_name ) {
                 scope_leave();
             }
         } break;
 
         case DIRECTIVE_EXPORT: {
-            Directive_Export *dir = (Directive_Export *)d;
-            curr_scope->export_syms     = dir->syms;
-            curr_scope->num_export_syms = dir->num_syms;
+            curr_scope->export_syms     = AS_EXPORT(dir)->syms;
+            curr_scope->num_export_syms = AS_EXPORT(dir)->num_syms;
         } break;
 
         case DIRECTIVE_LOAD: {
-            Directive_Load *dir = (Directive_Load *)d;
-            resolve(dir->parsed_file);
+            result = resolve(AS_LOAD(dir)->parsed_file);
         } break;
+
+        default: {
+            assert(!"unbekannte direktive");
+        } break;
+    }
+
+    return result;
+}
+
+Resolved_Stmts
+resolve_directives(Directive **directives) {
+    Resolved_Stmts result = NULL;
+
+    for ( int i = 0; i < buf_len(directives); ++i ) {
+        Directive *dir = directives[i];
+        Resolved_Stmts ret = resolve_directive(dir);
+
+        for ( int j = 0; j < buf_len(ret); ++j ) {
+            buf_push(result, ret[j]);
+        }
+    }
+
+    return result;
+}
+
+void
+type_complete_struct(Type_Struct *type) {
+    Decl *decl = type->sym->decl;
+
+    assert(decl->kind == DECL_STRUCT);
+    type->scope = scope_enter(decl->name);
+
+    if ( !AS_STRUCT(decl)->num_fields ) {
+        assert(!"datenstruktur muss mindestens ein feld enthalten!");
+    }
+
+    for ( size_t i = 0; i < AS_STRUCT(decl)->num_fields; i++ ) {
+        Struct_Field *field = AS_STRUCT(decl)->fields[i];
+
+        Type *field_type = 0;
+        if ( field->typespec ) {
+            field_type = resolve_typespec(field->typespec);
+        }
+
+        Operand *operand = NULL;
+        if ( field->default_value ) {
+            operand = resolve_expr(field->default_value);
+            field_type = operand->type;
+        }
+
+        if ( !field_type ) {
+            assert(!"datentyp des feldes konnte nicht ermittelt werden");
+        }
+
+        type_complete(field_type);
+
+        field->type = field_type;
+        field->operand = operand;
+
+        sym_push_var(field->name, field_type);
+    }
+
+    scope_leave();
+    type->kind = TYPE_STRUCT;
+
+    uint32_t offset = 0;
+    uint32_t align = 0;
+
+    for ( uint32_t i = 0; i < AS_STRUCT(decl)->num_fields; ++i ) {
+        type->size += AS_STRUCT(decl)->fields[i]->type->size;
+        type->align = MAX(type->size, AS_STRUCT(decl)->fields[i]->type->align);
+        AS_STRUCT(decl)->fields[i]->offset = offset;
+        offset += AS_STRUCT(decl)->fields[i]->type->size;
+    }
+
+    ((Type_Struct *)type)->fields     = AS_STRUCT(decl)->fields;
+    ((Type_Struct *)type)->num_fields = AS_STRUCT(decl)->num_fields;
+}
+
+void
+type_complete_enum(Type_Enum *type) {
+    assert(!"implementieren");
+    type->kind = TYPE_ENUM;
+}
+
+void
+type_complete(Type *type) {
+    if ( type->kind == TYPE_COMPLETING ) {
+        assert(!"zirkuläre abhängigkeit festgestellt!");
+    } else if (type->kind != TYPE_INCOMPLETE) {
+        return;
+    }
+
+    type->kind = TYPE_COMPLETING;
+    Decl *decl = type->sym->decl;
+
+    if ( decl->kind == DECL_STRUCT ) {
+        type_complete_struct((Type_Struct *)type);
+    } else {
+        type_complete_enum((Type_Enum *)type);
     }
 }
 
 void
-resolve_directives(Directive **directives) {
-    for ( int i = 0; i < buf_len(directives); ++i ) {
-        Directive *dir = directives[i];
-        resolve_directive(dir);
+resolve_proc(Sym *sym) {
+    Decl_Proc *decl = AS_PROC(sym->decl);
+    assert(sym->state == SYMSTATE_RESOLVED);
+    Proc_Sign *sign = decl->sign;
+
+    scope_enter(decl->name);
+    for ( uint32_t i = 0; i < sign->num_params; ++i ) {
+        Proc_Param *param = sign->params[i];
+        sym_push_var(param->name, resolve_typespec(param->typespec));
+    }
+
+    for ( uint32_t i = 0; i < sign->num_rets; ++i ) {
+        sign->rets[i]->type = resolve_typespec(sign->rets[i]->typespec);
+    }
+
+    bool returns = false;
+    if ( !sign->sys_call ) {
+        returns = resolve_stmt(decl->block);
+    }
+
+    scope_leave();
+
+    if ( sign->sys_call || sign->num_rets == 1 && sign->rets[0]->type == type_void ) {
+    } else if ( !returns ) {
+        assert(!"nicht alle zweige liefern einen wert zurueck!");
     }
 }
 
@@ -765,46 +1161,74 @@ register_global_syms(Stmts stmts) {
             continue;
         }
 
-        Sym *sym = sym_push(stmt->decl->name, stmt->decl);
+        Decl *decl = stmt->decl;
+        Sym *sym = sym_push(decl->name, decl);
 
-        switch ( stmt->decl->kind ) {
+        switch ( decl->kind ) {
             case DECL_TYPE:
             case DECL_ENUM:
             case DECL_STRUCT: {
                 sym->kind = SYM_TYPE;
             } break;
 
-            case DECL_VAR:
-            case DECL_CONST: {
+            case DECL_VAR: {
                 sym->kind = SYM_VAR;
+            } break;
+
+            case DECL_CONST: {
+                sym->kind = SYM_CONST;
             } break;
 
             case DECL_PROC: {
                 sym->kind = SYM_PROC;
             } break;
         }
+
+        if ( decl->kind == DECL_STRUCT ) {
+            sym->state = SYMSTATE_RESOLVED;
+            sym->type  = type_incomplete_struct(sym);
+        }
     }
 }
 
-Syms
+void
+sym_finalize(Sym *sym) {
+    sym_resolve(sym);
+
+    if ( sym->kind == SYM_TYPE ) {
+        type_complete(sym->type);
+    } else if ( sym->kind == SYM_PROC ) {
+        resolve_proc(sym);
+    }
+}
+
+Resolved_Stmts
 resolve(Parsed_File *parsed_file) {
-    resolve_directives(parsed_file->directives);
+    Resolved_Stmts result = resolve_directives(parsed_file->directives);
     register_global_syms(parsed_file->stmts);
 
     for ( int i = 0; i < buf_len(parsed_file->stmts); ++i ) {
         Stmt *stmt = parsed_file->stmts[i];
 
         if ( stmt->kind == STMT_DECL ) {
-            Stmt_Decl *s = (Stmt_Decl *)stmt;
-            Sym *sym = sym_get(s->decl->name);
+            Sym *sym = sym_get(AS_DECL(stmt)->decl->name);
             assert(sym);
-            sym_resolve(sym);
+
+            if ( sym->decl ) {
+                sym_finalize(sym);
+            }
+
+            buf_push(result, resolved_stmt(stmt, sym, sym->type, NULL));
         } else {
-            resolve_stmt(stmt);
+            Resolved_Stmts stmts = resolve_stmt(stmt);
+
+            for ( int j = 0; j < buf_len(stmts); ++j ) {
+                buf_push(result, stmts[j]);
+            }
         }
     }
 
-    return NULL;
+    return result;
 }
 
 void
@@ -813,22 +1237,20 @@ resolver_init() {
     global_scope = scope_new("global", sys_scope);
     curr_scope   = global_scope;
 
-    type_void   = type_new(0);
-    type_u8     = type_new(1);
-    type_u16    = type_new(2);
-    type_u32    = type_new(4);
-    type_u64    = type_new(8);
-    type_s8     = type_new(1);
-    type_s16    = type_new(2);
-    type_s32    = type_new(4);
-    type_s64    = type_new(8);
-    type_f32    = type_new(4);
-    type_f64    = type_new(8);
-    type_bool   = type_new(1);
-    type_usize  = type_new(8);
-    type_ssize  = type_new(8);
-    type_typeid = type_new(4);
-    type_string = type_new(type_usize->size + PTR_SIZE); // bytegröße (int) + zeiger zu daten
+    type_void   = type_new(0, TYPE_VOID);
+    type_u8     = type_new(1, TYPE_U8);
+    type_u16    = type_new(2, TYPE_U16);
+    type_u32    = type_new(4, TYPE_U32);
+    type_u64    = type_new(8, TYPE_U64);
+    type_s8     = type_new(1, TYPE_S8);
+    type_s16    = type_new(2, TYPE_S16);
+    type_s32    = type_new(4, TYPE_S32);
+    type_s64    = type_new(8, TYPE_S64);
+    type_f32    = type_new(4, TYPE_F32);
+    type_f64    = type_new(8, TYPE_F64);
+    type_bool   = type_new(1, TYPE_BOOL);
+    type_typeid = type_new(4, TYPE_TYPEID);
+    type_string = type_new(type_u32->size + PTR_SIZE, TYPE_STRING); // bytegröße (int) + zeiger zu daten
 
     sym_push_sys("void",   type_void);
     sym_push_sys("u8",     type_u8);
@@ -842,7 +1264,6 @@ resolver_init() {
     sym_push_sys("f32",    type_f32);
     sym_push_sys("f64",    type_f64);
     sym_push_sys("bool",   type_bool);
-    sym_push_sys("usize",  type_usize);
-    sym_push_sys("ssize",  type_ssize);
+    sym_push_sys("string", type_string);
     sym_push_sys("typeid", type_typeid);
 }
