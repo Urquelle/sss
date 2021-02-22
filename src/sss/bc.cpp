@@ -1140,6 +1140,12 @@ bytecode_stmt(Bytecode *bc, Stmt *stmt) {
     switch ( stmt->kind ) {
         case STMT_ASSIGN: {
             bytecode_expr(bc, AS_ASSIGN(stmt)->rhs);
+
+            if ( AS_ASSIGN(stmt)->op->kind == T_PLUS_ASSIGN ) {
+                bytecode_expr(bc, AS_ASSIGN(stmt)->lhs);
+                bytecode_write8(bc, BYTECODEOP_ADD);
+            }
+
             bytecode_expr(bc, AS_ASSIGN(stmt)->lhs, BYTECODEFLAG_ASSIGNABLE);
 
             bytecode_write8(bc, BYTECODEOP_SET_SYM);
@@ -1182,13 +1188,35 @@ bytecode_stmt(Bytecode *bc, Stmt *stmt) {
             bytecode_write16(bc, 0);
 
             /* @INFO: den eigentlichen code der schleife generieren */
-            bytecode_stmt(bc, AS_FOR(stmt)->stmt);
+            bytecode_stmt(bc, AS_FOR(stmt)->block);
 
             /* @INFO: die schleifenvariable inkrementieren und den boolischen wert für
              *        die spätere JMP_FALSE operation auf den stack laden
              */
             bytecode_write8(bc, BYTECODEOP_INC_LOOP);
             bytecode_write16(bc, (uint16_t)index);
+
+            /* @INFO: bedingungsloser sprung zu der JMP_FALSE operation */
+            bytecode_write8(bc, BYTECODEOP_JMP);
+            bytecode_write16(bc, (uint16_t)loop_addr);
+            int32_t exit_addr = bc->size;
+
+            bytecode_write8(bc, BYTECODEOP_SCOPE_LEAVE);
+            bytecode_write16(bc, exit_instr, (uint16_t)exit_addr);
+        } break;
+
+        case STMT_WHILE: {
+            /* @INFO: platziert einen wert auf dem stack */
+            uint32_t loop_addr = bc->size;
+            bytecode_expr(bc, AS_WHILE(stmt)->cond);
+            bytecode_write8(bc, BYTECODEOP_SCOPE_ENTER);
+
+            bytecode_write8(bc, BYTECODEOP_JMP_FALSE);
+            int32_t exit_instr = bc->size;
+            bytecode_write16(bc, 0);
+
+            /* @INFO: den eigentlichen code der schleife generieren */
+            bytecode_stmt(bc, AS_WHILE(stmt)->block);
 
             /* @INFO: bedingungsloser sprung zu der JMP_FALSE operation */
             bytecode_write8(bc, BYTECODEOP_JMP);
@@ -1594,8 +1622,8 @@ step(Vm *vm) {
 
             vm->frame_num -= 1;
 
-            for ( int i = num_vals; i > 0; --i ) {
-                stack_push(vm, vals[i-1]);
+            for ( int i = 0; i < num_vals; ++i ) {
+                stack_push(vm, vals[i]);
             }
         } break;
 

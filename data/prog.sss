@@ -5,6 +5,10 @@ b := a + 1;
 c := false;
 d : s32 = 0;
 
+while a < b {
+    a += 1;
+}
+
 if a < b {
     b = 10;
 }
@@ -15,9 +19,7 @@ hallo :: proc(x: s32) -> s32 {
     return result, 7.5;
 }
 
-hallo(15);
-
-a = 30;
+a = hallo(15);
 
 for 1..2 {
     d = d + it;

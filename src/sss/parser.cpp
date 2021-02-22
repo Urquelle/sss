@@ -24,6 +24,7 @@ char *keyword_struct;
 char *keyword_true;
 char *keyword_type;
 char *keyword_using;
+char *keyword_while;
 
 struct Compound_Elem;
 struct Decl;
@@ -278,8 +279,9 @@ struct Stmt_Decl : Stmt {
 
 #define AS_ASSIGN(Stmt) ((Stmt_Assign *)(Stmt))
 struct Stmt_Assign : Stmt {
-    Expr *lhs;
-    Expr *rhs;
+    Token *op;
+    Expr  *lhs;
+    Expr  *rhs;
 };
 
 #define AS_BLOCK(Stmt) ((Stmt_Block *)(Stmt))
@@ -299,7 +301,7 @@ struct Stmt_If : Stmt {
 struct Stmt_For : Stmt {
     Expr *it;
     Expr *cond;
-    Stmt *stmt;
+    Stmt *block;
     Stmt *stmt_else;
 };
 
@@ -380,6 +382,12 @@ struct Stmt_Ret : Stmt {
     Exprs       exprs;
     uint32_t    num_exprs;
     Proc_Sign * sign;
+};
+
+#define AS_WHILE(Stmt) ((Stmt_While *)(Stmt))
+struct Stmt_While : Stmt {
+    Expr * cond;
+    Stmt * block;
 };
 
 enum Decl_Kind {
@@ -573,6 +581,15 @@ token_is_keyword(Token_List *tokens) {
     }
 
     return false;
+}
+
+bool
+token_is_assign(Token_List *tokens) {
+    Token *curr = token_get(tokens);
+
+    bool result = curr->kind >= T_FIRST_ASSIGN && curr->kind <= T_LAST_ASSIGN;
+
+    return result;
 }
 
 bool
@@ -1246,9 +1263,10 @@ stmt_decl(Ast_Elem *loc, Decl *decl) {
 }
 
 Stmt_Assign *
-stmt_assign(Ast_Elem *loc, Expr *lhs, Expr *rhs) {
+stmt_assign(Ast_Elem *loc, Expr *lhs, Token *op, Expr *rhs) {
     STRUCTK(Stmt_Assign, STMT_ASSIGN);
 
+    result->op  = op;
     result->lhs = lhs;
     result->rhs = rhs;
 
@@ -1267,12 +1285,12 @@ stmt_if(Ast_Elem *loc, Expr *cond, Stmt *stmt, Stmt_If *stmt_else) {
 }
 
 Stmt_For *
-stmt_for(Ast_Elem *loc, Expr *it, Expr *cond, Stmt *stmt, Stmt *stmt_else) {
+stmt_for(Ast_Elem *loc, Expr *it, Expr *cond, Stmt *block, Stmt *stmt_else) {
     STRUCTK(Stmt_For, STMT_FOR);
 
     result->it        = it;
     result->cond      = cond;
-    result->stmt      = stmt;
+    result->block     = block;
     result->stmt_else = stmt_else;
 
     return result;
@@ -1305,6 +1323,16 @@ stmt_match(Ast_Elem *loc, Expr *expr, Match_Lines lines, size_t num_lines) {
     result->expr      = expr;
     result->lines     = (Match_Lines)MEMDUP(lines);
     result->num_lines = num_lines;
+
+    return result;
+}
+
+Stmt_While *
+stmt_while(Ast_Elem *loc, Expr *cond, Stmt *block) {
+    STRUCTK(Stmt_While, STMT_WHILE);
+
+    result->cond  = cond;
+    result->block = block;
 
     return result;
 }
@@ -1552,10 +1580,11 @@ parse_decl_struct(Token_List *tokens, char *name) {
         do {
             Token **field_names = NULL;
             while ( !token_is(tokens, T_COLON) ) {
-                Token *field_name = token_read(tokens);
-                assert(field_name->kind == T_IDENT);
-                buf_push(field_names, field_name);
-                token_match(tokens, T_COMMA);
+                do {
+                    Token *field_name = token_read(tokens);
+                    assert(field_name->kind == T_IDENT);
+                    buf_push(field_names, field_name);
+                } while ( token_match(tokens, T_COMMA) );
             }
 
             token_expect(tokens, T_COLON);
@@ -1571,7 +1600,7 @@ parse_decl_struct(Token_List *tokens, char *name) {
                 buf_push(fields, struct_field(field_name, field_name->val_str, typespec, value));
             }
 
-            token_match(tokens, T_COMMA);
+            token_expect(tokens, T_SEMICOLON);
         } while ( !token_is(tokens, T_RBRACE) );
     }
     token_expect(tokens, T_RBRACE);
@@ -1728,9 +1757,9 @@ parse_stmt_decl(Token_List *tokens, char *name) {
 }
 
 Stmt_Assign *
-parse_stmt_assign(Token_List *tokens, Expr *expr) {
+parse_stmt_assign(Token_List *tokens, Token *op, Expr *expr) {
     Token *curr = token_get(tokens);
-    Stmt_Assign *result = stmt_assign(curr, expr, parse_expr(tokens, true));
+    Stmt_Assign *result = stmt_assign(curr, expr, op, parse_expr(tokens, true));
     token_expect(tokens, T_SEMICOLON);
 
     return result;
@@ -1823,6 +1852,16 @@ parse_stmt_match(Token_List *tokens) {
     token_expect(tokens, T_RBRACE);
 
     return stmt_match(curr, expr, lines, buf_len(lines));
+}
+
+Stmt_While *
+parse_stmt_while(Token_List *tokens) {
+    Token *curr = token_get(tokens);
+
+    Expr *cond = parse_expr(tokens);
+    Stmt *block = parse_stmt_block(tokens);
+
+    return stmt_while(curr, cond, block);
 }
 
 Directive_Import *
@@ -1994,6 +2033,8 @@ parse_stmt(Token_List *tokens) {
                     result = parse_stmt_for(tokens);
                 } else if ( keyword->val == keyword_return ) {
                     result = parse_stmt_ret(tokens);
+                } else if ( keyword->val == keyword_while ) {
+                    result = parse_stmt_while(tokens);
                 } else if ( keyword->val == keyword_match ) {
                     result = parse_stmt_match(tokens);
                 }
@@ -2005,8 +2046,12 @@ parse_stmt(Token_List *tokens) {
                 } else if ( token_match(tokens, T_SEMICOLON) ) {
                     result = stmt_expr(expr, expr);
                 } else {
-                    token_expect(tokens, T_EQL_ASSIGN);
-                    result = parse_stmt_assign(tokens, expr);
+                    if ( !token_is_assign(tokens) ) {
+                        assert(!"unerwarteter token");
+                    }
+
+                    Token *op = token_read(tokens);
+                    result = parse_stmt_assign(tokens, op, expr);
                 }
             }
         } else {
@@ -2049,6 +2094,7 @@ parse(Token_List *tokens) {
     KEYWORD(true);
     KEYWORD(type);
     KEYWORD(using);
+    KEYWORD(while);
 #undef KEYWORD
 
     Stmts stmts = NULL;

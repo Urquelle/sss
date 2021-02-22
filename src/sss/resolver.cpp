@@ -639,7 +639,7 @@ resolve_expr(Expr *expr) {
                 }
             }
 
-            result = op;
+            result = operand(((Type_Proc *)op->type)->rets[0]->type);
         } break;
 
         case EXPR_RANGE: {
@@ -875,7 +875,7 @@ resolve_stmt(Stmt *stmt) {
 
             scope_enter("for-loop");
             Sym *sym = sym_push_var(it, cond->type);
-            resolve_stmt(AS_FOR(stmt)->stmt);
+            resolve_stmt(AS_FOR(stmt)->block);
             scope_leave();
 
             if ( AS_FOR(stmt)->stmt_else ) {
@@ -898,6 +898,14 @@ resolve_stmt(Stmt *stmt) {
             scope_enter();
             resolve_stmt(s->stmt);
             scope_leave();
+
+            buf_push(result, resolved_stmt(stmt, NULL, NULL, NULL));
+        } break;
+
+        case STMT_WHILE: {
+            Operand *cond = resolve_expr(AS_WHILE(stmt)->cond);
+            assert(cond->type->kind == TYPE_BOOL);
+            resolve_stmt(AS_WHILE(stmt)->block);
 
             buf_push(result, resolved_stmt(stmt, NULL, NULL, NULL));
         } break;
