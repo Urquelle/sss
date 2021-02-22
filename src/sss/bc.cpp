@@ -97,6 +97,7 @@ struct Table {
 enum Bytecode_Flags {
     BYTECODEFLAG_NONE,
     BYTECODEFLAG_ASSIGNABLE,
+    BYTECODEFLAG_SET_EXISTING,
 };
 
 struct Bytecode_Scope {
@@ -1242,6 +1243,7 @@ bytecode_stmt(Bytecode *bc, Stmt *stmt) {
                     proc->name = obj_string(decl->name, decl->len);
                     proc->num_params = (uint32_t)AS_PROC(decl)->sign->num_params;
 
+                    bytecode_write8(proc->bc, BYTECODEOP_SCOPE_ENTER);
                     for ( uint32_t i = 0; i < AS_PROC(decl)->sign->num_params; ++i ) {
                         Proc_Param *param = AS_PROC(decl)->sign->params[i];
 
@@ -1259,6 +1261,7 @@ bytecode_stmt(Bytecode *bc, Stmt *stmt) {
                             bytecode_write16(bc, 0);
                         }
                     }
+                    bytecode_write8(proc->bc, BYTECODEOP_SCOPE_LEAVE);
                 } break;
 
                 default: {
@@ -1377,10 +1380,25 @@ bytecode_sym_get(Obj_String *key, Value *val) {
 }
 
 bool
-bytecode_sym_set(Obj_String *key, Value val) {
-    bool result = table_set(&bc_curr_scope->syms, key, val);
+bytecode_sym_set(Obj_String *key, Value val, uint32_t flags = BYTECODEFLAG_NONE) {
+    if ( flags & BYTECODEFLAG_SET_EXISTING ) {
+        Bytecode_Scope *it = bc_curr_scope;
 
-    return result;
+        while ( it ) {
+            Value v;
+            if ( table_get(&it->syms, key, &v) ) {
+                table_set(&it->syms, key, val);
+
+                return true;
+            }
+
+            it = it->parent;
+        }
+    } else {
+        return table_set(&bc_curr_scope->syms, key, val);
+    }
+
+    return false;
 }
 
 Bytecode *
@@ -1502,7 +1520,7 @@ step(Vm *vm) {
             Obj_String *name = as_str(stack_pop(vm));
             Value val = stack_pop(vm);
 
-            bytecode_sym_set(name, val);
+            bytecode_sym_set(name, val, BYTECODEFLAG_SET_EXISTING);
         } break;
 
         case BYTECODEOP_CALL: {
