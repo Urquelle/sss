@@ -1206,10 +1206,11 @@ bytecode_stmt(Bytecode *bc, Stmt *stmt) {
         } break;
 
         case STMT_WHILE: {
-            /* @INFO: platziert einen wert auf dem stack */
+            bytecode_write8(bc, BYTECODEOP_SCOPE_ENTER);
+
+            /* @INFO: platziert den entscheidungswert auf dem stack */
             uint32_t loop_addr = bc->size;
             bytecode_expr(bc, AS_WHILE(stmt)->cond);
-            bytecode_write8(bc, BYTECODEOP_SCOPE_ENTER);
 
             bytecode_write8(bc, BYTECODEOP_JMP_FALSE);
             int32_t exit_instr = bc->size;

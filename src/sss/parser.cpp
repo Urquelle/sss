@@ -261,6 +261,7 @@ enum Stmt_Kind {
     STMT_IF,
     STMT_MATCH,
     STMT_RET,
+    STMT_WHILE,
 };
 struct Stmt : Ast_Elem {
     Stmt_Kind kind;
