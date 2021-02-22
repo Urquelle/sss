@@ -300,6 +300,7 @@ struct Stmt_For : Stmt {
     Expr *it;
     Expr *cond;
     Stmt *stmt;
+    Stmt *stmt_else;
 };
 
 struct Module_Sym : Ast_Elem {
@@ -1266,12 +1267,13 @@ stmt_if(Ast_Elem *loc, Expr *cond, Stmt *stmt, Stmt_If *stmt_else) {
 }
 
 Stmt_For *
-stmt_for(Ast_Elem *loc, Expr *it, Expr *cond, Stmt *stmt) {
+stmt_for(Ast_Elem *loc, Expr *it, Expr *cond, Stmt *stmt, Stmt *stmt_else) {
     STRUCTK(Stmt_For, STMT_FOR);
 
-    result->it   = it;
-    result->cond = cond;
-    result->stmt = stmt;
+    result->it        = it;
+    result->cond      = cond;
+    result->stmt      = stmt;
+    result->stmt_else = stmt_else;
 
     return result;
 }
@@ -1767,7 +1769,12 @@ parse_stmt_for(Token_List *tokens) {
 
     Stmt *stmt  = parse_stmt_block(tokens);
 
-    return stmt_for(curr, it, cond, stmt);
+    Stmt *stmt_else = NULL;
+    if ( keyword_matches(tokens, keyword_else) ) {
+        stmt_else = parse_stmt_block(tokens);
+    }
+
+    return stmt_for(curr, it, cond, stmt, stmt_else);
 }
 
 Stmt_Ret *

@@ -99,6 +99,15 @@ enum Bytecode_Flags {
     BYTECODEFLAG_ASSIGNABLE,
 };
 
+struct Bytecode_Scope {
+    char           * name;
+    Bytecode_Scope * parent;
+    Table            syms;
+};
+
+Bytecode_Scope bc_global_scope = {"global", NULL, {}};
+Bytecode_Scope *bc_curr_scope = &bc_global_scope;
+
 struct Bytecode {
     Bytecode * parent;
     uint8_t  * code;
@@ -106,7 +115,6 @@ struct Bytecode {
     uint32_t   cap;
 
     Value_Array constants;
-    Table       syms;
 };
 
 #define BYTECODES               \
@@ -130,7 +138,10 @@ struct Bytecode {
     X(BYTECODEOP_CALL)          \
     X(BYTECODEOP_INIT_LOOP)     \
     X(BYTECODEOP_INC_LOOP)      \
+    X(BYTECODEOP_POP)           \
     X(BYTECODEOP_PUSH)          \
+    X(BYTECODEOP_SCOPE_ENTER)   \
+    X(BYTECODEOP_SCOPE_LEAVE)   \
     X(BYTECODEOP_RET)
 
 enum Bytecode_Opcode {
@@ -153,6 +164,21 @@ struct Vm {
 };
 
 Table strings;
+
+void
+bytecode_scope_enter() {
+    Bytecode_Scope *scope = urq_allocs(Bytecode_Scope);
+
+    scope->name   = NULL;
+    scope->parent = bc_curr_scope;
+    bc_curr_scope = scope;
+}
+
+void
+bytecode_scope_leave() {
+    assert(bc_curr_scope->parent);
+    bc_curr_scope = bc_curr_scope->parent;
+}
 
 uint32_t
 hash_string(char* key, int32_t size) {
@@ -367,7 +393,6 @@ bytecode_new() {
     result->size      = 0;
     result->cap       = 0;
     result->constants = {};
-    result->syms      = {};
 
     return result;
 }
@@ -999,6 +1024,18 @@ bytecode_debug(Vm *vm, int32_t code) {
             printf("\n");
         } break;
 
+        case BYTECODEOP_POP: {
+            printf("OP_POP\n");
+        } break;
+
+        case BYTECODEOP_SCOPE_ENTER: {
+            printf("OP_SCOPE_ENTER\n");
+        } break;
+
+        case BYTECODEOP_SCOPE_LEAVE: {
+            printf("OP_SCOPE_LEAVE\n");
+        } break;
+
         default: {
             assert(!"unbekannter bytecode");
         } break;
@@ -1132,6 +1169,8 @@ bytecode_stmt(Bytecode *bc, Stmt *stmt) {
             /* @INFO: platziert den namen der laufvariable */
             int32_t index = bytecode_push_constant(bc, val_str(it, (uint32_t)utf8_str_size(it)));
 
+            bytecode_write8(bc, BYTECODEOP_SCOPE_ENTER);
+
             /* @INFO: anweisung holt sich den namen der laufvariable und den wert */
             bytecode_write8(bc, BYTECODEOP_INIT_LOOP);
             bytecode_write16(bc, (uint16_t)index);
@@ -1155,6 +1194,7 @@ bytecode_stmt(Bytecode *bc, Stmt *stmt) {
             bytecode_write16(bc, (uint16_t)loop_addr);
             int32_t exit_addr = bc->size;
 
+            bytecode_write8(bc, BYTECODEOP_SCOPE_LEAVE);
             bytecode_write16(bc, exit_instr, (uint16_t)exit_addr);
         } break;
 
@@ -1231,7 +1271,9 @@ bytecode_stmt(Bytecode *bc, Stmt *stmt) {
             bytecode_expr(bc, AS_IF(stmt)->cond);
 
             int32_t addr = bytecode_emit_jmp_false(bc);
+            bytecode_write8(bc, BYTECODEOP_SCOPE_ENTER);
             bytecode_stmt(bc, AS_IF(stmt)->stmt);
+            bytecode_write8(bc, BYTECODEOP_SCOPE_LEAVE);
             bytecode_patch_jmp(bc, addr, (uint16_t)bc->size);
 
             if ( AS_IF(stmt)->stmt_else ) {
@@ -1319,6 +1361,28 @@ call_proc(Vm *vm, Value val, uint32_t num_args) {
     frame->sp   = prev_frame->sp;
 }
 
+bool
+bytecode_sym_get(Obj_String *key, Value *val) {
+    Bytecode_Scope *it = bc_curr_scope;
+
+    while ( it ) {
+        if ( table_get(&it->syms, key, val) ) {
+            return true;
+        }
+
+        it = it->parent;
+    }
+
+    return false;
+}
+
+bool
+bytecode_sym_set(Obj_String *key, Value val) {
+    bool result = table_set(&bc_curr_scope->syms, key, val);
+
+    return result;
+}
+
 Bytecode *
 build(Resolved_Stmts stmts) {
     Bytecode *bc = bytecode_new();
@@ -1388,8 +1452,7 @@ step(Vm *vm) {
         case BYTECODEOP_PUSH_SYM: {
             Obj_String *name = as_str(value_get(&frame->proc->bc->constants, bytecode_read16(vm)));
             Value val = stack_pop(vm);
-
-            table_set(&frame->proc->bc->syms, name, val);
+            bytecode_sym_set(name, val);
         } break;
 
         case BYTECODEOP_INIT_LOOP: {
@@ -1399,7 +1462,7 @@ step(Vm *vm) {
             assert(val.kind == VAL_OBJ);
             assert(val.obj_val->kind == OBJ_RANGE);
 
-            table_set(&frame->proc->bc->syms, name, val_iter(as_range(val), as_range(val)->left));
+            bytecode_sym_set(name, val_iter(as_range(val), as_range(val)->left));
             stack_push(vm, as_range(val)->left < as_range(val)->right);
         } break;
 
@@ -1408,13 +1471,12 @@ step(Vm *vm) {
             Obj_String *name = as_str(value_get(&frame->proc->bc->constants, index));
 
             Value val;
-            if ( !table_get(&frame->proc->bc->syms, name, &val) ) {
+
+            if ( !bytecode_sym_get(name, &val) ) {
                 assert(!"symbol nicht gefunden");
             }
 
-            val = val + 1;
-            table_set(&frame->proc->bc->syms, name, val);
-
+            bytecode_sym_set(name, val + 1);
             Obj_Iter *iter = ((Obj_Iter *)val.obj_val);
             Value cond = iter->iter < ((Obj_Range *)iter->range)->right;
             stack_push(vm, cond);
@@ -1424,7 +1486,7 @@ step(Vm *vm) {
             Obj_String *name = as_str(value_get(&frame->proc->bc->constants, bytecode_read16(vm)));
             Value val;
 
-            if ( !table_get(&frame->proc->bc->syms, name, &val) ) {
+            if ( !bytecode_sym_get(name, &val) ) {
                 assert(!"symbol nicht gefunden");
             }
 
@@ -1440,7 +1502,7 @@ step(Vm *vm) {
             Obj_String *name = as_str(stack_pop(vm));
             Value val = stack_pop(vm);
 
-            table_set(&frame->proc->bc->syms, name, val);
+            bytecode_sym_set(name, val);
         } break;
 
         case BYTECODEOP_CALL: {
@@ -1499,6 +1561,10 @@ step(Vm *vm) {
             stack_push(vm, val);
         } break;
 
+        case BYTECODEOP_POP: {
+            stack_pop(vm);
+        } break;
+
         case BYTECODEOP_RET: {
             int32_t num_vals = bytecode_read16(vm);
 
@@ -1513,6 +1579,14 @@ step(Vm *vm) {
             for ( int i = num_vals; i > 0; --i ) {
                 stack_push(vm, vals[i-1]);
             }
+        } break;
+
+        case BYTECODEOP_SCOPE_ENTER: {
+            bytecode_scope_enter();
+        } break;
+
+        case BYTECODEOP_SCOPE_LEAVE: {
+            bytecode_scope_leave();
         } break;
 
         default: {

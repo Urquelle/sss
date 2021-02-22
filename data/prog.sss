@@ -5,7 +5,7 @@ b := a + 1;
 c := false;
 d : s32 = 0;
 
-if b < a {
+if a < b {
     b = 10;
 }
 
@@ -19,8 +19,10 @@ hallo(15);
 
 a = 30;
 
-for 1..b {
+for 1..2 {
     d = d + it;
+} else {
+    d = 100;
 }
 
 e := d;

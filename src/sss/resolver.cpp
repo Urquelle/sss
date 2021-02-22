@@ -878,6 +878,12 @@ resolve_stmt(Stmt *stmt) {
             resolve_stmt(AS_FOR(stmt)->stmt);
             scope_leave();
 
+            if ( AS_FOR(stmt)->stmt_else ) {
+                scope_enter("for-else");
+                resolve_stmt(AS_FOR(stmt)->stmt_else);
+                scope_leave();
+            }
+
             buf_push(result, resolved_stmt(stmt, NULL, NULL, NULL));
         } break;
 
