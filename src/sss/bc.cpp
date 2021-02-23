@@ -1,6 +1,7 @@
 struct Bytecode;
 struct Obj;
 struct Obj_Proc;
+struct Table;
 
 #define VALUES   \
     X(VAL_NONE)  \
@@ -26,11 +27,13 @@ struct Value {
     };
 };
 
-#define OBJECTS   \
-    X(OBJ_STRING) \
-    X(OBJ_RANGE)  \
-    X(OBJ_PROC)   \
-    X(OBJ_ITER)
+#define OBJECTS         \
+    X(OBJ_STRING)       \
+    X(OBJ_RANGE)        \
+    X(OBJ_PROC)         \
+    X(OBJ_ITER)         \
+    X(OBJ_STRUCT)       \
+    X(OBJ_STRUCT_FIELD)
 
 enum Obj_Kind {
 #define X(Elem) Elem,
@@ -66,15 +69,27 @@ struct Obj_Iter : Obj {
     uint32_t    curr_index;
 };
 
+struct Obj_Struct : Obj {
+    Obj_String * name;
+    Table      * fields;
+};
+
+struct Obj_Struct_Field : Obj {
+    Obj_String * name;
+    Value        default_value;
+};
+
 typedef Value* Values;
 
-Value       val_none();
-Value       val_str(char *ptr, uint32_t size);
-Value       val_bool(bool val);
-void        val_print(Value val);
-Obj_Proc  * obj_proc();
-Obj_Proc  * as_proc(Value val);
-Obj_Range * as_range(Value val);
+Value              val_none();
+Value              val_str(char *ptr, uint32_t size);
+Value              val_bool(bool val);
+void               val_print(Value val);
+Obj_Proc         * obj_proc();
+Obj_Proc         * as_proc(Value val);
+Obj_Range        * as_range(Value val);
+Obj_Struct       * as_struct(Value val);
+Obj_Struct_Field * as_struct_field(Value val);
 
 struct Value_Array {
     uint32_t   size;
@@ -120,7 +135,7 @@ struct Bytecode {
 
 #define BYTECODES               \
     X(BYTECODEOP_HLT)           \
-    X(BYTECODEOP_NULL)          \
+    X(BYTECODEOP_NONE)          \
     X(BYTECODEOP_ADD)           \
     X(BYTECODEOP_SUB)           \
     X(BYTECODEOP_MUL)           \
@@ -131,6 +146,8 @@ struct Bytecode {
     X(BYTECODEOP_CMP_LT)        \
     X(BYTECODEOP_PRINT)         \
     X(BYTECODEOP_RANGE)         \
+    X(BYTECODEOP_STRUCT)        \
+    X(BYTECODEOP_STRUCT_FIELD)  \
     X(BYTECODEOP_CONST)         \
     X(BYTECODEOP_PUSH_SYM)      \
     X(BYTECODEOP_LOAD_SYM)      \
@@ -568,6 +585,27 @@ obj_iter(Obj_Range *range, Value iter) {
     return result;
 }
 
+Obj_Struct *
+obj_struct(Obj_String *name) {
+    Obj_Struct *result = urq_allocs(Obj_Struct);
+
+    result->kind   = OBJ_STRUCT;
+    result->name   = name;
+    result->fields = table_new();
+
+    return result;
+}
+
+Obj_Struct_Field *
+obj_struct_field(Obj_String *name) {
+    Obj_Struct_Field *result = urq_allocs(Obj_Struct_Field);
+
+    result->kind = OBJ_STRUCT_FIELD;
+    result->name = name;
+
+    return result;
+}
+
 void
 obj_print(Obj *obj) {
     switch ( obj->kind ) {
@@ -595,6 +633,18 @@ obj_print(Obj *obj) {
             printf("][it: ");
             val_print(((Obj_Iter *)obj)->iter);
             printf("]\n");
+        } break;
+
+        case OBJ_STRUCT: {
+            printf("(struct: ");
+            obj_print(((Obj_Struct *)obj)->name);
+            printf(")");
+        } break;
+
+        case OBJ_STRUCT_FIELD: {
+            printf("struct_field: ");
+            obj_print(((Obj_Struct_Field *)obj)->name);
+            printf(")");
         } break;
 
         default: {
@@ -677,6 +727,20 @@ val_proc(char *ptr, uint32_t size, bool sys_call) {
 Value
 val_iter(Obj_Range *range, Value iter) {
     Value result = val_obj(obj_iter(range, iter));
+
+    return result;
+}
+
+Value
+val_struct(char *name, uint32_t len) {
+    Value result = val_obj(obj_struct(obj_string(name, len)));
+
+    return result;
+}
+
+Value
+val_struct_field(char *name, uint32_t len) {
+    Value result = val_obj(obj_struct_field(obj_string(name, len)));
 
     return result;
 }
@@ -1037,6 +1101,25 @@ bytecode_debug(Vm *vm, int32_t code) {
             printf("OP_SCOPE_LEAVE\n");
         } break;
 
+        case BYTECODEOP_STRUCT_FIELD: {
+            Value val   = vm->stack[frame->sp-1];
+            Value field = vm->stack[frame->sp-2];
+
+            printf("OP_STRUCT_FIELD [name: ");
+            val_print(field);
+            printf("[value: ");
+            val_print(val);
+            printf("]\n");
+        } break;
+
+        case BYTECODEOP_STRUCT: {
+            printf("OP_STRUCT\n");
+        } break;
+
+        case BYTECODEOP_NONE: {
+            printf("OP_NONE\n");
+        } break;
+
         default: {
             assert(!"unbekannter bytecode");
         } break;
@@ -1236,7 +1319,7 @@ bytecode_stmt(Bytecode *bc, Stmt *stmt) {
                     if ( AS_VAR(decl)->expr ) {
                         bytecode_expr(bc, AS_VAR(decl)->expr);
                     } else {
-                        bytecode_write8(bc, BYTECODEOP_NULL);
+                        bytecode_write8(bc, BYTECODEOP_NONE);
                     }
 
                     int32_t index = bytecode_push_constant(bc, val_str(decl->name, decl->len));
@@ -1249,7 +1332,7 @@ bytecode_stmt(Bytecode *bc, Stmt *stmt) {
                     if ( AS_CONST(decl)->expr ) {
                         bytecode_expr(bc, AS_CONST(decl)->expr);
                     } else {
-                        bytecode_write8(bc, BYTECODEOP_NULL);
+                        bytecode_write8(bc, BYTECODEOP_NONE);
                     }
 
                     int32_t index = bytecode_push_constant(bc, val_str(decl->name, decl->len));
@@ -1291,6 +1374,44 @@ bytecode_stmt(Bytecode *bc, Stmt *stmt) {
                         }
                     }
                     bytecode_write8(proc->bc, BYTECODEOP_SCOPE_LEAVE);
+                } break;
+
+                case DECL_STRUCT: {
+                    Value val = val_struct(decl->name, decl->len);
+                    int32_t index = bytecode_push_constant(bc, val);
+                    bytecode_write8(bc, BYTECODEOP_CONST);
+                    bytecode_write16(bc, (uint16_t)index);
+
+                    int32_t name_index = bytecode_push_constant(bc, val_str(decl->name, (uint32_t)utf8_str_size(decl->name)));
+                    bytecode_write8(bc, BYTECODEOP_PUSH_SYM);
+                    bytecode_write16(bc, (uint16_t)name_index);
+
+                    bytecode_write8(bc, BYTECODEOP_PUSH);
+                    bytecode_write16(bc, (uint16_t)index);
+
+                    for ( int i = 0; i < AS_STRUCT(decl)->num_fields; ++i ) {
+                        Struct_Field *field = AS_STRUCT(decl)->fields[i];
+
+                        // feldnamen generieren {
+                            Value field_val = val_struct_field(field->name, (uint32_t)utf8_str_size(field->name));
+                            int32_t field_index = bytecode_push_constant(bc, field_val);
+                            bytecode_write8(bc, BYTECODEOP_PUSH);
+                            bytecode_write16(bc, (uint16_t)field_index);
+                        // }
+
+                        // feldwert generieren {
+                            if ( field->default_value ) {
+                                bytecode_expr(bc, field->default_value);
+                            } else {
+                                bytecode_write8(bc, BYTECODEOP_NONE);
+                            }
+                        // }
+
+                        bytecode_write8(bc, BYTECODEOP_STRUCT_FIELD);
+                    }
+
+                    bytecode_write8(bc, BYTECODEOP_STRUCT);
+                    bytecode_write16(bc, (uint16_t)AS_STRUCT(decl)->num_fields);
                 } break;
 
                 default: {
@@ -1351,6 +1472,20 @@ as_range(Value val) {
 Obj_Proc *
 as_proc(Value val) {
     Obj_Proc *result = (Obj_Proc *)val.obj_val;
+
+    return result;
+}
+
+Obj_Iter *
+as_iter(Value val) {
+    Obj_Iter *result = (Obj_Iter *)val.obj_val;
+
+    return result;
+}
+
+Obj_Struct *
+as_struct(Value val) {
+    Obj_Struct *result = (Obj_Struct *)val.obj_val;
 
     return result;
 }
@@ -1457,7 +1592,7 @@ step(Vm *vm) {
 #endif
 
     switch ( instr ) {
-        case BYTECODEOP_NULL: {
+        case BYTECODEOP_NONE: {
             stack_push(vm, val_none());
         } break;
 
@@ -1634,6 +1769,30 @@ step(Vm *vm) {
 
         case BYTECODEOP_SCOPE_LEAVE: {
             bytecode_scope_leave();
+        } break;
+
+        case BYTECODEOP_STRUCT: {
+            int32_t num_fields = bytecode_read16(vm);
+
+            Values vals = NULL;
+            for ( int i = 0; i < num_fields; ++i ) {
+                buf_push(vals, stack_pop(vm));
+            }
+
+            Value structure = stack_pop(vm);
+
+            for ( int i = 0; i < num_fields; ++i ) {
+                Obj_Struct_Field *field = ((Obj_Struct_Field *)vals[i].obj_val);
+                table_set(((Obj_Struct *)structure.obj_val)->fields, field->name, field->default_value);
+            }
+        } break;
+
+        case BYTECODEOP_STRUCT_FIELD: {
+            Value val = stack_pop(vm);
+            Value field = stack_pop(vm);
+
+            ((Obj_Struct_Field *)field.obj_val)->default_value = val;
+            stack_push(vm, field);
         } break;
 
         default: {

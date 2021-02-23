@@ -91,6 +91,7 @@ enum Type_Kind {
     TYPE_PROC,
     TYPE_ARRAY,
     TYPE_NAMESPACE,
+    TYPE_VARARG,
 };
 
 struct Type {
@@ -160,6 +161,7 @@ Type *type_f64;
 Type *type_bool;
 Type *type_typeid;
 Type *type_string;
+Type *type_vararg;
 
 Resolved_Stmt *
 resolved_stmt(Stmt *stmt, Sym *sym, Type *type, Operand *operand) {
@@ -630,8 +632,13 @@ resolve_expr(Expr *expr) {
             assert(op->type && op->type->kind == TYPE_PROC);
 
             for ( uint32_t i = 0; i < ((Type_Proc *)op->type)->num_params; ++i ) {
-                Operand    *arg   = resolve_expr(AS_CALL(expr)->args[i]);
                 Proc_Param *param = ((Type_Proc *)op->type)->params[i];
+
+                if ( param->type == type_vararg ) {
+                    break;
+                }
+
+                Operand    *arg   = resolve_expr(AS_CALL(expr)->args[i]);
 
                 operand_cast(param->type, arg);
                 if ( param->type != arg->type ) {
@@ -699,6 +706,10 @@ resolve_typespec(Typespec *t) {
             Operand *op = resolve_expr(typespec->num_elems);
             /* @AUFGABE: den wert 1 mit dem wert aus op ersetzen */
             result = type_array(resolve_typespec(typespec->base), 1);
+        } break;
+
+        case TYPESPEC_VARARG: {
+            result = type_vararg;
         } break;
 
         case TYPESPEC_PROC: {
@@ -1265,6 +1276,7 @@ resolver_init() {
     type_bool   = type_new(1, TYPE_BOOL);
     type_typeid = type_new(4, TYPE_TYPEID);
     type_string = type_new(type_u32->size + PTR_SIZE, TYPE_STRING); // bytegröße (int) + zeiger zu daten
+    type_vararg = type_new(0, TYPE_VARARG);
 
     sym_push_sys("void",   type_void);
     sym_push_sys("u8",     type_u8);

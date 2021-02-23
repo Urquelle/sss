@@ -3,6 +3,7 @@ char *keyword_api;
 char *keyword_as;
 char *keyword_break;
 char *keyword_const;
+char *keyword_defer;
 char *keyword_free;
 char *keyword_else;
 char *keyword_enum;
@@ -256,6 +257,7 @@ enum Stmt_Kind {
     STMT_ASSIGN,
     STMT_BLOCK,
     STMT_DECL,
+    STMT_DEFER,
     STMT_EXPR,
     STMT_FOR,
     STMT_IF,
@@ -296,6 +298,11 @@ struct Stmt_If : Stmt {
     Expr *cond;
     Stmt *stmt;
     Stmt_If *stmt_else;
+};
+
+#define AS_DEFER(Stmt) ((Stmt_Defer *)(Stmt))
+struct Stmt_Defer : Stmt {
+    Stmt *stmt;
 };
 
 #define AS_FOR(Stmt) ((Stmt_For *)(Stmt))
@@ -462,6 +469,7 @@ enum Typespec_Kind {
     TYPESPEC_ARRAY,
     TYPESPEC_NAME,
     TYPESPEC_PROC,
+    TYPESPEC_VARARG,
 };
 struct Typespec : Ast_Elem {
     Typespec_Kind   kind;
@@ -1263,6 +1271,15 @@ stmt_decl(Ast_Elem *loc, Decl *decl) {
     return result;
 }
 
+Stmt_Defer *
+stmt_defer(Ast_Elem *loc, Stmt *stmt) {
+    STRUCTK(Stmt_Defer, STMT_DEFER);
+
+    result->stmt = stmt;
+
+    return result;
+}
+
 Stmt_Assign *
 stmt_assign(Ast_Elem *loc, Expr *lhs, Token *op, Expr *rhs) {
     STRUCTK(Stmt_Assign, STMT_ASSIGN);
@@ -1429,6 +1446,13 @@ typespec_ptr(Ast_Elem *loc, Typespec *base) {
     return result;
 }
 
+Typespec *
+typespec_vararg(Ast_Elem *loc) {
+    STRUCTK(Typespec, TYPESPEC_VARARG);
+
+    return result;
+}
+
 Typespec_Array *
 typespec_array(Ast_Elem *loc, Typespec *base, Expr *num_elems) {
     STRUCTK(Typespec_Array, TYPESPEC_ARRAY);
@@ -1463,6 +1487,8 @@ parse_typespec(Token_List *tokens) {
     if ( curr->kind == T_ASTERISK ) {
         token_eat(tokens);
         result = typespec_ptr(curr, parse_typespec(tokens));
+    } else if ( token_match(tokens, T_ELLIPSIS) ) {
+        result = typespec_vararg(curr);
     } else if ( curr->kind == T_LBRACKET ) {
         token_eat(tokens);
         Expr *num_elems = NULL;
@@ -1807,6 +1833,15 @@ parse_stmt_for(Token_List *tokens) {
     return stmt_for(curr, it, cond, stmt, stmt_else);
 }
 
+Stmt_Defer *
+parse_stmt_defer(Token_List *tokens) {
+    Token *curr = token_get(tokens);
+
+    Stmt_Defer *result = stmt_defer(curr, parse_stmt(tokens));
+
+    return result;
+}
+
 Stmt_Ret *
 parse_stmt_ret(Token_List *tokens) {
     Token *curr = token_get(tokens);
@@ -2036,6 +2071,8 @@ parse_stmt(Token_List *tokens) {
                     result = parse_stmt_ret(tokens);
                 } else if ( keyword->val == keyword_while ) {
                     result = parse_stmt_while(tokens);
+                } else if ( keyword->val == keyword_defer ) {
+                    result = parse_stmt_defer(tokens);
                 } else if ( keyword->val == keyword_match ) {
                     result = parse_stmt_match(tokens);
                 }
@@ -2074,6 +2111,7 @@ parse(Token_List *tokens) {
     KEYWORD(as);
     KEYWORD(break);
     KEYWORD(const);
+    KEYWORD(defer);
     KEYWORD(enum);
     KEYWORD(else);
     KEYWORD(export);
