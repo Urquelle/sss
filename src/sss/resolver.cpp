@@ -779,14 +779,19 @@ resolve_decl_var(Decl *decl) {
     Type *type = resolve_typespec(AS_VAR(decl)->typespec);
     Operand *op = resolve_expr(AS_VAR(decl)->expr);
 
+    if ( !type && !op ) {
+        assert(!"unbekannter datentyp");
+    }
+
     if ( !type ) {
         type = op->type;
     }
 
-    /* @AUFGABE: prüfen ob type aus dem typespec und dem op passen */
-    operand_cast(type, op);
-    if ( type != op->type ) {
-        assert(!"typespec stimmt mit dem zugewiesenem datentyp nicht überein");
+    if ( op ) {
+        operand_cast(type, op);
+        if ( type != op->type ) {
+            assert(!"typespec stimmt mit dem zugewiesenem datentyp nicht überein");
+        }
     }
 
     type_complete(type);

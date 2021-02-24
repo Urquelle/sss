@@ -62,6 +62,7 @@ int main(int argc, char* argv[]) {
         os_file_read(argv[1], &content);
 
         resolver_init();
+
         auto tokens   = tokenize(argv[1], content);
         auto parsed   = parse(&tokens);
         auto resolved = resolve(parsed);

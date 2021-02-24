@@ -6,7 +6,7 @@ namespace Urq { namespace Sss {
 #include "lex.cpp"
 #include "parser.cpp"
 #include "resolver.cpp"
-#include "bc.cpp"
+#include "bytecode.cpp"
 
 void sss_repl() {
     char buf[1000];

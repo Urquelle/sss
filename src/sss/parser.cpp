@@ -214,8 +214,9 @@ struct Expr_Call : Expr {
 
 #define AS_FIELD(Expr) ((Expr_Field *)(Expr))
 struct Expr_Field : Expr {
-    Expr *base;
-    char *field;
+    Expr     * base;
+    char     * field;
+    uint32_t   len;
 };
 
 #define AS_INDEX(Expr) ((Expr_Index *)(Expr))
@@ -377,6 +378,7 @@ struct Enum_Field : Ast_Elem {
 
 struct Struct_Field : Ast_Elem {
     char     * name;
+    uint32_t   len;
     Sym      * sym;
     Type     * type;
     Typespec * typespec;
@@ -476,9 +478,11 @@ struct Typespec : Ast_Elem {
     Type          * type;
 };
 
+#define AS_NAME(Typespec) ((Typespec_Name *)(Typespec))
 struct Typespec_Name : Typespec {
-    char * name;
-    Sym  * sym;
+    char     * name;
+    uint32_t   len;
+    Sym      * sym;
 };
 
 struct Typespec_Ptr : Typespec {
@@ -499,6 +503,7 @@ struct Typespec_Proc : Typespec {
 
 struct Proc_Param {
     char     * name;
+    uint32_t   len;
     Sym      * sym;
     Typespec * typespec;
     Type     * type;
@@ -803,6 +808,7 @@ expr_field(Ast_Elem *loc, Expr *base, char *field) {
 
     result->base  = base;
     result->field = field;
+    result->len   = (uint32_t)utf8_str_size(field);
 
     return result;
 }
@@ -1146,6 +1152,7 @@ struct_field(Ast_Elem *loc, char *name, Typespec *typespec, Expr *default_value)
     STRUCT(Struct_Field);
 
     result->name          = name;
+    result->len           = (uint32_t)utf8_str_size(name);
     result->typespec      = typespec;
     result->default_value = default_value;
     result->type          = NULL;
@@ -1182,6 +1189,7 @@ decl_const(Ast_Elem *loc, char *name, Typespec *typespec, Expr *expr) {
     STRUCTK(Decl_Const, DECL_CONST);
 
     result->name     = name;
+    result->len      = (uint32_t)utf8_str_size(name);
     result->typespec = typespec;
     result->expr     = expr;
 
@@ -1193,6 +1201,7 @@ decl_enum(Ast_Elem *loc, char *name, Enum_Fields fields, size_t num_fields) {
     STRUCTK(Decl_Enum, DECL_ENUM);
 
     result->name       = name;
+    result->len        = (uint32_t)utf8_str_size(name);
     result->fields     = (Enum_Fields)MEMDUP(fields);
     result->num_fields = num_fields;
 
@@ -1204,6 +1213,7 @@ decl_struct(Ast_Elem *loc, char *name, Struct_Fields fields, size_t num_fields) 
     STRUCTK(Decl_Struct, DECL_STRUCT);
 
     result->name       = name;
+    result->len        = (uint32_t)utf8_str_size(name);
     result->fields     = (Struct_Fields)MEMDUP(fields);
     result->num_fields = num_fields;
 
@@ -1228,6 +1238,7 @@ decl_api(Ast_Elem *loc, char *name, Decls decls, size_t num_decls) {
     STRUCTK(Decl_Api, DECL_API);
 
     result->name      = name;
+    result->len       = (uint32_t)utf8_str_size(name);
     result->decls     = decls;
     result->num_decls = num_decls;
 
@@ -1239,6 +1250,7 @@ decl_impl(Ast_Elem *loc, char *name, Exprs exprs, size_t num_exprs, Stmt *block)
     STRUCTK(Decl_Impl, DECL_IMPL);
 
     result->name      = name;
+    result->len       = (uint32_t)utf8_str_size(name);
     result->exprs     = (Exprs)MEMDUP(exprs);
     result->num_exprs = num_exprs;
     result->block     = block;
@@ -1394,6 +1406,7 @@ proc_param(char *name, Typespec *typespec, Expr *default_value = NULL) {
     Proc_Param *result = urq_allocs(Proc_Param);
 
     result->name     = name;
+    result->len      = (uint32_t)utf8_str_size(name);
     result->typespec = typespec;
     result->type     = NULL;
 
@@ -1433,6 +1446,7 @@ typespec_name(Ast_Elem *loc, char *name) {
     STRUCTK(Typespec_Name, TYPESPEC_NAME);
 
     result->name = name;
+    result->len  = (uint32_t)utf8_str_size(name);
 
     return result;
 }
@@ -1774,8 +1788,11 @@ parse_stmt_decl(Token_List *tokens, char *name) {
             decl = parse_decl_impl(tokens, name);
         }
     } else {
-        token_expect(tokens, T_EQL_ASSIGN);
-        Expr *expr = parse_expr(tokens, true);
+        Expr *expr = NULL;
+        if ( token_match(tokens, T_EQL_ASSIGN) ) {
+            expr = parse_expr(tokens, true);
+        }
+
         token_expect(tokens, T_SEMICOLON);
         decl = decl_var(curr, name, typespec, expr);
     }
