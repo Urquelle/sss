@@ -1,8 +1,16 @@
 Vec3 :: struct {
-    x: s32 = 5;
+    x, y, z: s32 = 5;
+}
+
+Widget :: struct {
+    pos: Vec3;
+    vel: Vec3 = { 7, 8, 9 };
 }
 
 a : u32;
 b := a;
-c : Vec3;
+c := Vec3;
 d := c.x;
+e : Widget;
+f := e.pos.x;
+g := e.vel.x;

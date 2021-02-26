@@ -5,11 +5,11 @@ struct Table;
 
 #define IS_STRUCT(Value) (((Value).kind == VAL_OBJ) && ((Value).obj_val->kind == OBJ_STRUCT))
 
-#define VALUES   \
-    X(VAL_NONE)  \
-    X(VAL_INT)   \
-    X(VAL_FLOAT) \
-    X(VAL_BOOL)  \
+#define VALUES      \
+    X(VAL_NONE)     \
+    X(VAL_INT)      \
+    X(VAL_FLOAT)    \
+    X(VAL_BOOL)     \
     X(VAL_OBJ)
 
 enum Value_Kind {
@@ -29,12 +29,15 @@ struct Value {
     };
 };
 
+typedef Value* Values;
+
 #define OBJECTS         \
     X(OBJ_STRING)       \
     X(OBJ_RANGE)        \
     X(OBJ_PROC)         \
     X(OBJ_ITER)         \
     X(OBJ_STRUCT)       \
+    X(OBJ_COMPOUND)     \
     X(OBJ_STRUCT_FIELD)
 
 enum Obj_Kind {
@@ -51,6 +54,11 @@ struct Obj_String : Obj {
     uint32_t   size;
     char     * ptr;
     uint32_t   hash;
+};
+
+struct Obj_Compound : Obj {
+    Values   elems;
+    uint32_t num_elems;
 };
 
 struct Obj_Proc : Obj {
@@ -72,16 +80,15 @@ struct Obj_Iter : Obj {
 };
 
 struct Obj_Struct : Obj {
-    Obj_String * name;
-    Table      * fields;
+    Obj_String *  name;
+    Table      *  fields;
+    Obj_String ** fieldnames_ordered;
 };
 
 struct Obj_Struct_Field : Obj {
     Obj_String * name;
     Value        default_value;
 };
-
-typedef Value* Values;
 
 void               bytecode_stmt(Bytecode *bc, Stmt *stmt);
 void               bytecode_init(Bytecode *bc);
@@ -150,7 +157,8 @@ struct Bytecode {
     X(BYTECODEOP_JMP)               \
     X(BYTECODEOP_JMP_FALSE)         \
     X(BYTECODEOP_CMP_LT)            \
-    X(BYTECODEOP_PRINT)             \
+    X(BYTECODEOP_COMPOUND)          \
+    X(BYTECODEOP_NAMED_COMPOUND)    \
     X(BYTECODEOP_RANGE)             \
     X(BYTECODEOP_STRUCT)            \
     X(BYTECODEOP_STRUCT_FIELD)      \
@@ -549,6 +557,17 @@ obj_string(char *ptr, uint32_t size) {
     return result;
 }
 
+Obj_Compound *
+obj_compound(Values elems, uint32_t num_elems) {
+    Obj_Compound *result = urq_allocs(Obj_Compound);
+
+    result->kind      = OBJ_COMPOUND;
+    result->elems     = elems;
+    result->num_elems = num_elems;
+
+    return result;
+}
+
 Obj_Range *
 obj_range(Value left, Value right) {
     Obj_Range *result = urq_allocs(Obj_Range);
@@ -601,6 +620,7 @@ obj_struct(Obj_String *name) {
     result->kind   = OBJ_STRUCT;
     result->name   = name;
     result->fields = table_new();
+    result->fieldnames_ordered = NULL;
 
     return result;
 }
@@ -628,6 +648,17 @@ obj_print(Obj *obj) {
             printf("]..[right: ");
             val_print(((Obj_Range *)obj)->right);
             printf("])");
+        } break;
+
+        case OBJ_COMPOUND: {
+            Obj_Compound *c = ((Obj_Compound *)obj);
+            printf("(compound: ");
+            for ( uint32_t i = 0; i < c->num_elems; ++i ) {
+                printf("[%01d: ", i);
+                val_print(c->elems[i]);
+                printf("]");
+            }
+            printf(")\n");
         } break;
 
         case OBJ_PROC: {
@@ -715,6 +746,13 @@ val_obj(Obj *val) {
 Value
 val_str(char *ptr, uint32_t size) {
     Value result = val_obj(obj_string(ptr, size));
+
+    return result;
+}
+
+Value
+val_compound(Values elems, uint32_t num_elems) {
+    Value result = val_obj(obj_compound(elems, num_elems));
 
     return result;
 }
@@ -1053,6 +1091,10 @@ bytecode_debug(Vm *vm, int32_t code) {
             printf("]\n");
         } break;
 
+        case BYTECODEOP_COMPOUND: {
+            printf("OP_COMPOUND\n");
+        } break;
+
         case BYTECODEOP_INIT_LOOP: {
             printf("OP_INIT_LOOP [loop var: ");
             val_print(value_get(&frame->proc->bc->constants, *(uint16_t *)(frame->proc->bc->code + frame->pc)));
@@ -1184,6 +1226,20 @@ bytecode_expr(Bytecode *bc, Expr *expr, uint32_t flags = BYTECODEFLAG_NONE) {
 
             bytecode_write8(bc, BYTECODEOP_CONST);
             bytecode_write16(bc, (uint16_t)index);
+        } break;
+
+        case EXPR_COMPOUND: {
+            if ( AS_COMPOUND(expr)->elems[0]->name == NULL ) {
+                for ( int i = 0; i < AS_COMPOUND(expr)->num_elems; ++i ) {
+                    bytecode_expr(bc, AS_COMPOUND(expr)->elems[i]->value);
+                }
+
+                bytecode_write8(bc, BYTECODEOP_COMPOUND);
+                bytecode_write16(bc, (uint16_t)AS_COMPOUND(expr)->num_elems);
+            } else {
+                assert(!"benamtes compound implementieren");
+                bytecode_write8(bc, BYTECODEOP_NAMED_COMPOUND);
+            }
         } break;
 
         case EXPR_FIELD: {
@@ -1357,6 +1413,12 @@ bytecode_decl(Bytecode *bc, Decl *decl) {
                     bytecode_write8(bc, BYTECODEOP_PUSH);
                     bytecode_write16(bc, (uint16_t)field_index);
                 // }
+
+                if ( field->typespec ) {
+                    bytecode_typespec(bc, field->typespec);
+                } else {
+                    bytecode_write8(bc, BYTECODEOP_NONE);
+                }
 
                 // feldwert generieren {
                     if ( field->default_value ) {
@@ -1808,11 +1870,6 @@ step(Vm *vm) {
             stack_push(vm, left < right);
         } break;
 
-        case BYTECODEOP_PRINT: {
-            Value val = stack_pop(vm);
-            val_print(val);
-        } break;
-
         case BYTECODEOP_INC: {
             int32_t index = bytecode_read16(vm);
             Value val = value_get(&frame->proc->bc->constants, index);
@@ -1824,6 +1881,17 @@ step(Vm *vm) {
             Value left  = stack_pop(vm);
 
             stack_push(vm, val_range(left, right));
+        } break;
+
+        case BYTECODEOP_COMPOUND: {
+            int32_t num_vals = bytecode_read16(vm);
+
+            Values vals = NULL;
+            for ( int i = 0; i < num_vals; ++i ) {
+                buf_push(vals, stack_pop(vm));
+            }
+
+            stack_push(vm, val_compound(vals, num_vals));
         } break;
 
         case BYTECODEOP_HLT: {
@@ -1877,6 +1945,7 @@ step(Vm *vm) {
             for ( int i = 0; i < num_fields; ++i ) {
                 Obj_Struct_Field *field = ((Obj_Struct_Field *)vals[i].obj_val);
                 table_set(((Obj_Struct *)structure.obj_val)->fields, field->name, field->default_value);
+                buf_push(((Obj_Struct *)structure.obj_val)->fieldnames_ordered, field->name);
             }
         } break;
 
@@ -1893,10 +1962,25 @@ step(Vm *vm) {
         } break;
 
         case BYTECODEOP_STRUCT_FIELD: {
-            Value val = stack_pop(vm);
+            Value default_val = stack_pop(vm);
+            Value type_val = stack_pop(vm);
             Value field = stack_pop(vm);
 
-            ((Obj_Struct_Field *)field.obj_val)->default_value = val;
+            Value val     = (default_val.kind == VAL_NONE) ? type_val : default_val;
+            Value new_val = val;
+
+            if ( val.kind == VAL_OBJ && val.obj_val->kind == OBJ_COMPOUND ) {
+                Obj_Compound * compound  = ((Obj_Compound *)val.obj_val);
+                Obj_Struct   * structure = (Obj_Struct *)type_val.obj_val;
+                               new_val   = val_struct(((Obj_String *)structure->name)->ptr, ((Obj_String *)structure->name)->size);
+
+                for ( uint32_t i = 0; i < compound->num_elems; ++i ) {
+                    Value compound_val = compound->elems[i];
+                    table_set(((Obj_Struct *)new_val.obj_val)->fields, structure->fieldnames_ordered[i], compound_val);
+                }
+            }
+
+            ((Obj_Struct_Field *)field.obj_val)->default_value = new_val;
             stack_push(vm, field);
         } break;
 
@@ -1926,14 +2010,16 @@ void eval(Bytecode *bc) {
 
 void
 bytecode_init(Bytecode *bc) {
-#define REGISTER_TYPE(Val, Name, Size)                            \
-    do {                                                          \
-        int32_t index = bytecode_push_constant(bc, Val);          \
-        bytecode_write8(bc, BYTECODEOP_CONST);                    \
-        bytecode_write16(bc, (uint16_t)index);                    \
-        index = bytecode_push_constant(bc, val_str(Name, Size));  \
-        bytecode_write8(bc, BYTECODEOP_PUSH_SYSSYM);              \
-        bytecode_write16(bc, (uint16_t)index);                    \
+#define REGISTER_TYPE(Val, Name, Size)                                                 \
+    do {                                                                               \
+            Bytecode_Scope *prev_scope = bc_curr_scope;                                \
+            bc_curr_scope = &bc_sys_scope;                                             \
+            int32_t index = bytecode_push_constant(bc, val_str(Name, Size));           \
+            Obj_String *name = as_str(value_get(&bc->constants, index));               \
+            if ( !bytecode_sym_set(name, Val) ) {                                      \
+                assert(!"symbol konnte nicht gesetzt werden");                         \
+            }                                                                          \
+            bc_curr_scope = prev_scope;                                                \
     } while(0)
 
     REGISTER_TYPE(val_none(),      "void",   4);
@@ -1953,4 +2039,5 @@ bytecode_init(Bytecode *bc) {
 #if 0
     sym_push_sys("typeid", type_typeid);
 #endif
+#undef REGISTER_TYPE
 }

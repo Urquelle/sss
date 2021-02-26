@@ -91,6 +91,7 @@ enum Type_Kind {
     TYPE_PROC,
     TYPE_ARRAY,
     TYPE_NAMESPACE,
+    TYPE_COMPOUND,
     TYPE_VARARG,
 };
 
@@ -113,6 +114,11 @@ struct Type_Ptr : Type {
 struct Type_Array : Type {
     Type   * base;
     size_t   num_elems;
+};
+
+struct Type_Compound : Type {
+    Compound_Elems elems;
+    uint32_t       num_elems;
 };
 
 struct Type_Field {
@@ -204,8 +210,26 @@ type_incomplete_struct(Sym *sym) {
 }
 
 Type *
-type_namespace() {
+type_namespace(char *name) {
     Type *result = type_new(0, TYPE_NAMESPACE);
+
+    result->name = name;
+
+    return result;
+}
+
+Type_Compound *
+type_compound(Compound_Elems elems, uint32_t num_elems) {
+    Type_Compound *result = urq_allocs(Type_Compound);
+
+    result->kind      = TYPE_COMPOUND;
+    result->sym       = NULL;
+    result->size      = 0;
+    result->align     = 0;
+    result->id        = type_id++;
+    result->scope     = NULL;
+    result->elems     = elems;
+    result->num_elems = num_elems;
 
     return result;
 }
@@ -553,7 +577,7 @@ resolve_name(char *name) {
 }
 
 Operand *
-resolve_expr(Expr *expr) {
+resolve_expr(Expr *expr, Type *given_type = NULL) {
     Operand *result = NULL;
 
     if ( !expr ) {
@@ -589,6 +613,7 @@ resolve_expr(Expr *expr) {
         } break;
 
         case EXPR_KEYWORD: {
+            assert(!"schlüsselwort");
         } break;
 
         case EXPR_BIN: {
@@ -638,7 +663,7 @@ resolve_expr(Expr *expr) {
                     break;
                 }
 
-                Operand    *arg   = resolve_expr(AS_CALL(expr)->args[i]);
+                Operand *arg = resolve_expr(AS_CALL(expr)->args[i]);
 
                 operand_cast(param->type, arg);
                 if ( param->type != arg->type ) {
@@ -661,7 +686,34 @@ resolve_expr(Expr *expr) {
         } break;
 
         case EXPR_COMPOUND: {
-            assert(!"in arbeit");
+            assert(given_type);
+            assert(given_type->kind == TYPE_STRUCT);
+
+            if ( ((Type_Struct *)given_type)->num_fields != AS_COMPOUND(expr)->num_elems ) {
+                assert(!"falsche anzahl der argumente");
+            }
+
+            Compound_Elems args = NULL;
+            for ( int i = 0; i < ((Type_Struct *)given_type)->num_fields; ++i ) {
+                Struct_Field  * struct_field = ((Type_Struct *)given_type)->fields[i];
+                Compound_Elem * arg          = AS_COMPOUND(expr)->elems[i];
+
+                if ( arg->name ) {
+                    assert(!"unbehandelter fall");
+                } else {
+                    Operand *operand = resolve_expr(arg->value);
+                    operand_cast(struct_field->type, operand);
+
+                    if ( struct_field->type != operand->type ) {
+                        assert(!"falschen datentyp übergeben");
+                    }
+
+                    arg->type = struct_field->type;
+                    buf_push(args, arg);
+                }
+            }
+
+            result = operand(type_compound(args, (uint32_t)buf_len(args)));
         } break;
 
         default: {
@@ -981,7 +1033,7 @@ resolve_directive(Directive *dir) {
 
             Scope *push_scope = curr_scope;
             if ( AS_IMPORT(dir)->scope_name ) {
-                Type *type = type_namespace();
+                Type *type = type_namespace(AS_IMPORT(dir)->scope_name);
                 Sym *sym   = sym_push_namespace(AS_IMPORT(dir)->scope_name, type);
 
                 type->sym = sym;
@@ -1092,7 +1144,11 @@ type_complete_struct(Type_Struct *type) {
 
         Operand *operand = NULL;
         if ( field->default_value ) {
-            operand = resolve_expr(field->default_value);
+            operand = resolve_expr(field->default_value, field_type);
+        }
+
+        if ( !field_type ) {
+            assert(operand && operand->type);
             field_type = operand->type;
         }
 

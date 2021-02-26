@@ -522,7 +522,8 @@ struct Compound_Elem {
     char     * name;
     Sym      * sym;
     Typespec * typespec;
-    Expr     * default_value;
+    Type     * type;
+    Expr     * value;
 };
 
 struct Parsed_File {
@@ -693,6 +694,18 @@ keyword_expect(Token_List *tokens, char *keyword) {
         assert(!"keyword erwartet");
         return;
     }
+}
+
+Compound_Elem *
+compound_elem(Ast_Elem *loc, char *name, Typespec *typespec, Expr *value) {
+    Compound_Elem *result = urq_allocs(Compound_Elem);
+
+    result->name     = name;
+    result->typespec = typespec;
+    result->type     = NULL;
+    result->value    = value;
+
+    return result;
 }
 
 Note *
@@ -938,6 +951,7 @@ parse_expr_base(Token_List *tokens) {
 
         if ( !token_is(tokens, T_RBRACE) ) {
             do {
+#if 0
                 char *name = NULL;
                 Typespec *typespec = NULL;
                 Expr *value = NULL;
@@ -958,6 +972,29 @@ parse_expr_base(Token_List *tokens) {
                 }
 
                 token_match(tokens, T_COMMA);
+#else
+                curr                = token_get(tokens);
+                char     * name     = NULL;
+                Typespec * typespec = NULL;
+                Expr     * value    = parse_expr(tokens);
+
+                if ( token_match(tokens, T_COLON) ) {
+                    assert(value->kind == EXPR_IDENT);
+                    name     = AS_IDENT(value)->val;
+                    value    = NULL;
+                    typespec = parse_typespec(tokens);
+                }
+
+                if ( token_match(tokens, T_EQL_ASSIGN) ) {
+                    assert(value->kind == EXPR_IDENT);
+                    name  = AS_IDENT(value)->val;
+                    value = parse_expr(tokens);
+                }
+
+                token_match(tokens, T_COMMA);
+
+                buf_push(elems, compound_elem(curr, name, typespec, value));
+#endif
             } while ( !token_is(tokens, T_RBRACE) );
         }
 
