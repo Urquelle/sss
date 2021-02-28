@@ -612,6 +612,15 @@ resolve_expr(Expr *expr, Type *given_type = NULL) {
             result = operand(sym->type);
         } break;
 
+        case EXPR_CAST: {
+            Operand *type_to_cast_to = resolve_expr(AS_CAST(expr)->type);
+            Operand *type_to_cast    = resolve_expr(AS_CAST(expr)->expr);
+
+            /* @AUFGABE: überprüfen ob der datentyp umgewandelt werden darf/kann */
+
+            result = type_to_cast_to;
+        } break;
+
         case EXPR_KEYWORD: {
             assert(!"schlüsselwort");
         } break;
@@ -980,7 +989,22 @@ resolve_stmt(Stmt *stmt) {
 
         case STMT_MATCH: {
             /* @AUFGABE: match kann result setzen */
-            assert(!"in arbeit");
+            Operand *op = resolve_expr(AS_MATCH(stmt)->expr);
+
+            for ( int i = 0; i < AS_MATCH(stmt)->num_lines; ++i ) {
+                Match_Line *line = AS_MATCH(stmt)->lines[i];
+
+                Operand *res_op = resolve_expr(line->resolution);
+
+                operand_cast(op->type, res_op);
+                if ( op->type != res_op->type ) {
+                    assert(!"falscher datentyp");
+                }
+
+                resolve_stmt(line->stmt);
+            }
+
+            buf_push(result, resolved_stmt(stmt, NULL, NULL, NULL));
         } break;
 
         case STMT_RET: {

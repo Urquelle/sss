@@ -2,6 +2,7 @@ char **keywords;
 char *keyword_api;
 char *keyword_as;
 char *keyword_break;
+char *keyword_cast;
 char *keyword_const;
 char *keyword_defer;
 char *keyword_free;
@@ -115,7 +116,7 @@ enum Expr_Kind {
     EXPR_NEW,
     EXPR_RUN,
     EXPR_KEYWORD,
-
+    EXPR_CAST,
     EXPR_BIN,
     EXPR_FIELD,
     EXPR_INDEX,
@@ -173,6 +174,12 @@ struct Expr_Run : Expr {
 struct Expr_Keyword : Expr {
     Sym  * sym;
     char * val;
+};
+
+#define AS_CAST(Expr) ((Expr_Cast *)(Expr))
+struct Expr_Cast : Expr {
+    Expr *type;
+    Expr *expr;
 };
 
 enum Op_Kind {
@@ -350,7 +357,6 @@ struct Directive_Load : Directive {
 };
 
 struct Match_Line : Ast_Elem {
-    char *ident;
     Expr *resolution;
     Stmt *stmt;
 };
@@ -718,6 +724,19 @@ note_create(Ast_Elem *loc, Exprs exprs, size_t num_exprs) {
     return result;
 }
 /* expr {{{ */
+void
+expr_print(Expr *expr) {
+    switch ( expr->kind ) {
+        case EXPR_INT: {
+            printf("%lld", AS_INT(expr)->val);
+        } break;
+
+        default: {
+            assert(!"unbekannter ausdruck");
+        } break;
+    }
+}
+
 Expr_Int *
 expr_int(Ast_Elem *loc, int64_t val) {
     STRUCTK(Expr_Int, EXPR_INT);
@@ -884,6 +903,16 @@ expr_stmt(Ast_Elem *loc, Stmt *stmt) {
     return result;
 }
 
+Expr_Cast *
+expr_cast(Ast_Elem *loc, Expr *type, Expr *expr) {
+    STRUCTK(Expr_Cast, EXPR_CAST);
+
+    result->type = type;
+    result->expr = expr;
+
+    return result;
+}
+
 Expr *
 parse_expr_tuple(Token_List *tokens) {
     Token *curr = token_get(tokens);
@@ -909,6 +938,18 @@ parse_expr_ident(Token_List *tokens) {
     return AS_IDENT(expr)->val;
 }
 
+Expr_Cast *
+parse_expr_cast(Token_List *tokens) {
+    Token *curr = token_get(tokens);
+
+    token_expect(tokens, T_LPAREN);
+    Expr *type = parse_expr(tokens);
+    token_expect(tokens, T_RPAREN);
+    Expr *expr = parse_expr(tokens);
+
+    return expr_cast(curr, type, expr);
+}
+
 Expr *
 parse_expr_base(Token_List *tokens) {
     Expr *result = NULL;
@@ -931,6 +972,8 @@ parse_expr_base(Token_List *tokens) {
                 result = expr_bool(curr, true);
             } else if ( keyword_matches(tokens, keyword_new) ) {
                 result = expr_new(tokens, parse_expr(tokens));
+            } else if ( keyword_matches(tokens, keyword_cast) ) {
+                result = parse_expr_cast(tokens);
             } else {
                 Token *t = token_read(tokens);
 
@@ -951,28 +994,6 @@ parse_expr_base(Token_List *tokens) {
 
         if ( !token_is(tokens, T_RBRACE) ) {
             do {
-#if 0
-                char *name = NULL;
-                Typespec *typespec = NULL;
-                Expr *value = NULL;
-
-                Token *first = token_get(tokens);
-                Token *next  = token_peek(tokens);
-
-                if ( next->kind == T_COLON ) {
-                    name = next->val_str;
-                    token_eat(tokens);
-                    typespec = parse_typespec(tokens);
-                } else {
-                    typespec = parse_typespec(tokens);
-                }
-
-                if ( token_match(tokens, T_EQL_ASSIGN) ) {
-                    value = parse_expr(tokens);
-                }
-
-                token_match(tokens, T_COMMA);
-#else
                 curr                = token_get(tokens);
                 char     * name     = NULL;
                 Typespec * typespec = NULL;
@@ -994,7 +1015,6 @@ parse_expr_base(Token_List *tokens) {
                 token_match(tokens, T_COMMA);
 
                 buf_push(elems, compound_elem(curr, name, typespec, value));
-#endif
             } while ( !token_is(tokens, T_RBRACE) );
         }
 
@@ -1152,12 +1172,11 @@ proc_sign(Ast_Elem *loc, Proc_Params params, uint32_t num_params, Proc_Params re
 }
 
 Match_Line *
-match_line(Ast_Elem *loc, char *ident, Expr *resolution, Stmt *stmt) {
+match_line(Ast_Elem *loc, Expr *resolution, Stmt *stmt) {
     STRUCT(Match_Line);
 
-    result->ident = ident;
     result->resolution = resolution;
-    result->stmt = stmt;
+    result->stmt       = stmt;
 
     return result;
 }
@@ -1921,6 +1940,7 @@ parse_stmt_match(Token_List *tokens) {
 
     if ( !token_is(tokens, T_RBRACE) ) {
         do {
+#if 0
             Token *ident = token_read(tokens);
             assert(ident->kind == T_IDENT);
 
@@ -1936,6 +1956,13 @@ parse_stmt_match(Token_List *tokens) {
             buf_push(lines, match_line(ident, ident->val_str, resolution, stmt));
 
             token_match(tokens, T_COMMA);
+#else
+            Expr *resolution = parse_expr(tokens);
+            token_expect(tokens, T_FAT_ARROW);
+            Stmt *stmt = parse_stmt(tokens);
+
+            buf_push(lines, match_line(resolution, resolution, stmt));
+#endif
         } while ( !token_is(tokens, T_RBRACE) );
     }
 
@@ -2164,6 +2191,7 @@ parse(Token_List *tokens) {
     KEYWORD(api);
     KEYWORD(as);
     KEYWORD(break);
+    KEYWORD(cast);
     KEYWORD(const);
     KEYWORD(defer);
     KEYWORD(enum);

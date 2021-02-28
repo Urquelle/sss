@@ -156,9 +156,11 @@ struct Bytecode {
     X(BYTECODEOP_INC)               \
     X(BYTECODEOP_JMP)               \
     X(BYTECODEOP_JMP_FALSE)         \
+    X(BYTECODEOP_CAST)              \
     X(BYTECODEOP_CMP_LT)            \
     X(BYTECODEOP_COMPOUND)          \
     X(BYTECODEOP_NAMED_COMPOUND)    \
+    X(BYTECODEOP_MATCH_CASE)        \
     X(BYTECODEOP_RANGE)             \
     X(BYTECODEOP_STRUCT)            \
     X(BYTECODEOP_STRUCT_FIELD)      \
@@ -941,17 +943,17 @@ operator/(Value left, Value right) {
     return val_none();
 }
 
-Value
+bool
 operator<(Value left, Value right) {
     switch ( left.kind ) {
         case VAL_INT: {
             assert(right.kind == VAL_INT);
-            return val_bool(left.int_val < right.int_val);
+            return left.int_val < right.int_val;
         } break;
 
         case VAL_FLOAT: {
             assert(right.kind == VAL_FLOAT);
-            return val_bool(left.flt_val < right.flt_val);
+            return left.flt_val < right.flt_val;
         } break;
 
         default: {
@@ -960,7 +962,175 @@ operator<(Value left, Value right) {
     }
 
     assert(0);
-    return val_none();
+    return false;
+}
+
+bool
+operator>=(float left, Value right) {
+    assert(right.kind == VAL_FLOAT);
+
+    return left >= right.flt_val;
+}
+
+bool
+operator>=(Value left, float right) {
+    assert(left.kind == VAL_FLOAT);
+
+    return left.flt_val >= right;
+}
+
+bool
+operator>=(int64_t left, Value right) {
+    assert(right.kind == VAL_INT);
+
+    return left >= right.int_val;
+}
+
+bool
+operator>=(Value left, int64_t right) {
+    assert(left.kind == VAL_INT);
+
+    return left.int_val >= right;
+}
+
+bool
+operator<=(int64_t left, Value right) {
+    assert(right.kind == VAL_INT);
+
+    return left <= right.int_val;
+}
+
+bool
+operator<=(Value left, int64_t right) {
+    assert(left.kind == VAL_INT);
+
+    return left.int_val <= right;
+}
+
+bool
+operator<=(float left, Value right) {
+    assert(right.kind == VAL_FLOAT);
+
+    return left <= right.flt_val;
+}
+
+bool
+operator<=(Value left, float right) {
+    assert(left.kind == VAL_FLOAT);
+
+    return left.flt_val <= right;
+}
+
+bool
+operator>=(Value left, Value right) {
+    switch ( left.kind ) {
+        case VAL_INT: {
+            assert(right.kind == VAL_INT);
+
+            return left.int_val >= right.int_val;
+        } break;
+
+        default: {
+            assert(0);
+        } break;
+    }
+
+    assert(0);
+    return false;
+}
+
+bool
+operator<=(Value left, Value right) {
+    switch ( left.kind ) {
+        case VAL_INT: {
+            assert(right.kind == VAL_INT);
+
+            return left.int_val <= right.int_val;
+        } break;
+
+        default: {
+            assert(0);
+        } break;
+    }
+
+    assert(0);
+    return false;
+}
+
+bool
+operator!=(Value left, Value right) {
+    switch ( left.kind ) {
+        case VAL_INT: {
+            switch ( right.kind ) {
+                case VAL_INT: {
+                    return left.int_val != right.int_val;
+                } break;
+
+                case VAL_FLOAT: {
+                    return left.int_val != right.flt_val;
+                } break;
+
+                case VAL_OBJ: {
+                    assert(right.obj_val->kind == OBJ_RANGE);
+
+                    bool gt = !(left.int_val >= ((Obj_Range *)right.obj_val)->left);
+                    bool lt = !(left.int_val <= ((Obj_Range *)right.obj_val)->right);
+                    bool result = gt || lt;
+
+                    return result;
+                } break;
+            }
+        } break;
+
+        case VAL_FLOAT: {
+            switch ( right.kind ) {
+                case VAL_INT: {
+                    return left.flt_val != right.int_val;
+                } break;
+
+                case VAL_FLOAT: {
+                    return left.flt_val != right.flt_val;
+                } break;
+
+                case VAL_OBJ: {
+                    assert(right.obj_val->kind == OBJ_RANGE);
+
+                    return left.flt_val >= ((Obj_Range *)right.obj_val)->left &&
+                           left.flt_val <= ((Obj_Range *)right.obj_val)->right;
+                } break;
+            }
+        } break;
+
+        case VAL_OBJ: {
+            assert(left.obj_val->kind == OBJ_RANGE);
+            Obj_Range *range = (Obj_Range *)left.obj_val;
+
+            switch ( right.kind ) {
+                case VAL_INT: {
+                    return range->left >= right.int_val && range->right <= right.int_val;
+                } break;
+
+                case VAL_FLOAT: {
+                    return range->left >= right.flt_val &&
+                           range->right <= right.flt_val;
+                } break;
+
+                case VAL_OBJ: {
+                    assert(left.obj_val->kind == OBJ_RANGE);
+
+                    Obj_Range *left_range = (Obj_Range *)left.obj_val;
+                    return range->left != left_range->left && range->right != left_range->right;
+                } break;
+            }
+        } break;
+
+        default: {
+            assert(0);
+        } break;
+    }
+
+    assert(0);
+    return false;
 }
 
 int32_t
@@ -1043,6 +1213,10 @@ bytecode_debug(Vm *vm, int32_t code) {
             printf("]\n");
         } break;
 
+        case BYTECODEOP_MATCH_CASE: {
+            printf("OP_MATCH_CASE\n");
+        } break;
+
         case BYTECODEOP_PUSH_SYSSYM: {
             printf("OP_PUSH_SYSSYM [index: %02d] (", frame->proc->bc->code[frame->pc]);
             val_print(bytecode_fetch_constant(frame->proc->bc, frame->proc->bc->code[frame->pc]));
@@ -1053,8 +1227,16 @@ bytecode_debug(Vm *vm, int32_t code) {
             printf("OP_PUSH_SYM ");
             val_print(bytecode_fetch_constant(frame->proc->bc, frame->proc->bc->code[frame->pc]));
             printf("[val: ");
-            val_print(vm->stack[frame->sp-1]);
+
+            Value type_val = vm->stack[frame->sp-1];
+            Value expr_val = vm->stack[frame->sp-2];
+            val_print(expr_val.kind == VAL_NONE ? type_val : expr_val);
+
             printf("]\n");
+        } break;
+
+        case BYTECODEOP_CAST: {
+            printf("OP_CAST\n");
         } break;
 
         case BYTECODEOP_LOAD_STRUCT_FIELD: {
@@ -1230,6 +1412,7 @@ bytecode_expr(Bytecode *bc, Expr *expr, uint32_t flags = BYTECODEFLAG_NONE) {
 
         case EXPR_COMPOUND: {
             if ( AS_COMPOUND(expr)->elems[0]->name == NULL ) {
+                /* @AUFGABE: alle elemente des ausdrucks durchgehen und auf den stack holen */
                 for ( int i = 0; i < AS_COMPOUND(expr)->num_elems; ++i ) {
                     bytecode_expr(bc, AS_COMPOUND(expr)->elems[i]->value);
                 }
@@ -1269,6 +1452,12 @@ bytecode_expr(Bytecode *bc, Expr *expr, uint32_t flags = BYTECODEFLAG_NONE) {
 
             int32_t index = bytecode_push_constant(bc, val_str(AS_IDENT(expr)->val, AS_IDENT(expr)->len));
             bytecode_write16(bc, (uint16_t)index);
+        } break;
+
+        case EXPR_CAST: {
+            bytecode_expr(bc, AS_CAST(expr)->type);
+            bytecode_expr(bc, AS_CAST(expr)->expr);
+            bytecode_write8(bc, BYTECODEOP_CAST);
         } break;
 
         case EXPR_CALL: {
@@ -1337,6 +1526,8 @@ bytecode_decl(Bytecode *bc, Decl *decl) {
 
             if ( AS_VAR(decl)->typespec ) {
                 bytecode_typespec(bc, AS_VAR(decl)->typespec);
+            } else {
+                bytecode_write8(bc, BYTECODEOP_NONE);
             }
 
             bytecode_write8(bc, BYTECODEOP_PUSH_SYM);
@@ -1351,6 +1542,12 @@ bytecode_decl(Bytecode *bc, Decl *decl) {
             }
 
             int32_t index = bytecode_push_constant(bc, val_str(decl->name, decl->len));
+
+            if ( AS_CONST(decl)->typespec ) {
+                bytecode_typespec(bc, AS_CONST(decl)->typespec);
+            } else {
+                bytecode_write8(bc, BYTECODEOP_NONE);
+            }
 
             bytecode_write8(bc, BYTECODEOP_PUSH_SYM);
             bytecode_write16(bc, (uint16_t)index);
@@ -1509,6 +1706,42 @@ bytecode_stmt(Bytecode *bc, Stmt *stmt) {
 
             bytecode_write8(bc, BYTECODEOP_SCOPE_LEAVE);
             bytecode_write16(bc, exit_instr, (uint16_t)exit_addr);
+        } break;
+
+        case STMT_MATCH: {
+            int32_t *exit_addrs = NULL;
+            for ( int i = 0; i < AS_MATCH(stmt)->num_lines; ++i ) {
+                Match_Line *line = AS_MATCH(stmt)->lines[i];
+
+                /* @INFO: den anfangswert auf den stack holen */
+                bytecode_expr(bc, AS_MATCH(stmt)->expr);
+
+                /* @INFO: den case wert auf den stack holen */
+                bytecode_expr(bc, line->resolution);
+
+                /* @INFO: die beiden werte vergleichen */
+                bytecode_write8(bc, BYTECODEOP_MATCH_CASE);
+                /* @INFO: platzhalter für die sprungadresse schreiben */
+                int32_t addr = bc->size;
+                bytecode_write16(bc, 0);
+
+                /* @INFO: die case anweisungen kodieren */
+                bytecode_stmt(bc, line->stmt);
+
+                /* @INFO: zum schluß ans ende der gesamten match anweisung springen */
+                bytecode_write8(bc, BYTECODEOP_JMP);
+                buf_push(exit_addrs, bc->size);
+                bytecode_write16(bc, 0);
+
+                /* @INFO: die adresse für MATCH_CASE patchen für den fall, daß die anweisung
+                 *        nicht zutrifft und zum nächsten case gesprungen werden muß
+                 */
+                bytecode_patch_jmp(bc, addr, bc->size);
+            }
+
+            for ( int i = 0; i < buf_len(exit_addrs); ++i ) {
+                bytecode_patch_jmp(bc, exit_addrs[i], bc->size);
+            }
         } break;
 
         case STMT_WHILE: {
@@ -1767,7 +2000,11 @@ step(Vm *vm) {
 
         case BYTECODEOP_PUSH_SYM: {
             Obj_String *name = as_str(value_get(&frame->proc->bc->constants, bytecode_read16(vm)));
-            Value val = stack_pop(vm);
+
+            Value type_val = stack_pop(vm);
+            Value expr_val = stack_pop(vm);
+
+            Value val = (expr_val.kind == VAL_NONE) ? type_val : expr_val;
 
             if ( !bytecode_sym_set(name, val) ) {
                 assert(!"symbol konnte nicht gesetzt werden");
@@ -1782,7 +2019,7 @@ step(Vm *vm) {
             assert(val.obj_val->kind == OBJ_RANGE);
 
             bytecode_sym_set(name, val_iter(as_range(val), as_range(val)->left));
-            stack_push(vm, as_range(val)->left < as_range(val)->right);
+            stack_push(vm, val_bool(as_range(val)->left < as_range(val)->right));
         } break;
 
         case BYTECODEOP_INC_LOOP: {
@@ -1797,7 +2034,7 @@ step(Vm *vm) {
 
             bytecode_sym_set(name, val + 1);
             Obj_Iter *iter = ((Obj_Iter *)val.obj_val);
-            Value cond = iter->iter < ((Obj_Range *)iter->range)->right;
+            Value cond = val_bool(iter->iter < ((Obj_Range *)iter->range)->right);
             stack_push(vm, cond);
         } break;
 
@@ -1867,7 +2104,7 @@ step(Vm *vm) {
             Value right = stack_pop(vm);
             Value left  = stack_pop(vm);
 
-            stack_push(vm, left < right);
+            stack_push(vm, val_bool(left < right));
         } break;
 
         case BYTECODEOP_INC: {
@@ -1902,6 +2139,15 @@ step(Vm *vm) {
             int32_t index = bytecode_read16(vm);
             Value val = value_get(&frame->proc->bc->constants, index);
             stack_push(vm, val);
+        } break;
+
+        case BYTECODEOP_CAST: {
+            Value type_to_cast    = stack_pop(vm);
+            Value type_to_cast_to = stack_pop(vm);
+
+            type_to_cast.kind = type_to_cast_to.kind;
+
+            stack_push(vm, type_to_cast);
         } break;
 
         case BYTECODEOP_POP: {
@@ -1959,6 +2205,16 @@ step(Vm *vm) {
             }
 
             stack_push(vm, type_val);
+        } break;
+
+        case BYTECODEOP_MATCH_CASE: {
+            Value   resolution = stack_pop(vm);
+            Value   expr       = stack_pop(vm);
+            int32_t addr       = bytecode_read16(vm);
+
+            if ( expr != resolution ) {
+                frame->pc = addr;
+            }
         } break;
 
         case BYTECODEOP_STRUCT_FIELD: {

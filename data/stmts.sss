@@ -1,15 +1,18 @@
 #import Sys = (print) from sys;
 
-##
 Vec3 :: struct {
     x, y, z : s32;
 }
-##)
 
 a : s32 = 5 + 3;
 b := a + 1;
 c := false;
 d : s32 = 0;
+
+match cast(u32)a {
+    1..7 => a += 1;
+       8 => a += 2;
+}
 
 while a < b {
     a += 1;

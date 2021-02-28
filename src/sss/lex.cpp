@@ -39,6 +39,7 @@ enum Token_Kind {
     T_RANGE,
     T_ELLIPSIS,
     T_ARROW,
+    T_FAT_ARROW,
 
     T_FIRST_CMP,
     T_LT = T_FIRST_CMP,
@@ -391,6 +392,9 @@ recurse:
 
             if ( AT(0) && AT(0) == '=' ) {
                 token_push(&result, token_str(T_EQ, "==", 2, file, line, col));
+                NEXT();
+            } else if ( AT(0) && AT(0) == '>' ) {
+                token_push(&result, token_str(T_FAT_ARROW, "=>", 2, file, line, col));
                 NEXT();
             } else {
                 token_push(&result, token_str(T_EQL_ASSIGN, "=", 1, file, line, col));
