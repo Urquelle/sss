@@ -168,6 +168,7 @@ struct Bytecode {
 };
 
 #define BYTECODES                   \
+    X(BYTECODEOP_HLT)               \
     X(BYTECODEOP_ADD)               \
     X(BYTECODEOP_CALL)              \
     X(BYTECODEOP_CAST)              \
@@ -176,7 +177,6 @@ struct Bytecode {
     X(BYTECODEOP_CONST)             \
     X(BYTECODEOP_DIV)               \
     X(BYTECODEOP_EXPORT_SYM)        \
-    X(BYTECODEOP_HLT)               \
     X(BYTECODEOP_INC)               \
     X(BYTECODEOP_INC_LOOP)          \
     X(BYTECODEOP_INIT_LOOP)         \
@@ -1436,6 +1436,10 @@ bytecode_debug(Vm *vm, int32_t code) {
             printf("]\n");
         } break;
 
+        case BYTECODEOP_HLT: {
+            printf("halt\n");
+        } break;
+
         case BYTECODEOP_NAMESPACE_ENTER: {
             Value name = vm->stack[frame->sp-1];
             printf("namespace enter");
@@ -1543,6 +1547,7 @@ bytecode_expr(Bytecode *bc, Expr *expr, uint32_t flags = BYTECODEFLAG_NONE) {
         case EXPR_CALL: {
             for ( int i = 0; i < AS_CALL(expr)->num_args; ++i ) {
                 bytecode_expr(bc, AS_CALL(expr)->args[i]);
+                bytecode_write8(bc, BYTECODEOP_NONE);
             }
 
             bytecode_expr(bc, AS_CALL(expr)->base);
@@ -1640,9 +1645,12 @@ bytecode_decl(Bytecode *bc, Decl *decl) {
 
         case DECL_PROC: {
             Value val = val_proc(decl->name, decl->len, AS_PROC(decl)->sign->sys_call);
-            bytecode_emit_const(bc, val);
 
-            int32_t index = bytecode_push_constant(bc, val_str(decl->name, decl->len));
+            int32_t index = bytecode_push_constant(bc, val);
+            bytecode_write8(bc, BYTECODEOP_CONST);
+            bytecode_write16(bc, (uint16_t)index);
+
+            index = bytecode_push_constant(bc, val_str(decl->name, decl->len));
             bytecode_write8(bc, BYTECODEOP_NONE);
 
             bytecode_write8(bc, BYTECODEOP_PUSH_SYM);
@@ -1667,7 +1675,7 @@ bytecode_decl(Bytecode *bc, Decl *decl) {
 
                 if ( !AS_PROC(decl)->sign->num_rets ) {
                     bytecode_write8(proc->bc, BYTECODEOP_RET);
-                    bytecode_write16(bc, 0);
+                    bytecode_write16(proc->bc, 0);
                 }
             }
             bytecode_write8(proc->bc, BYTECODEOP_SCOPE_LEAVE);
