@@ -20,7 +20,7 @@ void sss_repl() {
         auto tokens   = tokenize("<repl>", buf);
         auto parsed   = parse(&tokens);
         auto resolved = resolve(parsed);
-        auto code     = build(resolved);
+        auto code     = build(parsed);
         eval(code);
     }
 }

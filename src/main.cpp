@@ -66,7 +66,7 @@ int main(int argc, char* argv[]) {
         auto tokens   = tokenize(argv[1], content);
         auto parsed   = parse(&tokens);
         auto resolved = resolve(parsed);
-        auto code     = build(resolved);
+        auto code     = build(parsed);
 
         eval(code);
     }

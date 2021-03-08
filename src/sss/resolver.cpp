@@ -680,7 +680,11 @@ resolve_expr(Expr *expr, Type *given_type = NULL) {
                 }
             }
 
-            result = operand(((Type_Proc *)op->type)->rets[0]->type);
+            if ( ((Type_Proc *)op->type)->num_rets ) {
+                result = operand(((Type_Proc *)op->type)->rets[0]->type);
+            } else {
+                result = operand(type_void);
+            }
         } break;
 
         case EXPR_RANGE: {
@@ -729,6 +733,8 @@ resolve_expr(Expr *expr, Type *given_type = NULL) {
             assert(!"unbekannter ausdruck");
         } break;
     }
+
+    expr->type = result->type;
 
     return result;
 }
@@ -1252,7 +1258,7 @@ resolve_proc(Sym *sym) {
 
     scope_leave();
 
-    if ( sign->sys_call || sign->num_rets == 1 && sign->rets[0]->type == type_void ) {
+    if ( sign->sys_call || sign->num_rets == 0 ) {
     } else if ( !returns ) {
         assert(!"nicht alle zweige liefern einen wert zurueck!");
     }

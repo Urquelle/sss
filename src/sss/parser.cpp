@@ -1724,9 +1724,11 @@ parse_proc_sign(Token_List *tokens) {
         buf_push(rets, parse_proc_param(tokens));
     }
 
+#if 0
     if ( buf_len(rets) == 0 ) {
         buf_push(rets, proc_param(NULL, typespec_name(curr, intern_str("void")), NULL));
     }
+#endif
 
     return proc_sign(curr, params, (uint32_t)buf_len(params), rets, (uint32_t)buf_len(rets));
 }
