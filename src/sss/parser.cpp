@@ -31,7 +31,6 @@ char *keyword_while;
 struct Compound_Elem;
 struct Decl;
 struct Directive;
-struct Enum_Arg;
 struct Enum_Field;
 struct Expr;
 struct Match_Line;
@@ -54,7 +53,6 @@ struct Typespec;
 typedef Compound_Elem**  Compound_Elems;
 typedef Decl**           Decls;
 typedef Directive**      Directives;
-typedef Enum_Arg**       Enum_Args;
 typedef Enum_Field**     Enum_Fields;
 typedef Expr**           Exprs;
 typedef Match_Line**     Match_Lines;
@@ -116,6 +114,7 @@ enum Expr_Kind {
     EXPR_NEW,
     EXPR_RUN,
     EXPR_KEYWORD,
+    EXPR_UNARY,
     EXPR_CAST,
     EXPR_BIN,
     EXPR_FIELD,
@@ -210,6 +209,12 @@ struct Expr_Bin : Expr {
     Op_Kind op;
     Expr * left;
     Expr * right;
+};
+
+#define AS_UNARY(Expr) ((Expr_Unary *)(Expr))
+struct Expr_Unary : Expr {
+    Op_Kind op;
+    Expr *expr;
 };
 
 #define AS_CALL(Expr) ((Expr_Call *)(Expr))
@@ -368,17 +373,11 @@ struct Stmt_Match : Stmt {
     size_t num_lines;
 };
 
-struct Enum_Arg : Ast_Elem {
-    char     * name;
-    Sym      * Sym;
-    Typespec * typespec;
-};
-
 struct Enum_Field : Ast_Elem {
     char      * name;
     Sym       * sym;
-    Enum_Args   args;
-    size_t      num_args;
+    Type      * type;
+    Operand   * operand;
     Expr      * value;
 };
 
@@ -823,6 +822,16 @@ expr_call(Ast_Elem *loc, Expr *base, Exprs args, size_t num_args) {
     return result;
 }
 
+Expr_Unary *
+expr_unary(Ast_Elem *loc, Op_Kind op, Expr *expr) {
+    STRUCTK(Expr_Unary, EXPR_UNARY);
+
+    result->op   = op;
+    result->expr = expr;
+
+    return result;
+}
+
 Expr_Bin *
 expr_bin(Ast_Elem *loc, Op_Kind op, Expr *left, Expr *right) {
     STRUCTK(Expr_Bin, EXPR_BIN);
@@ -964,6 +973,12 @@ parse_expr_base(Token_List *tokens) {
     } else if ( token_is(tokens, T_FLOAT) ) {
         Token *t = token_read(tokens);
         result = expr_float(curr, t->val_float);
+    } else if ( token_is(tokens, T_MINUS) ) {
+        while ( token_match(tokens, T_MINUS) ) {
+            /* - */
+        }
+
+        result = expr_unary(curr, OP_SUB, parse_expr(tokens));
     } else if ( token_is(tokens, T_IDENT) ) {
         if ( token_is_keyword(tokens) ) {
             if ( keyword_matches(tokens, keyword_false) ) {
@@ -1181,24 +1196,12 @@ match_line(Ast_Elem *loc, Expr *resolution, Stmt *stmt) {
     return result;
 }
 
-Enum_Arg *
-enum_arg(Ast_Elem *loc, char *name, Typespec *typespec) {
-    STRUCT(Enum_Arg);
-
-    result->name = name;
-    result->typespec = typespec;
-
-    return result;
-}
-
 Enum_Field *
-enum_field(Ast_Elem *loc, char *name, Enum_Args args, size_t num_args, Expr *value) {
+enum_field(Ast_Elem *loc, char *name, Expr *value) {
     STRUCT(Enum_Field);
 
-    result->name     = name;
-    result->args     = (Enum_Args)MEMDUP(args);
-    result->num_args = num_args;
-    result->value    = value;
+    result->name  = name;
+    result->value = value;
 
     return result;
 }
@@ -1623,42 +1626,16 @@ parse_decl_enum(Token_List *tokens, char *name) {
         do {
             Token *field_name = token_get(tokens);
             token_expect(tokens, T_IDENT);
-            Enum_Args args = NULL;
-
-            if ( token_match(tokens, T_LPAREN) ) {
-                /* @INFO: enum A { FELD_A(u32, u32), FELD_B ... } */
-                Token *t = token_get(tokens);
-                if ( !token_is(tokens, T_RPAREN) ) {
-                    do {
-                        Typespec *typespec = parse_typespec(tokens);
-                        buf_push(args, enum_arg(t, NULL, typespec));
-                    } while ( token_match(tokens, T_COMMA) );
-                }
-
-                token_expect(tokens, T_RPAREN);
-            } else if ( token_match(tokens, T_LBRACE) ) {
-                /* @INFO: enum A { FELD_A { x: u32, y: u32 }, FELD_B ... } */
-                if ( !token_is(tokens, T_RBRACE) ) {
-                    do {
-                        Token *arg_name = token_get(tokens);
-                        token_expect(tokens, T_IDENT);
-                        token_expect(tokens, T_COLON);
-                        Typespec *typespec = parse_typespec(tokens);
-
-                        buf_push(args, enum_arg(arg_name, arg_name->val_str, typespec));
-                    } while ( token_match(tokens, T_COMMA) );
-                }
-
-                token_expect(tokens, T_RBRACE);
-            }
 
             Expr *value = NULL;
-            if ( token_match(tokens, T_EQL_ASSIGN) ) {
+            if ( token_match(tokens, T_COLON) ) {
+                token_expect(tokens, T_COLON);
                 value = parse_expr(tokens);
             }
 
-            buf_push(fields, enum_field(field_name, field_name->val_str, args, buf_len(args), value));
-            token_match(tokens, T_COMMA);
+            buf_push(fields, enum_field(field_name, field_name->val_str, value));
+
+            token_expect(tokens, T_SEMICOLON);
         } while ( !token_is(tokens, T_RBRACE) );
     }
 
@@ -1723,12 +1700,6 @@ parse_proc_sign(Token_List *tokens) {
     if ( token_match(tokens, T_ARROW) ) {
         buf_push(rets, parse_proc_param(tokens));
     }
-
-#if 0
-    if ( buf_len(rets) == 0 ) {
-        buf_push(rets, proc_param(NULL, typespec_name(curr, intern_str("void")), NULL));
-    }
-#endif
 
     return proc_sign(curr, params, (uint32_t)buf_len(params), rets, (uint32_t)buf_len(rets));
 }

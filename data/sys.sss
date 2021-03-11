@@ -1,10 +1,11 @@
-#import Win = (*) from win32;
+#import Win32 = (*) from win32;
 
 #export {
     print
 }
 
 print :: proc(fmt: string, args: ...) {
-    ## WriteConsole()
+    handle := Win32.get_std_handle(cast(u32)Win32.Device_Type.STD_OUTPUT_HANDLE);
+    ## Win.WriteConsole(GetStdHandle(), fmt);
 }
 

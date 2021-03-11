@@ -2,7 +2,6 @@ struct Operand;
 struct Proc_Sign;
 struct Resolved_Stmt;
 struct Scope;
-struct Type_Field;
 struct Type_Proc;
 struct Type_Struct;
 
@@ -10,7 +9,6 @@ typedef Operand       ** Operands;
 typedef Resolved_Stmt ** Resolved_Stmts;
 typedef Sym           ** Syms;
 typedef Type          ** Types;
-typedef Type_Field    ** Type_Fields;
 
 Resolved_Stmts   resolve(Parsed_File *parsed_file);
 Type           * resolve_decl(Decl *d);
@@ -121,18 +119,13 @@ struct Type_Compound : Type {
     uint32_t       num_elems;
 };
 
-struct Type_Field {
-    char    * name;
-    Type    * type;
-    Operand * operand;
-};
 struct Type_Struct : Type {
     Struct_Fields fields;
     size_t        num_fields;
 };
 
 struct Type_Enum : Type {
-    Type_Fields fields;
+    Enum_Fields fields;
     size_t num_fields;
 };
 
@@ -209,6 +202,20 @@ type_incomplete_struct(Sym *sym) {
     return result;
 }
 
+Type_Enum *
+type_incomplete_enum(Sym *sym) {
+    Type_Enum *result = urq_allocs(Type_Enum);
+
+    result->kind  = TYPE_INCOMPLETE;
+    result->sym   = sym;
+    result->size  = 0;
+    result->align = 0;
+    result->id    = type_id++;
+    result->scope = scope_new(sym->name);
+
+    return result;
+}
+
 Type *
 type_namespace(char *name) {
     Type *result = type_new(0, TYPE_NAMESPACE);
@@ -230,6 +237,13 @@ type_compound(Compound_Elems elems, uint32_t num_elems) {
     result->scope     = NULL;
     result->elems     = elems;
     result->num_elems = num_elems;
+
+    return result;
+}
+
+bool
+type_is_numerical(Type *type) {
+    bool result = type->kind >= TYPE_U8 && type->kind <= TYPE_F64;
 
     return result;
 }
@@ -318,41 +332,6 @@ type_array(Type *base, size_t num_elems) {
     result->kind      = TYPE_ARRAY;
     result->base      = base;
     result->num_elems = num_elems;
-
-    return result;
-}
-
-#if 0
-Type_Struct *
-type_struct(Struct_Fields fields, size_t num_fields) {
-    Type_Struct *result = urq_allocs(Type_Struct);
-
-    result->kind       = TYPE_STRUCT;
-    result->fields     = (Type_Fields)MEMDUP(fields);
-    result->num_fields = num_fields;
-
-    return result;
-}
-#endif
-
-Type_Enum *
-type_enum(Type_Fields fields, size_t num_fields) {
-    Type_Enum *result = urq_allocs(Type_Enum);
-
-    result->kind  = TYPE_ENUM;
-    result->fields = (Type_Fields)MEMDUP(fields);
-    result->num_fields = num_fields;
-
-    return result;
-}
-
-Type_Field *
-type_field(char *name, Type *type, Operand *operand = NULL) {
-    Type_Field *result = urq_allocs(Type_Field);
-
-    result->name    = name;
-    result->type    = type;
-    result->operand = operand;
 
     return result;
 }
@@ -625,6 +604,16 @@ resolve_expr(Expr *expr, Type *given_type = NULL) {
             assert(!"schlüsselwort");
         } break;
 
+        case EXPR_UNARY: {
+            Operand *op = resolve_expr(AS_UNARY(expr)->expr);
+
+            if ( !type_is_numerical(op->type) ) {
+                assert(!"numerischer ausdruck erwartet");
+            }
+
+            result = operand(type_s32);
+        } break;
+
         case EXPR_BIN: {
             Operand *left = resolve_expr(AS_BIN(expr)->left);
             Operand *right = resolve_expr(AS_BIN(expr)->right);
@@ -643,7 +632,7 @@ resolve_expr(Expr *expr, Type *given_type = NULL) {
         case EXPR_FIELD: {
             Operand *base = resolve_expr(AS_FIELD(expr)->base);
             assert(base->type);
-            assert( base->type->kind == TYPE_NAMESPACE || base->type->kind == TYPE_STRUCT);
+            assert( base->type->kind == TYPE_NAMESPACE || base->type->kind == TYPE_STRUCT || base->type->kind == TYPE_ENUM);
 
             Sym *sym = sym_get(base->type->scope, AS_FIELD(expr)->field);
             assert(sym);
@@ -1213,8 +1202,45 @@ type_complete_struct(Type_Struct *type) {
 
 void
 type_complete_enum(Type_Enum *type) {
-    assert(!"implementieren");
+    Decl *decl = type->sym->decl;
+
+    assert(decl->kind == DECL_ENUM);
+    type->scope = scope_enter(decl->name);
+
+    if ( !AS_ENUM(decl)->num_fields ) {
+        assert(!"datenstruktur muss mindestens ein feld enthalten!");
+    }
+
+    for ( size_t i = 0; i < AS_ENUM(decl)->num_fields; i++ ) {
+        Enum_Field *field = AS_ENUM(decl)->fields[i];
+
+        Operand *operand = NULL;
+        if ( field->value ) {
+            operand = resolve_expr(field->value, type_s32);
+        }
+
+        operand_cast(type_s32, operand);
+        if ( type_s32 != operand->type ) {
+        }
+
+        field->type = type_s32;
+        field->operand = operand;
+
+        sym_push_var(field->name, type_s32);
+    }
+
+    scope_leave();
     type->kind = TYPE_ENUM;
+
+    uint32_t align = 0;
+
+    for ( uint32_t i = 0; i < AS_ENUM(decl)->num_fields; ++i ) {
+        type->size += AS_ENUM(decl)->fields[i]->type->size;
+        type->align = MAX(type->size, AS_ENUM(decl)->fields[i]->type->align);
+    }
+
+    ((Type_Enum *)type)->fields     = AS_ENUM(decl)->fields;
+    ((Type_Enum *)type)->num_fields = AS_ENUM(decl)->num_fields;
 }
 
 void
@@ -1300,9 +1326,15 @@ register_global_syms(Stmts stmts) {
             } break;
         }
 
-        if ( decl->kind == DECL_STRUCT ) {
+        if ( decl->kind == DECL_STRUCT || decl->kind == DECL_ENUM) {
             sym->state = SYMSTATE_RESOLVED;
-            sym->type  = type_incomplete_struct(sym);
+
+            if ( decl->kind == DECL_STRUCT ) {
+                sym->type = type_incomplete_struct(sym);
+            } else {
+                assert(decl->kind == DECL_ENUM);
+                sym->type = type_incomplete_enum(sym);
+            }
         }
     }
 }

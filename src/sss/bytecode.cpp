@@ -6,6 +6,7 @@ struct Table;
 struct Vm;
 
 #define IS_STRUCT(Value) (((Value).kind == VAL_OBJ) && ((Value).obj_val->kind == OBJ_STRUCT))
+#define IS_ENUM(Value) (((Value).kind == VAL_OBJ) && ((Value).obj_val->kind == OBJ_ENUM))
 #define IS_NAMESPACE(Value) (((Value).kind == VAL_OBJ) && ((Value).obj_val->kind == OBJ_NAMESPACE))
 
 #define VALUES      \
@@ -42,6 +43,7 @@ typedef Value* Values;
     X(OBJ_ITER)         \
     X(OBJ_NAMESPACE)    \
     X(OBJ_STRUCT)       \
+    X(OBJ_ENUM)         \
     X(OBJ_COMPOUND)     \
     X(OBJ_STRUCT_FIELD)
 
@@ -67,10 +69,11 @@ struct Obj_Compound : Obj {
 };
 
 struct Obj_Proc : Obj {
-    Obj_String * name;
-    Bytecode   * bc;
-    uint32_t     num_params;
-    bool         sys_call;
+    Obj_String     * name;
+    Bytecode_Scope * scope;
+    Bytecode       * bc;
+    uint32_t         num_params;
+    bool             sys_call;
 };
 
 struct Obj_Namespace : Obj {
@@ -101,6 +104,12 @@ struct Obj_Struct : Obj {
 struct Obj_Struct_Field : Obj {
     Obj_String * name;
     Value        default_value;
+};
+
+struct Obj_Enum : Obj {
+    Obj_String *  name;
+    Table      *  fields;
+    Obj_String ** fieldnames_ordered;
 };
 
 enum Bytecode_Flags {
@@ -157,6 +166,7 @@ struct Bytecode_Scope {
 Bytecode_Scope   bc_sys_scope    = {"sys",    NULL,          {}};
 Bytecode_Scope   bc_global_scope = {"global", &bc_sys_scope, {}};
 Bytecode_Scope * bc_curr_scope   = &bc_global_scope;
+Bytecode_Scope * bc_prev_scope;
 
 struct Bytecode {
     Bytecode * parent;
@@ -169,6 +179,7 @@ struct Bytecode {
 
 #define BYTECODES                   \
     X(BYTECODEOP_HLT)               \
+    X(BYTECODEOP_NEG)               \
     X(BYTECODEOP_ADD)               \
     X(BYTECODEOP_CALL)              \
     X(BYTECODEOP_CAST)              \
@@ -203,6 +214,7 @@ struct Bytecode {
     X(BYTECODEOP_SET_SYM)           \
     X(BYTECODEOP_STRUCT)            \
     X(BYTECODEOP_STRUCT_FIELD)      \
+    X(BYTECODEOP_ENUM)              \
     X(BYTECODEOP_SUB)               \
 
 enum Bytecode_Opcode {
@@ -625,6 +637,7 @@ obj_proc() {
     Obj_Proc *result = urq_allocs(Obj_Proc);
 
     result->kind       = OBJ_PROC;
+    result->scope      = bytecode_scope_new(NULL, NULL);
     result->num_params = 0;
     result->bc         = bytecode_new();
     result->name       = NULL;
@@ -650,7 +663,7 @@ Obj_Proc *
 obj_proc(bool sys_call) {
     Obj_Proc *result = obj_proc();
 
-    result->sys_call   = sys_call;
+    result->sys_call = sys_call;
 
     return result;
 }
@@ -685,6 +698,18 @@ obj_struct_field(Obj_String *name) {
 
     result->kind = OBJ_STRUCT_FIELD;
     result->name = name;
+
+    return result;
+}
+
+Obj_Enum *
+obj_enum(Obj_String *name) {
+    Obj_Enum *result = urq_allocs(Obj_Enum);
+
+    result->kind   = OBJ_ENUM;
+    result->name   = name;
+    result->fields = table_new();
+    result->fieldnames_ordered = NULL;
 
     return result;
 }
@@ -732,6 +757,12 @@ obj_print(Obj *obj) {
         case OBJ_STRUCT: {
             printf("(struct: ");
             obj_print(((Obj_Struct *)obj)->name);
+            printf(")");
+        } break;
+
+        case OBJ_ENUM: {
+            printf("(enum: ");
+            obj_print(((Obj_Enum *)obj)->name);
             printf(")");
         } break;
 
@@ -846,6 +877,13 @@ val_struct(char *name, uint32_t len) {
 }
 
 Value
+val_enum(char *name, uint32_t len) {
+    Value result = val_obj(obj_enum(obj_string(name, len)));
+
+    return result;
+}
+
+Value
 val_struct_field(char *name, uint32_t len) {
     Value result = val_obj(obj_struct_field(obj_string(name, len)));
 
@@ -884,6 +922,24 @@ val_print(Value val) {
 
         default: {
             assert(!"unbekannter wert");
+        } break;
+    }
+}
+
+Value
+operator-(Value val) {
+    switch ( val.kind ) {
+        case VAL_INT: {
+            return val_int(-val.int_val);
+        } break;
+
+        case VAL_FLOAT: {
+            return val_float(-val.flt_val);
+        } break;
+
+        default: {
+            assert(!"operator- implementieren");
+            return val_none();
         } break;
     }
 }
@@ -1452,7 +1508,11 @@ bytecode_debug(Vm *vm, int32_t code) {
         } break;
 
         case BYTECODEOP_STRUCT: {
-            printf("OP_STRUCT\n");
+            printf("struct\n");
+        } break;
+
+        case BYTECODEOP_ENUM: {
+            printf("enum\n");
         } break;
 
         case BYTECODEOP_NONE: {
@@ -1469,8 +1529,27 @@ bytecode_debug(Vm *vm, int32_t code) {
             printf("export sym\n");
         } break;
 
+        case BYTECODEOP_NEG: {
+            printf("neg ");
+            val_print(vm->stack[frame->sp-1]);
+            printf("\n");
+        } break;
+
         default: {
             assert(!"unbekannter bytecode");
+        } break;
+    }
+}
+
+void
+bytecode_op(Bytecode *bc, uint32_t unary_op) {
+    switch ( unary_op ) {
+        case OP_SUB: {
+            bytecode_write8(bc, BYTECODEOP_NEG);
+        } break;
+
+        default: {
+            assert(!"unary operator");
         } break;
     }
 }
@@ -1553,6 +1632,11 @@ bytecode_expr(Bytecode *bc, Expr *expr, uint32_t flags = BYTECODEFLAG_NONE) {
             bytecode_expr(bc, AS_CALL(expr)->base);
             bytecode_write8(bc, BYTECODEOP_CALL);
             bytecode_write16(bc, (uint16_t)AS_CALL(expr)->num_args);
+        } break;
+
+        case EXPR_UNARY: {
+            bytecode_expr(bc, AS_UNARY(expr)->expr);
+            bytecode_op(bc, AS_UNARY(expr)->op);
         } break;
 
         case EXPR_BIN: {
@@ -1658,9 +1742,9 @@ bytecode_decl(Bytecode *bc, Decl *decl) {
 
             Obj_Proc *proc = as_proc(val);
             proc->name = obj_string(decl->name, decl->len);
+            proc->scope->name = decl->name;
             proc->num_params = (uint32_t)AS_PROC(decl)->sign->num_params;
 
-            bytecode_write8(proc->bc, BYTECODEOP_SCOPE_ENTER);
             for ( uint32_t i = 0; i < AS_PROC(decl)->sign->num_params; ++i ) {
                 Proc_Param *param = AS_PROC(decl)->sign->params[i];
 
@@ -1678,7 +1762,47 @@ bytecode_decl(Bytecode *bc, Decl *decl) {
                     bytecode_write16(proc->bc, 0);
                 }
             }
-            bytecode_write8(proc->bc, BYTECODEOP_SCOPE_LEAVE);
+        } break;
+
+        case DECL_ENUM: {
+            Value val = val_enum(decl->name, decl->len);
+            int32_t index = bytecode_emit_const(bc, val);
+            bytecode_write8(bc, BYTECODEOP_NONE);
+
+            int32_t name_index = bytecode_push_constant(bc, val_str(decl->name, decl->len));
+            bytecode_write8(bc, BYTECODEOP_PUSH_SYM);
+            bytecode_write16(bc, (uint16_t)name_index);
+
+            bytecode_write8(bc, BYTECODEOP_PUSH);
+            bytecode_write16(bc, (uint16_t)index);
+
+            for ( int i = 0; i < AS_ENUM(decl)->num_fields; ++i ) {
+                Enum_Field *field = AS_ENUM(decl)->fields[i];
+
+                // feldnamen generieren {
+                    Value field_val = val_struct_field(field->name, (uint32_t)utf8_str_size(field->name));
+                    int32_t field_index = bytecode_push_constant(bc, field_val);
+                    bytecode_write8(bc, BYTECODEOP_PUSH);
+                    bytecode_write16(bc, (uint16_t)field_index);
+                // }
+
+                int32_t type_index = bytecode_push_constant(bc, val_str("s32", 3));
+                bytecode_write8(bc, BYTECODEOP_PUSH_TYPEVAL);
+                bytecode_write16(bc, (int16_t)type_index);
+
+                // feldwert generieren {
+                    if ( field->value ) {
+                        bytecode_expr(bc, field->value);
+                    } else {
+                        bytecode_write8(bc, BYTECODEOP_NONE);
+                    }
+                // }
+
+                bytecode_write8(bc, BYTECODEOP_STRUCT_FIELD);
+            }
+
+            bytecode_write8(bc, BYTECODEOP_ENUM);
+            bytecode_write16(bc, (uint16_t)AS_ENUM(decl)->num_fields);
         } break;
 
         case DECL_STRUCT: {
@@ -1969,6 +2093,9 @@ call_proc(Vm *vm, Value val, uint32_t num_args) {
     frame->proc = proc;
     frame->pc   = 0;
     frame->sp   = prev_frame->sp;
+
+    bc_prev_scope = bc_curr_scope;
+    bc_curr_scope = proc->scope;
 }
 
 void
@@ -2082,7 +2209,7 @@ bytecode_directive(Bytecode *bc, Directive *dir) {
                 bytecode_emit_const(bc, val_str(sym->name, (uint32_t)utf8_str_size(sym->name)));
 
                 if ( sym->alias ) {
-                    bytecode_emit_const(bc, val_str(sym->name, (uint32_t)utf8_str_size(sym->alias)));
+                    bytecode_emit_const(bc, val_str(sym->alias, (uint32_t)utf8_str_size(sym->alias)));
                 } else {
                     bytecode_write8(bc, BYTECODEOP_NONE);
                 }
@@ -2264,6 +2391,10 @@ step(Vm *vm) {
             if ( !bytecode_sym_set(name, val) ) {
                 assert(!"symbol konnte nicht gesetzt werden");
             }
+
+            if ( is_proc(val) ) {
+                as_proc(val)->scope->parent = bc_curr_scope;
+            }
         } break;
 
         case BYTECODEOP_INIT_LOOP: {
@@ -2318,6 +2449,15 @@ step(Vm *vm) {
 
                 Value field_val;
                 if ( !table_get(structure->fields, as_str(field), &field_val) ) {
+                    assert(!"feld konnte nicht gefunden werden");
+                }
+
+                stack_push(vm, field_val);
+            } else if ( IS_ENUM(val) ) {
+                Obj_Enum *enumeration = ((Obj_Enum *)val.obj_val);
+
+                Value field_val;
+                if ( !table_get(enumeration->fields, as_str(field), &field_val) ) {
                     assert(!"feld konnte nicht gefunden werden");
                 }
 
@@ -2431,6 +2571,8 @@ step(Vm *vm) {
             for ( int i = 0; i < num_vals; ++i ) {
                 stack_push(vm, vals[i]);
             }
+
+            bc_curr_scope = bc_prev_scope;
         } break;
 
         case BYTECODEOP_SCOPE_ENTER: {
@@ -2458,6 +2600,23 @@ step(Vm *vm) {
             }
         } break;
 
+        case BYTECODEOP_ENUM: {
+            int32_t num_fields = bytecode_read16(vm);
+
+            Values vals = NULL;
+            for ( int i = 0; i < num_fields; ++i ) {
+                buf_push(vals, stack_pop(vm));
+            }
+
+            Value enumeration = stack_pop(vm);
+
+            for ( int i = 0; i < num_fields; ++i ) {
+                Obj_Struct_Field *field = ((Obj_Struct_Field *)vals[i].obj_val);
+                table_set(((Obj_Enum *)enumeration.obj_val)->fields, field->name, field->default_value);
+                buf_push(((Obj_Enum *)enumeration.obj_val)->fieldnames_ordered, field->name);
+            }
+        } break;
+
         case BYTECODEOP_PUSH_TYPEVAL: {
             int32_t index = bytecode_read16(vm);
             Value val = value_get(&frame->proc->bc->constants, index);
@@ -2480,6 +2639,11 @@ step(Vm *vm) {
             }
         } break;
 
+        case BYTECODEOP_NEG: {
+            Value val = stack_pop(vm);
+            stack_push(vm, -val);
+        } break;
+
         case BYTECODEOP_STRUCT_FIELD: {
             Value default_val = stack_pop(vm);
             Value type_val = stack_pop(vm);
@@ -2490,6 +2654,8 @@ step(Vm *vm) {
 
             if ( val.kind == VAL_OBJ && val.obj_val->kind == OBJ_COMPOUND ) {
                 Obj_Compound * compound  = ((Obj_Compound *)val.obj_val);
+
+                assert(type_val.obj_val->kind == OBJ_STRUCT);
                 Obj_Struct   * structure = (Obj_Struct *)type_val.obj_val;
                                new_val   = val_struct(((Obj_String *)structure->name)->ptr, ((Obj_String *)structure->name)->size);
 

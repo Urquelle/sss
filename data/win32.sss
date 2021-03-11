@@ -1,7 +1,22 @@
 #export {
-    WriteConsole
+    Device_Type,
+    WriteConsole as write_console,
+    GetStdHandle as get_std_handle,
 }
 
+##(
+PVOID  :: type *void;
+HANDLE :: type PVOID;
+DWORD  :: type u32;
+##)
+
+Device_Type :: enum {
+    STD_INPUT_HANDLE  :: -10;
+    STD_OUTPUT_HANDLE :: -11;
+    STD_ERROR_HANDLE  :: -12;
+}
+
+GetStdHandle :: proc(nStdHandle             : u32) -> *void #sys_call;
 WriteConsole :: proc(hConsoleOutput         : *void,
                      lpBuffer               : *void,
                      nNumberOfCharsToWrite  : u32,
