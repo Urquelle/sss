@@ -126,6 +126,9 @@ struct Type_Struct : Type {
     size_t        num_fields;
 };
 
+struct Type_String : Type {
+};
+
 struct Type_Enum : Type {
     Enum_Fields fields;
     size_t num_fields;
@@ -186,6 +189,20 @@ type_new( uint32_t size, Type_Kind kind ) {
     result->align = 0;
     result->id    = type_id++;
     result->scope = scope_new("type");
+
+    return result;
+}
+
+Type_String *
+type_string_new() {
+    Type_String *result = urq_allocs(Type_String);
+
+    result->kind  = TYPE_STRING;
+    result->size  = sizeof(uint64_t) + PTR_SIZE;
+    result->id    = type_id++;
+    result->scope = scope_new("string");
+
+    sym_push_scope(result->scope, "size", type_u64);
 
     return result;
 }
@@ -1449,7 +1466,8 @@ resolver_init() {
     type_f64    = type_new(8, TYPE_F64);
     type_bool   = type_new(1, TYPE_BOOL);
     type_typeid = type_new(4, TYPE_TYPEID);
-    type_string = type_new(type_u32->size + PTR_SIZE, TYPE_STRING); // bytegröße (int) + zeiger zu daten
+    type_string = type_string_new();
+
     type_vararg = type_new(0, TYPE_VARARG);
 
     sym_push_sys("void",   type_void);
