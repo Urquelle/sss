@@ -648,7 +648,7 @@ resolve_expr(Expr *expr, Type *given_type = NULL) {
         case EXPR_FIELD: {
             Operand *base = resolve_expr(AS_FIELD(expr)->base);
             assert(base->type);
-            assert( base->type->kind == TYPE_NAMESPACE || base->type->kind == TYPE_STRUCT || base->type->kind == TYPE_ENUM);
+            assert( base->type->scope );
 
             Sym *sym = sym_get(base->type->scope, AS_FIELD(expr)->field);
             assert(sym);
