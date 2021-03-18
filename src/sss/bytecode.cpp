@@ -1,3 +1,8 @@
+#define dcAllocMem urq_alloc
+#define dcFreeMem urq_dealloc
+
+#include "dyncall.h"
+
 struct Bytecode;
 struct Bytecode_Scope;
 struct Obj;
@@ -74,6 +79,8 @@ struct Obj_Proc : Obj {
     Bytecode       * bc;
     uint32_t         num_params;
     bool             sys_call;
+    char           * lib;
+    Proc_Sign      * sign;
 };
 
 struct Obj_Namespace : Obj {
@@ -226,9 +233,10 @@ enum Bytecode_Opcode {
 };
 
 struct Call_Frame {
-    Obj_Proc * proc;
-    uint32_t   pc;
-    uint32_t   sp;
+    Obj_Proc       * proc;
+    Bytecode_Scope * prev_scope;
+    uint32_t         pc;
+    uint32_t         sp;
 };
 
 enum { MAX_STACK_SIZE = 1024, MAX_FRAME_NUM = 100 };
@@ -644,6 +652,8 @@ obj_proc() {
     result->bc         = bytecode_new();
     result->name       = NULL;
     result->sys_call   = false;
+    result->lib        = NULL;
+    result->sign       = NULL;
 
     return result;
 }
@@ -662,10 +672,11 @@ obj_namespace(char *name, char *scope_name) {
 }
 
 Obj_Proc *
-obj_proc(bool sys_call) {
+obj_proc(bool sys_call, char *lib) {
     Obj_Proc *result = obj_proc();
 
     result->sys_call = sys_call;
+    result->lib      = lib;
 
     return result;
 }
@@ -858,8 +869,8 @@ val_range(Value left, Value right) {
 }
 
 Value
-val_proc(char *ptr, uint32_t size, bool sys_call) {
-    Value result = val_obj(obj_proc(sys_call));
+val_proc(char *ptr, uint32_t size, bool sys_call, char *lib) {
+    Value result = val_obj(obj_proc(sys_call, lib));
 
     return result;
 }
@@ -1736,7 +1747,7 @@ bytecode_decl(Bytecode *bc, Decl *decl) {
         } break;
 
         case DECL_PROC: {
-            Value val = val_proc(decl->name, decl->len, AS_PROC(decl)->sign->sys_call);
+            Value val = val_proc(decl->name, decl->len, AS_PROC(decl)->sign->sys_call, AS_PROC(decl)->sign->sys_lib);
 
             int32_t index = bytecode_push_constant(bc, val);
             bytecode_write8(bc, BYTECODEOP_CONST);
@@ -1750,6 +1761,7 @@ bytecode_decl(Bytecode *bc, Decl *decl) {
 
             Obj_Proc *proc = as_proc(val);
             proc->name = obj_string(decl->name, decl->len);
+            proc->sign = AS_PROC(decl)->sign;
             proc->scope->name = decl->name;
             proc->num_params = (uint32_t)AS_PROC(decl)->sign->num_params;
 
@@ -2035,6 +2047,11 @@ bytecode_stmt(Bytecode *bc, Stmt *stmt) {
     }
 }
 
+char *
+to_str(Obj_String *str) {
+    return str->ptr;
+}
+
 Obj_String *
 as_str(Value val) {
     Obj_String *result = (Obj_String *)val.obj_val;
@@ -2094,6 +2111,106 @@ is_proc(Value val) {
 }
 
 void
+call_sys_proc(Vm *vm, Value val, uint32_t num_args) {
+    DCCallVM *call_vm = dcNewCallVM(1024);
+    dcMode(call_vm, DC_CALL_C_DEFAULT);
+
+    auto lib = LoadLibrary(as_proc(val)->lib);
+    assert(lib);
+    auto proc_ptr = GetProcAddress(lib, to_str(as_proc(val)->name));
+    assert(proc_ptr);
+
+    for ( uint32_t i = 0; i < num_args; ++i ) {
+        Value type_val = stack_pop(vm);
+        Value expr_val = stack_pop(vm);
+
+        Value arg = (expr_val.kind == VAL_NONE) ? type_val : expr_val;
+
+        switch ( arg.kind ) {
+            case VAL_INT: {
+                dcArgLong(call_vm, (DClong)arg.int_val);
+            } break;
+
+            case VAL_FLOAT: {
+                dcArgFloat(call_vm, arg.flt_val);
+            } break;
+
+            case VAL_BOOL: {
+                dcArgBool(call_vm, arg.bool_val);
+            } break;
+
+            case VAL_OBJ: {
+                switch ( arg.obj_val->kind ) {
+                    case OBJ_STRING: {
+                        dcArgPointer(call_vm, ((Obj_String *)arg.obj_val)->ptr);
+                    } break;
+
+                    case OBJ_PTR: {
+                        dcArgPointer(call_vm, ((Obj_Ptr *)arg.obj_val)->ptr);
+                    } break;
+
+                    default: {
+                        assert(!"unbekanntes objekt");
+                    } break;
+                }
+            } break;
+
+            default: {
+                assert(!"unbekannter wert");
+            } break;
+        }
+    }
+
+    Obj_Proc *proc = as_proc(val);
+
+    if ( proc->sign->num_rets ) {
+        Type *type = proc->sign->rets[0]->type;
+
+        switch ( type->kind ) {
+            case TYPE_BOOL: {
+                auto result = dcCallBool(call_vm , proc_ptr);
+            } break;
+
+            case TYPE_U8:
+            case TYPE_S8: {
+                auto result = dcCallChar(call_vm , proc_ptr);
+            } break;
+
+            case TYPE_U16:
+            case TYPE_S16: {
+                auto result = dcCallShort(call_vm , proc_ptr);
+            } break;
+
+            case TYPE_U32:
+            case TYPE_S32: {
+                auto result = dcCallInt(call_vm , proc_ptr);
+            } break;
+
+            case TYPE_U64:
+            case TYPE_S64: {
+                auto result = dcCallLong(call_vm , proc_ptr);
+            } break;
+
+            case TYPE_F32:
+            case TYPE_F64: {
+                auto result = dcCallFloat(call_vm , proc_ptr);
+            } break;
+
+            case TYPE_PTR: {
+                auto *result = dcCallPointer(call_vm , proc_ptr);
+                stack_push(vm, val_ptr(result));
+            } break;
+
+            default: {
+                assert(!"");
+            } break;
+        }
+    } else {
+        dcCallVoid(call_vm , proc_ptr);
+    }
+}
+
+void
 call_proc(Vm *vm, Value val, uint32_t num_args) {
     assert(vm->frame_num < MAX_FRAME_NUM);
 
@@ -2106,8 +2223,8 @@ call_proc(Vm *vm, Value val, uint32_t num_args) {
     frame->proc = proc;
     frame->pc   = 0;
     frame->sp   = prev_frame->sp;
+    frame->prev_scope = bc_curr_scope;
 
-    bc_prev_scope = bc_curr_scope;
     bc_curr_scope = proc->scope;
 }
 
@@ -2499,7 +2616,11 @@ step(Vm *vm) {
             Value val = stack_pop(vm);
             uint16_t num_args = bytecode_read16(vm);
 
-            call_proc(vm, val, num_args);
+            if ( as_proc(val)->sys_call ) {
+                call_sys_proc(vm, val, num_args);
+            } else {
+                call_proc(vm, val, num_args);
+            }
         } break;
 
         case BYTECODEOP_JMP: {
@@ -2585,7 +2706,7 @@ step(Vm *vm) {
                 stack_push(vm, vals[i]);
             }
 
-            bc_curr_scope = bc_prev_scope;
+            bc_curr_scope = frame->prev_scope;
         } break;
 
         case BYTECODEOP_SCOPE_ENTER: {

@@ -522,11 +522,12 @@ struct Proc_Param {
 };
 
 struct Proc_Sign : Ast_Elem {
-    Proc_Params params;
-    uint32_t    num_params;
-    Proc_Params rets;
-    uint32_t    num_rets;
-    bool        sys_call;
+    Proc_Params   params;
+    uint32_t      num_params;
+    Proc_Params   rets;
+    uint32_t      num_rets;
+    bool          sys_call;
+    char        * sys_lib;
 };
 
 struct Compound_Elem {
@@ -953,6 +954,15 @@ parse_expr_ident(Token_List *tokens) {
     return AS_IDENT(expr)->val;
 }
 
+char *
+parse_expr_string(Token_List *tokens) {
+    Expr *expr = parse_expr(tokens);
+
+    assert(expr->kind == EXPR_STR);
+
+    return AS_STR(expr)->val;
+}
+
 Expr_Cast *
 parse_expr_cast(Token_List *tokens) {
     Token *curr = token_get(tokens);
@@ -1188,6 +1198,7 @@ proc_sign(Ast_Elem *loc, Proc_Params params, uint32_t num_params, Proc_Params re
     result->rets       = rets;
     result->num_rets   = num_rets;
     result->sys_call   = false;
+    result->sys_lib    = NULL;
 
     return result;
 }
@@ -1730,6 +1741,7 @@ parse_decl_proc(Token_List *tokens, char *name, Typespec *typespec) {
 
         if ( dir == intern_str("sys_call") ) {
             sign->sys_call = true;
+            sign->sys_lib = parse_expr_string(tokens);
         } else {
             assert(!"unbekannte direktive");
         }
