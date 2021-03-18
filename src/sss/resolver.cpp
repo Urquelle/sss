@@ -258,6 +258,13 @@ type_isint(Type *type) {
 }
 
 bool
+type_isptr(Type *type) {
+    bool result = type->kind == TYPE_PTR;
+
+    return result;
+}
+
+bool
 type_issigned(Type *type) {
     bool result = type->kind >= TYPE_S8 && type->kind <= TYPE_S64;
 
@@ -268,6 +275,10 @@ bool
 type_iscastable(Type *left, Type *right) {
     if ( left == right ) {
         return true;
+    }
+
+    if ( type_isptr(left) && type_isptr(right) ) {
+        return type_iscastable(((Type_Ptr *)left)->base, ((Type_Ptr *)right)->base);
     }
 
     if ( type_isint(left) && type_isint(right) ) {
@@ -306,15 +317,23 @@ operand_const(Type *type) {
     return result;
 }
 
+Type *
+type_cast(Type *left, Type *right) {
+    if ( type_iscastable(left, right) ) {
+        return left;
+    }
+
+    return right;
+}
+
 void
 operand_cast(Type *type, Operand *op) {
-    if ( type_iscastable(type, op->type) ) {
+    if ( op->is_const ) {
         op->type = type;
-    } else {
-        if ( op->is_const ) {
-            op->type = type;
-        }
+        return;
     }
+
+    op->type = type_cast(type, op->type);
 }
 
 Type_Ptr *
@@ -419,7 +438,7 @@ sym_new(char *name) {
     Sym *result = urq_allocs(Sym);
 
     result->kind = SYM_NONE;
-    result->name = name;
+    result->name = intern_str(name);
     result->decl = NULL;
     result->type = NULL;
 

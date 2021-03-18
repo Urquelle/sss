@@ -50,6 +50,7 @@ typedef Value* Values;
     X(OBJ_STRUCT)       \
     X(OBJ_ENUM)         \
     X(OBJ_COMPOUND)     \
+    X(OBJ_PTR)          \
     X(OBJ_STRUCT_FIELD)
 
 enum Obj_Kind {
@@ -117,6 +118,10 @@ struct Obj_Enum : Obj {
     Obj_String *  name;
     Table      *  fields;
     Obj_String ** fieldnames_ordered;
+};
+
+struct Obj_Ptr : Obj {
+    void *ptr;
 };
 
 enum Bytecode_Flags {
@@ -727,6 +732,15 @@ obj_enum(Obj_String *name) {
     return result;
 }
 
+Obj_Ptr *
+obj_ptr(void *ptr) {
+    Obj_Ptr *result = urq_allocs(Obj_Ptr);
+
+    result->ptr = ptr;
+
+    return result;
+}
+
 void
 obj_print(Obj *obj) {
     switch ( obj->kind ) {
@@ -790,6 +804,10 @@ obj_print(Obj *obj) {
             printf(")");
         } break;
 
+        case OBJ_PTR: {
+            printf("(ptr: 0x%p)", ((Obj_Ptr *)obj)->ptr);
+        } break;
+
         default: {
             assert(!"unbekanntes objekt");
         } break;
@@ -843,6 +861,13 @@ val_obj(Obj *val) {
 
     result.kind    = VAL_OBJ;
     result.obj_val = val;
+
+    return result;
+}
+
+Value
+val_ptr(void *ptr) {
+    Value result = val_obj(obj_ptr(ptr));
 
     return result;
 }
@@ -1691,6 +1716,12 @@ bytecode_typespec(Bytecode *bc, Typespec *typespec) {
         case TYPESPEC_NAME: {
             int32_t index = bytecode_push_constant(bc, val_str(AS_NAME(typespec)->name, AS_NAME(typespec)->len));
             bytecode_write8(bc, BYTECODEOP_PUSH_TYPEVAL);
+            bytecode_write16(bc, (int16_t)index);
+        } break;
+
+        case TYPESPEC_PTR: {
+            int32_t index = bytecode_push_constant(bc, val_ptr(NULL));
+            bytecode_write8(bc, BYTECODEOP_CONST);
             bytecode_write16(bc, (int16_t)index);
         } break;
 
