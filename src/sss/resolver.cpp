@@ -17,6 +17,7 @@ Type_Proc      * resolve_decl_proc(Decl *decl);
 Type           * resolve_decl_type(Decl *decl);
 Type           * resolve_decl_var(Decl *decl);
 Resolved_Stmts   resolve_stmt(Stmt *stmt);
+Type           * resolve_typespec(Typespec *t);
 Scope          * scope_new(char *name, Scope *parent = NULL);
 Sym            * sym_push_scope(Scope *scope, char *name, Type *type);
 void             type_complete(Type *type);
@@ -608,12 +609,11 @@ resolve_expr(Expr *expr, Type *given_type = NULL) {
         } break;
 
         case EXPR_CAST: {
-            Operand *type_to_cast_to = resolve_expr(AS_CAST(expr)->type);
-            Operand *type_to_cast    = resolve_expr(AS_CAST(expr)->expr);
+            Type *type_to_cast_to = resolve_typespec(AS_CAST(expr)->typespec);
+            Operand *type_to_cast = resolve_expr(AS_CAST(expr)->expr);
 
             /* @AUFGABE: überprüfen ob der datentyp umgewandelt werden darf/kann */
-
-            result = type_to_cast_to;
+            result = operand(type_to_cast_to);
         } break;
 
         case EXPR_KEYWORD: {

@@ -124,6 +124,7 @@ int32_t            bytecode_emit_const(Bytecode *bc, Value val);
 void               bytecode_debug(Vm *vm, int32_t code);
 void               bytecode_stmt(Bytecode *bc, Stmt *stmt);
 void               bytecode_init(Bytecode *bc);
+void               bytecode_typespec(Bytecode *bc, Typespec *typespec);
 Value              val_none();
 Value              val_str(char *ptr, uint32_t size);
 Value              val_bool(bool val);
@@ -1625,7 +1626,7 @@ bytecode_expr(Bytecode *bc, Expr *expr, uint32_t flags = BYTECODEFLAG_NONE) {
         } break;
 
         case EXPR_CAST: {
-            bytecode_expr(bc, AS_CAST(expr)->type);
+            bytecode_typespec(bc, AS_CAST(expr)->typespec);
             bytecode_expr(bc, AS_CAST(expr)->expr);
             bytecode_write8(bc, BYTECODEOP_CAST);
         } break;

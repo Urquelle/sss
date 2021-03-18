@@ -177,8 +177,8 @@ struct Expr_Keyword : Expr {
 
 #define AS_CAST(Expr) ((Expr_Cast *)(Expr))
 struct Expr_Cast : Expr {
-    Expr *type;
-    Expr *expr;
+    Typespec * typespec;
+    Expr     * expr;
 };
 
 enum Op_Kind {
@@ -919,11 +919,11 @@ expr_stmt(Ast_Elem *loc, Stmt *stmt) {
 }
 
 Expr_Cast *
-expr_cast(Ast_Elem *loc, Expr *type, Expr *expr) {
+expr_cast(Ast_Elem *loc, Typespec *typespec, Expr *expr) {
     STRUCTK(Expr_Cast, EXPR_CAST);
 
-    result->type = type;
-    result->expr = expr;
+    result->typespec = typespec;
+    result->expr     = expr;
 
     return result;
 }
@@ -958,11 +958,11 @@ parse_expr_cast(Token_List *tokens) {
     Token *curr = token_get(tokens);
 
     token_expect(tokens, T_LPAREN);
-    Expr *type = parse_expr(tokens);
+    Typespec *typespec = parse_typespec(tokens);
     token_expect(tokens, T_RPAREN);
     Expr *expr = parse_expr(tokens);
 
-    return expr_cast(curr, type, expr);
+    return expr_cast(curr, typespec, expr);
 }
 
 Expr *
