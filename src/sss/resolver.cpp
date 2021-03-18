@@ -670,6 +670,12 @@ resolve_expr(Expr *expr, Type *given_type = NULL) {
             Operand *op = resolve_expr(AS_CALL(expr)->base);
             assert(op->type && op->type->kind == TYPE_PROC);
 
+            Type_Proc *op_type = (Type_Proc *)op->type;
+
+            if ( op_type->num_params > AS_CALL(expr)->num_args ) {
+                assert(!"ungenügend anzahl argumente");
+            }
+
             for ( uint32_t i = 0; i < ((Type_Proc *)op->type)->num_params; ++i ) {
                 Proc_Param *param = ((Type_Proc *)op->type)->params[i];
 
