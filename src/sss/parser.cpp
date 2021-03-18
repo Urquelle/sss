@@ -277,6 +277,7 @@ enum Stmt_Kind {
     STMT_MATCH,
     STMT_RET,
     STMT_WHILE,
+    STMT_USING,
 };
 struct Stmt : Ast_Elem {
     Stmt_Kind kind;
@@ -403,6 +404,11 @@ struct Stmt_Ret : Stmt {
 struct Stmt_While : Stmt {
     Expr * cond;
     Stmt * block;
+};
+
+#define AS_USING(Stmt) ((Stmt_Using *)(Stmt))
+struct Stmt_Using : Stmt {
+    Expr *expr;
 };
 
 enum Decl_Kind {
@@ -1426,6 +1432,15 @@ stmt_while(Ast_Elem *loc, Expr *cond, Stmt *block) {
     return result;
 }
 
+Stmt_Using *
+stmt_using(Ast_Elem *loc, Expr *expr) {
+    STRUCTK(Stmt_Using, STMT_USING);
+
+    result->expr = expr;
+
+    return result;
+}
+
 Directive_Import *
 directive_import(Ast_Elem *loc, char *scope_name, bool wildcard, Module_Syms syms,
         size_t num_syms, Parsed_File *parsed_file)
@@ -1944,6 +1959,16 @@ parse_stmt_match(Token_List *tokens) {
     return stmt_match(curr, expr, lines, buf_len(lines));
 }
 
+Stmt_Using *
+parse_stmt_using(Token_List *tokens) {
+    Token *curr = token_get(tokens);
+
+    Expr *expr = parse_expr(tokens);
+    token_expect(tokens, T_SEMICOLON);
+
+    return stmt_using(curr, expr);
+}
+
 Stmt_While *
 parse_stmt_while(Token_List *tokens) {
     Token *curr = token_get(tokens);
@@ -2129,6 +2154,8 @@ parse_stmt(Token_List *tokens) {
                     result = parse_stmt_defer(tokens);
                 } else if ( keyword->val == keyword_match ) {
                     result = parse_stmt_match(tokens);
+                } else if ( keyword->val == keyword_using ) {
+                    result = parse_stmt_using(tokens);
                 }
             } else {
                 if ( token_is(tokens, T_COLON) ) {

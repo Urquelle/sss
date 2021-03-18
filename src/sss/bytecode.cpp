@@ -191,6 +191,7 @@ struct Bytecode {
     X(BYTECODEOP_INC)               \
     X(BYTECODEOP_INC_LOOP)          \
     X(BYTECODEOP_INIT_LOOP)         \
+    X(BYTECODEOP_IMPORT_SYMS)       \
     X(BYTECODEOP_JMP)               \
     X(BYTECODEOP_JMP_FALSE)         \
     X(BYTECODEOP_LOAD_STRUCT_FIELD) \
@@ -1535,6 +1536,12 @@ bytecode_debug(Vm *vm, int32_t code) {
             printf("\n");
         } break;
 
+        case BYTECODEOP_IMPORT_SYMS: {
+            printf("using ");
+            val_print(vm->stack[frame->sp-1]);
+            printf("\n");
+        } break;
+
         default: {
             assert(!"unbekannter bytecode");
         } break;
@@ -2014,6 +2021,11 @@ bytecode_stmt(Bytecode *bc, Stmt *stmt) {
 
         case STMT_EXPR: {
             bytecode_expr(bc, AS_EXPR(stmt)->expr);
+        } break;
+
+        case STMT_USING: {
+            bytecode_expr(bc, AS_USING(stmt)->expr);
+            bytecode_write8(bc, BYTECODEOP_IMPORT_SYMS);
         } break;
 
         default: {
@@ -2642,6 +2654,16 @@ step(Vm *vm) {
         case BYTECODEOP_NEG: {
             Value val = stack_pop(vm);
             stack_push(vm, -val);
+        } break;
+
+        case BYTECODEOP_IMPORT_SYMS: {
+            Value val = stack_pop(vm);
+            assert(IS_NAMESPACE(val));
+
+            for ( int i = 0; i < buf_len(AS_NAMESPACE(val)->scope->syms.ordered_entries); ++i ) {
+                Table_Entry *sym = AS_NAMESPACE(val)->scope->syms.ordered_entries[i];
+                bytecode_sym_set(sym->key, sym->val);
+            }
         } break;
 
         case BYTECODEOP_STRUCT_FIELD: {

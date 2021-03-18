@@ -1,6 +1,6 @@
 #export {
     Device_Type,
-    WriteConsole as write_console,
+    WriteConsoleA as write_console,
     GetStdHandle as get_std_handle,
 }
 
@@ -16,10 +16,10 @@ Device_Type :: enum {
     STD_ERROR_HANDLE  :: -12;
 }
 
-GetStdHandle :: proc(nStdHandle             : u32) -> *void #sys_call;
-WriteConsole :: proc(hConsoleOutput         : *void,
-                     lpBuffer               : *void,
-                     nNumberOfCharsToWrite  : u32,
-                     lpNumberOfCharsWritten : *u32,
-                     lpReserved             : *void) #sys_call;
+GetStdHandle  :: proc(device_type            : u32) -> *void #sys_call "kernel32.dll";
+WriteConsoleA :: proc(hConsoleOutput         : *void,
+                      lpBuffer               : *void,
+                      nNumberOfCharsToWrite  : u32,
+                      lpNumberOfCharsWritten : *u32,
+                      lpReserved             : *void) #sys_call "kernel32.dll";
 

@@ -18,6 +18,7 @@ Type           * resolve_decl_type(Decl *decl);
 Type           * resolve_decl_var(Decl *decl);
 Resolved_Stmts   resolve_stmt(Stmt *stmt);
 Scope          * scope_new(char *name, Scope *parent = NULL);
+Sym            * sym_push_scope(Scope *scope, char *name, Type *type);
 void             type_complete(Type *type);
 
 enum Sym_Kind {
@@ -422,6 +423,21 @@ sym_new(char *name) {
     result->type = NULL;
 
     return result;
+}
+
+Sym *
+sym_push_scope(Scope *scope, char *name, Type *type) {
+    Sym *result = sym_new(name);
+
+    result->type = type;
+    scope_push(scope, result);
+
+    return result;
+}
+
+void
+sym_push(Sym *sym) {
+    scope_push(curr_scope, sym);
 }
 
 Sym *
@@ -1024,6 +1040,16 @@ resolve_stmt(Stmt *stmt) {
                 }
             } else {
                 buf_push(result, resolved_stmt(stmt, NULL, type_void, operand(type_void)));
+            }
+        } break;
+
+        case STMT_USING: {
+            Operand *op = resolve_expr(AS_USING(stmt)->expr);
+            type_complete(op->type);
+
+            for ( int i = 0; i < buf_len(op->type->scope->sym_list); ++i ) {
+                Sym *sym = op->type->scope->sym_list[i];
+                sym_push(sym);
             }
         } break;
 
