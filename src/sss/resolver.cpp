@@ -243,7 +243,7 @@ type_compound(Compound_Elems elems, uint32_t num_elems) {
 }
 
 bool
-type_is_numerical(Type *type) {
+type_isnum(Type *type) {
     bool result = type->kind >= TYPE_U8 && type->kind <= TYPE_F64;
 
     return result;
@@ -623,7 +623,7 @@ resolve_expr(Expr *expr, Type *given_type = NULL) {
         case EXPR_UNARY: {
             Operand *op = resolve_expr(AS_UNARY(expr)->expr);
 
-            if ( !type_is_numerical(op->type) ) {
+            if ( !type_isnum(op->type) ) {
                 assert(!"numerischer ausdruck erwartet");
             }
 
