@@ -219,6 +219,7 @@ struct Bytecode {
     X(BYTECODEOP_POP)               \
     X(BYTECODEOP_PUSH)              \
     X(BYTECODEOP_PUSH_SYM)          \
+    X(BYTECODEOP_PUSH_DECL_SYM)     \
     X(BYTECODEOP_PUSH_SYSSYM)       \
     X(BYTECODEOP_PUSH_TYPEVAL)      \
     X(BYTECODEOP_RANGE)             \
@@ -1396,6 +1397,14 @@ bytecode_debug(Vm *vm, int32_t code) {
             printf("OP_PUSH_SYM ");
             val_print(bytecode_fetch_constant(frame->proc->bc, frame->proc->bc->code[frame->pc]));
             printf("[val: ");
+            val_print(vm->stack[frame->sp-1]);
+            printf("]\n");
+        } break;
+
+        case BYTECODEOP_PUSH_DECL_SYM: {
+            printf("OP_PUSH_DECL_SYM ");
+            val_print(bytecode_fetch_constant(frame->proc->bc, frame->proc->bc->code[frame->pc]));
+            printf("[val: ");
 
             Value type_val = vm->stack[frame->sp-1];
             Value expr_val = vm->stack[frame->sp-2];
@@ -1754,7 +1763,7 @@ bytecode_decl(Bytecode *bc, Decl *decl) {
                 bytecode_write8(bc, BYTECODEOP_NONE);
             }
 
-            bytecode_write8(bc, BYTECODEOP_PUSH_SYM);
+            bytecode_write8(bc, BYTECODEOP_PUSH_DECL_SYM);
             bytecode_write16(bc, (uint16_t)index);
         } break;
 
@@ -1773,7 +1782,7 @@ bytecode_decl(Bytecode *bc, Decl *decl) {
                 bytecode_write8(bc, BYTECODEOP_NONE);
             }
 
-            bytecode_write8(bc, BYTECODEOP_PUSH_SYM);
+            bytecode_write8(bc, BYTECODEOP_PUSH_DECL_SYM);
             bytecode_write16(bc, (uint16_t)index);
         } break;
 
@@ -1785,8 +1794,6 @@ bytecode_decl(Bytecode *bc, Decl *decl) {
             bytecode_write16(bc, (uint16_t)index);
 
             index = bytecode_push_constant(bc, val_str(decl->name, decl->len));
-            bytecode_write8(bc, BYTECODEOP_NONE);
-
             bytecode_write8(bc, BYTECODEOP_PUSH_SYM);
             bytecode_write16(bc, (uint16_t)index);
 
@@ -1818,7 +1825,6 @@ bytecode_decl(Bytecode *bc, Decl *decl) {
         case DECL_ENUM: {
             Value val = val_enum(decl->name, decl->len);
             int32_t index = bytecode_emit_const(bc, val);
-            bytecode_write8(bc, BYTECODEOP_NONE);
 
             int32_t name_index = bytecode_push_constant(bc, val_str(decl->name, decl->len));
             bytecode_write8(bc, BYTECODEOP_PUSH_SYM);
@@ -1859,7 +1865,6 @@ bytecode_decl(Bytecode *bc, Decl *decl) {
         case DECL_STRUCT: {
             Value val = val_struct(decl->name, decl->len);
             int32_t index = bytecode_emit_const(bc, val);
-            bytecode_write8(bc, BYTECODEOP_NONE);
 
             int32_t name_index = bytecode_push_constant(bc, val_str(decl->name, decl->len));
             bytecode_write8(bc, BYTECODEOP_PUSH_SYM);
@@ -2542,6 +2547,19 @@ step(Vm *vm) {
         } break;
 
         case BYTECODEOP_PUSH_SYM: {
+            Obj_String *name = as_str(value_get(&frame->proc->bc->constants, bytecode_read16(vm)));
+            Value val = stack_pop(vm);
+
+            if ( !bytecode_sym_set(name, val) ) {
+                assert(!"symbol konnte nicht gesetzt werden");
+            }
+
+            if ( is_proc(val) ) {
+                as_proc(val)->scope->parent = bc_curr_scope;
+            }
+        } break;
+
+        case BYTECODEOP_PUSH_DECL_SYM: {
             Obj_String *name = as_str(value_get(&frame->proc->bc->constants, bytecode_read16(vm)));
 
             Value type_val = stack_pop(vm);
