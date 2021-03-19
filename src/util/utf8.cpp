@@ -330,21 +330,28 @@ utf8_str_tolower(char *str) {
 
 enum { STRING_NOT_CASESENSITIVE, STRING_CASESENSITIVE };
 static int32_t
-utf8_str_cmp(char *left, char *right, uint32_t case_sensitive) {
+utf8_str_cmp(char *left, char *right, uint32_t length = 0, uint32_t flags = STRING_NOT_CASESENSITIVE) {
     char *lval = left;
     char *rval = right;
 
-    if ( !case_sensitive ) {
-        lval = utf8_str_tolower(lval);
-        rval = utf8_str_tolower(rval);
-    }
+    if ( length ) {
+        if ( flags & STRING_CASESENSITIVE ) {
+            return _strnicmp(left, right, length);
+        }
 
-    return strcmp(lval, rval);
+        return _strnicmp(left, right, length);
+    } else {
+        if ( flags & STRING_CASESENSITIVE ) {
+            return _stricmp(left, right);
+        }
+
+        return strcmp(left, right);
+    }
 }
 
 static bool
-utf8_str_eq(char *left, char *right, uint32_t case_sensitive) {
-    int32_t result = utf8_str_cmp(left, right, case_sensitive) == 0;
+utf8_str_eq(char *left, char *right, uint32_t length = 0, uint32_t flags = STRING_NOT_CASESENSITIVE) {
+    int32_t result = utf8_str_cmp(left, right, length, flags) == 0;
 
     return result;
 }
