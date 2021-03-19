@@ -192,6 +192,7 @@ struct Bytecode {
 
 #define BYTECODES                   \
     X(BYTECODEOP_HLT)               \
+    X(BYTECODEOP_ADDR)              \
     X(BYTECODEOP_NEG)               \
     X(BYTECODEOP_ADD)               \
     X(BYTECODEOP_CALL)              \
@@ -1589,6 +1590,12 @@ bytecode_debug(Vm *vm, int32_t code) {
             printf("\n");
         } break;
 
+        case BYTECODEOP_ADDR: {
+            printf("@");
+            val_print(vm->stack[frame->sp-1]);
+            printf("\n");
+        } break;
+
         default: {
             assert(!"unbekannter bytecode");
         } break;
@@ -1710,6 +1717,11 @@ bytecode_expr(Bytecode *bc, Expr *expr, uint32_t flags = BYTECODEFLAG_NONE) {
             } else {
                 assert(!"unbekannter operator");
             }
+        } break;
+
+        case EXPR_AT: {
+            bytecode_expr(bc, AS_AT(expr)->expr);
+            bytecode_write8(bc, BYTECODEOP_ADDR);
         } break;
 
         default: {
@@ -2826,6 +2838,27 @@ step(Vm *vm) {
         case BYTECODEOP_NEG: {
             Value val = stack_pop(vm);
             stack_push(vm, -val);
+        } break;
+
+        case BYTECODEOP_ADDR: {
+            Value val = stack_pop(vm);
+            switch ( val.kind ) {
+                case VAL_INT: {
+                    stack_push(vm, val_ptr(&val.int_val));
+                } break;
+
+                case VAL_FLOAT: {
+                    stack_push(vm, val_ptr(&val.flt_val));
+                } break;
+
+                case VAL_BOOL: {
+                    stack_push(vm, val_ptr(&val.bool_val));
+                } break;
+
+                default: {
+                    assert(!"unbekannter datentyp");
+                } break;
+            }
         } break;
 
         case BYTECODEOP_IMPORT_SYMS: {

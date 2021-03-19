@@ -11,6 +11,7 @@ struct Ast_Elem {
 enum Token_Kind {
     T_NONE,
 
+    T_AT,
     T_HASH,
     T_COMMA,
     T_COLON,
@@ -234,6 +235,9 @@ recurse:
 
         if ( AT(0) == '\0' ) {
             break;
+        } else if ( utf8_str_eq(c, "@", 1) ) {
+            NEXT();
+            token_push(&result, token_str(T_AT, "@", 1, file, line, col));
         } else if ( AT(0) == ';' ) {
             NEXT();
             token_push(&result, token_str(T_SEMICOLON, ";", 1, file, line, col));

@@ -681,6 +681,12 @@ resolve_expr(Expr *expr, Type *given_type = NULL) {
             }
         } break;
 
+        case EXPR_AT: {
+            Operand *op = resolve_expr(AS_AT(expr)->expr);
+
+            result = operand(type_ptr(op->type));
+        } break;
+
         case EXPR_FIELD: {
             Operand *base = resolve_expr(AS_FIELD(expr)->base);
             assert(base->type);

@@ -106,6 +106,7 @@ struct Note : Ast_Elem {
 enum Expr_Kind {
     EXPR_NONE,
 
+    EXPR_AT,
     EXPR_STR,
     EXPR_INT,
     EXPR_FLOAT,
@@ -129,6 +130,11 @@ enum Expr_Kind {
 struct Expr : Ast_Elem {
     Expr_Kind   kind;
     Type      * type;
+};
+
+#define AS_AT(Expr) ((Expr_At *)(Expr))
+struct Expr_At : Expr {
+    Expr *expr;
 };
 
 #define AS_INT(Expr) ((Expr_Int *)(Expr))
@@ -743,6 +749,15 @@ expr_print(Expr *expr) {
     }
 }
 
+Expr_At *
+expr_at(Ast_Elem *loc, Expr *expr) {
+    STRUCTK(Expr_At, EXPR_AT);
+
+    result->expr = expr;
+
+    return result;
+}
+
 Expr_Int *
 expr_int(Ast_Elem *loc, int64_t val) {
     STRUCTK(Expr_Int, EXPR_INT);
@@ -995,6 +1010,8 @@ parse_expr_base(Token_List *tokens) {
         }
 
         result = expr_unary(curr, OP_SUB, parse_expr(tokens));
+    } else if ( token_match(tokens, T_AT) ) {
+        result = expr_at(curr, parse_expr(tokens));
     } else if ( token_is(tokens, T_IDENT) ) {
         if ( token_is_keyword(tokens) ) {
             if ( keyword_matches(tokens, keyword_false) ) {
