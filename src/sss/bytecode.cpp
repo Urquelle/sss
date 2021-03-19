@@ -737,6 +737,7 @@ Obj_Ptr *
 obj_ptr(void *ptr) {
     Obj_Ptr *result = urq_allocs(Obj_Ptr);
 
+    result->kind = OBJ_PTR;
     result->ptr = ptr;
 
     return result;
