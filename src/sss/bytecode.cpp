@@ -1816,7 +1816,7 @@ bytecode_decl(Bytecode *bc, Decl *decl) {
             proc->scope->name = decl->name;
             proc->num_params = (uint32_t)AS_PROC(decl)->sign->num_params;
 
-            for ( uint32_t i = 0; i < AS_PROC(decl)->sign->num_params; ++i ) {
+            for ( int32_t i = AS_PROC(decl)->sign->num_params-1; i >= 0; --i ) {
                 Proc_Param *param = AS_PROC(decl)->sign->params[i];
 
                 index = bytecode_push_constant(proc->bc, val_str(param->name, param->len));
