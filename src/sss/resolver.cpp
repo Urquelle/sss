@@ -10,6 +10,8 @@ typedef Resolved_Stmt ** Resolved_Stmts;
 typedef Sym           ** Syms;
 typedef Type          ** Types;
 
+Types types;
+
 Resolved_Stmts   resolve(Parsed_File *parsed_file);
 Type           * resolve_decl(Decl *d);
 Type           * resolve_decl_const(Decl *decl);
@@ -190,6 +192,8 @@ type_new( uint32_t size, Type_Kind kind ) {
     result->id    = type_id++;
     result->scope = scope_new("type");
 
+    buf_push(types, result);
+
     return result;
 }
 
@@ -203,6 +207,8 @@ type_string_new() {
     result->scope = scope_new("string");
 
     sym_push_scope(result->scope, "size", type_u64);
+
+    buf_push(types, result);
 
     return result;
 }
@@ -218,6 +224,8 @@ type_incomplete_struct(Sym *sym) {
     result->id    = type_id++;
     result->scope = scope_new(sym->name);
 
+    buf_push(types, result);
+
     return result;
 }
 
@@ -231,6 +239,8 @@ type_incomplete_enum(Sym *sym) {
     result->align = 0;
     result->id    = type_id++;
     result->scope = scope_new(sym->name);
+
+    buf_push(types, result);
 
     return result;
 }
@@ -256,6 +266,8 @@ type_compound(Compound_Elems elems, uint32_t num_elems) {
     result->scope     = NULL;
     result->elems     = elems;
     result->num_elems = num_elems;
+
+    buf_push(types, result);
 
     return result;
 }
