@@ -1990,6 +1990,7 @@ parse_directive_load(Token_List *tokens) {
 
     Expr *file = parse_expr(tokens);
     assert(file->kind == EXPR_STR);
+    token_expect(tokens, T_SEMICOLON);
 
     char *file_name = ((Expr_Str *)file)->val;
 

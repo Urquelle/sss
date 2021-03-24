@@ -1,18 +1,9 @@
-a : s32 = 5 + 3;
-b := a + 1;
-
-falls a == b {
-    b = 10;
-} sonst falls a > b {
-    b = 5;
-} sonst {
-    b = 0;
-}
-##(
 Vec3 :: struct {
     x, y, z : s32;
 }
 
+a : s32 = 5 + 3;
+b := a + 1;
 c := falsch;
 d : s32 = 0;
 
@@ -23,6 +14,14 @@ zweig cast(u32)a {
 
 solange a < b {
     a += 1;
+}
+
+falls a == b {
+    b = 10;
+} sonst falls a > b {
+    b = 5;
+} sonst {
+    b = 0;
 }
 
 jedes 1..2 {
@@ -39,4 +38,4 @@ hallo :: proc(x: s32) -> s32 {
 
 e := hallo(15);
 f := d;
-##)
+

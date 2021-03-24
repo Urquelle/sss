@@ -630,6 +630,8 @@ resolve_expr(Expr *expr, Type *given_type = NULL) {
 
             EIDENT(expr)->sym = sym;
             result = operand(sym->type);
+
+            result->is_const = sym->kind == SYM_CONST;
         } break;
 
         case EXPR_CAST: {
@@ -667,6 +669,8 @@ resolve_expr(Expr *expr, Type *given_type = NULL) {
                     result = operand(left->type);
                 }
             }
+
+            result->is_const = left->is_const && right->is_const;
         } break;
 
         case EXPR_AT: {

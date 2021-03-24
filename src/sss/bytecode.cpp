@@ -2472,6 +2472,10 @@ bytecode_directive(Bytecode *bc, Directive *dir) {
             }
         } break;
 
+        case DIRECTIVE_LOAD: {
+            bytecode_build_file(bc, DIRLOAD(dir)->parsed_file);
+        } break;
+
         default: {
             assert(0);
         } break;
@@ -2495,6 +2499,17 @@ bytecode_build_export_directives(Bytecode *bc, Directives dirs) {
         Directive *dir = dirs[i];
 
         if ( dir->kind == DIRECTIVE_EXPORT ) {
+            bytecode_directive(bc, dir);
+        }
+    }
+}
+
+void
+bytecode_build_load_directives(Bytecode *bc, Directives dirs) {
+    for ( int i = 0; i < buf_len(dirs); ++i ) {
+        Directive *dir = dirs[i];
+
+        if ( dir->kind == DIRECTIVE_LOAD ) {
             bytecode_directive(bc, dir);
         }
     }
@@ -2528,6 +2543,7 @@ void
 bytecode_build_file(Bytecode *bc, Parsed_File *file) {
     bytecode_register_globals(bc, file);
     bytecode_build_import_directives(bc, file->directives);
+    bytecode_build_load_directives(bc, file->directives);
     bytecode_build_stmts(bc, file->stmts);
     bytecode_build_export_directives(bc, file->directives);
 }
