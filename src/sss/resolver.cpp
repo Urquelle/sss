@@ -1,28 +1,4 @@
-struct Operand;
-struct Proc_Sign;
-struct Resolved_Stmt;
-struct Scope;
-struct Type_Proc;
-struct Type_Struct;
-
-typedef Operand       ** Operands;
-typedef Resolved_Stmt ** Resolved_Stmts;
-typedef Sym           ** Syms;
-typedef Type          ** Types;
-
 Types types;
-
-Resolved_Stmts   resolve(Parsed_File *parsed_file);
-Type           * resolve_decl(Decl *d);
-Type           * resolve_decl_const(Decl *decl);
-Type_Proc      * resolve_decl_proc(Decl *decl);
-Type           * resolve_decl_type(Decl *decl);
-Type           * resolve_decl_var(Decl *decl);
-Resolved_Stmts   resolve_stmt(Stmt *stmt);
-Type           * resolve_typespec(Typespec *t);
-Scope          * scope_new(char *name, Scope *parent = NULL);
-Sym            * sym_push_scope(Scope *scope, char *name, Type *type);
-void             type_complete(Type *type);
 
 enum Sym_Kind {
     SYM_NONE,
@@ -646,19 +622,19 @@ resolve_expr(Expr *expr, Type *given_type = NULL) {
         } break;
 
         case EXPR_IDENT: {
-            Sym *sym = resolve_name(AS_IDENT(expr)->val);
+            Sym *sym = resolve_name(EIDENT(expr)->val);
 
             if ( !sym ) {
                 assert(!"unbekanntes symbol");
             }
 
-            AS_IDENT(expr)->sym = sym;
+            EIDENT(expr)->sym = sym;
             result = operand(sym->type);
         } break;
 
         case EXPR_CAST: {
-            Type *type_to_cast_to = resolve_typespec(AS_CAST(expr)->typespec);
-            Operand *type_to_cast = resolve_expr(AS_CAST(expr)->expr);
+            Type *type_to_cast_to = resolve_typespec(ECAST(expr)->typespec);
+            Operand *type_to_cast = resolve_expr(ECAST(expr)->expr);
 
             /* @AUFGABE: überprüfen ob der datentyp umgewandelt werden darf/kann */
             result = operand(type_to_cast_to);
@@ -669,7 +645,7 @@ resolve_expr(Expr *expr, Type *given_type = NULL) {
         } break;
 
         case EXPR_UNARY: {
-            Operand *op = resolve_expr(AS_UNARY(expr)->expr);
+            Operand *op = resolve_expr(EUNARY(expr)->expr);
 
             if ( !type_isnum(op->type) ) {
                 assert(!"numerischer ausdruck erwartet");
@@ -679,12 +655,12 @@ resolve_expr(Expr *expr, Type *given_type = NULL) {
         } break;
 
         case EXPR_BIN: {
-            Operand *left = resolve_expr(AS_BIN(expr)->left);
-            Operand *right = resolve_expr(AS_BIN(expr)->right);
+            Operand *left = resolve_expr(EBIN(expr)->left);
+            Operand *right = resolve_expr(EBIN(expr)->right);
 
-            if ( AS_BIN(expr)->op >= OP_CMP_START && AS_BIN(expr)->op <= OP_CMP_END ) {
+            if ( EBIN(expr)->op >= OP_CMP_START && EBIN(expr)->op <= OP_CMP_END ) {
                 result = operand(type_bool);
-            } else if ( AS_BIN(expr)->op >= OP_MATH_START && AS_BIN(expr)->op <= OP_MATH_END ) {
+            } else if ( EBIN(expr)->op >= OP_MATH_START && EBIN(expr)->op <= OP_MATH_END ) {
                 if ( left->is_const && right->is_const ) {
                     result = operand_const(left->type);
                 } else {
@@ -694,50 +670,50 @@ resolve_expr(Expr *expr, Type *given_type = NULL) {
         } break;
 
         case EXPR_AT: {
-            Operand *op = resolve_expr(AS_AT(expr)->expr);
+            Operand *op = resolve_expr(EAT(expr)->expr);
 
             result = operand(type_ptr(op->type));
         } break;
 
         case EXPR_FIELD: {
-            Operand *base = resolve_expr(AS_FIELD(expr)->base);
+            Operand *base = resolve_expr(EFIELD(expr)->base);
             assert(base->type);
             assert( base->type->scope );
 
-            Sym *sym = sym_get(base->type->scope, AS_FIELD(expr)->field);
+            Sym *sym = sym_get(base->type->scope, EFIELD(expr)->field);
             assert(sym);
 
             result = operand(sym->type);
         } break;
 
         case EXPR_INDEX: {
-            Operand *base = resolve_expr(AS_INDEX(expr)->base);
+            Operand *base = resolve_expr(EINDEX(expr)->base);
             assert(base->type && base->type->kind == TYPE_ARRAY);
-            result = operand(((Type_Array *)base->type)->base);
+            result = operand(TARRAY(base->type)->base);
         } break;
 
         case EXPR_PAREN: {
-            result = resolve_expr(AS_PAREN(expr)->expr);
+            result = resolve_expr(EPAREN(expr)->expr);
         } break;
 
         case EXPR_CALL: {
-            Operand *op = resolve_expr(AS_CALL(expr)->base);
+            Operand *op = resolve_expr(ECALL(expr)->base);
             assert(op->type && op->type->kind == TYPE_PROC);
 
-            Type_Proc *op_type = (Type_Proc *)op->type;
+            Type_Proc *op_type = TPROC(op->type);
 
-            if ( op_type->num_params > AS_CALL(expr)->num_args ) {
+            if ( op_type->num_params > ECALL(expr)->num_args ) {
                 assert(!"ungenügend anzahl argumente");
             }
 
-            for ( uint32_t i = 0; i < ((Type_Proc *)op->type)->num_params; ++i ) {
-                Proc_Param *param = ((Type_Proc *)op->type)->params[i];
+            for ( uint32_t i = 0; i < TPROC(op->type)->num_params; ++i ) {
+                Proc_Param *param = TPROC(op->type)->params[i];
 
                 if ( param->type == type_vararg ) {
                     break;
                 }
 
-                Operand *arg = resolve_expr(AS_CALL(expr)->args[i]);
+                Operand *arg = resolve_expr(ECALL(expr)->args[i]);
 
                 operand_cast(param->type, arg);
                 if ( param->type != arg->type ) {
@@ -745,16 +721,16 @@ resolve_expr(Expr *expr, Type *given_type = NULL) {
                 }
             }
 
-            if ( ((Type_Proc *)op->type)->num_rets ) {
-                result = operand(((Type_Proc *)op->type)->rets[0]->type);
+            if ( TPROC(op->type)->num_rets ) {
+                result = operand(TPROC(op->type)->rets[0]->type);
             } else {
                 result = operand(type_void);
             }
         } break;
 
         case EXPR_RANGE: {
-            Operand *left  = resolve_expr(AS_RANGE(expr)->left);
-            Operand *right = resolve_expr(AS_RANGE(expr)->right);
+            Operand *left  = resolve_expr(ERNG(expr)->left);
+            Operand *right = resolve_expr(ERNG(expr)->right);
 
             result = operand(left->type);
         } break;
@@ -767,14 +743,14 @@ resolve_expr(Expr *expr, Type *given_type = NULL) {
             assert(given_type);
             assert(given_type->kind == TYPE_STRUCT);
 
-            if ( ((Type_Struct *)given_type)->num_fields != AS_COMPOUND(expr)->num_elems ) {
+            if ( ((Type_Struct *)given_type)->num_fields != ECMPND(expr)->num_elems ) {
                 assert(!"falsche anzahl der argumente");
             }
 
             Compound_Elems args = NULL;
-            for ( int i = 0; i < ((Type_Struct *)given_type)->num_fields; ++i ) {
-                Struct_Field  * struct_field = ((Type_Struct *)given_type)->fields[i];
-                Compound_Elem * arg          = AS_COMPOUND(expr)->elems[i];
+            for ( int i = 0; i < TSTRUCT(given_type)->num_fields; ++i ) {
+                Struct_Field  * struct_field = TSTRUCT(given_type)->fields[i];
+                Compound_Elem * arg          = ECMPND(expr)->elems[i];
 
                 if ( arg->name ) {
                     assert(!"unbehandelter fall");
@@ -834,10 +810,9 @@ resolve_typespec(Typespec *t) {
         } break;
 
         case TYPESPEC_ARRAY: {
-            Typespec_Array *typespec = (Typespec_Array *)t;
-            Operand *op = resolve_expr(typespec->num_elems);
+            Operand *op = resolve_expr(TSARRAY(t)->num_elems);
             /* @AUFGABE: den wert 1 mit dem wert aus op ersetzen */
-            result = type_array(resolve_typespec(typespec->base), 1);
+            result = type_array(resolve_typespec(TSARRAY(t)->base), 1);
         } break;
 
         case TYPESPEC_VARARG: {
@@ -859,12 +834,12 @@ Type_Proc *
 resolve_decl_proc(Decl *decl) {
     assert(decl->kind == DECL_PROC);
 
-    Proc_Sign *sign = AS_PROC(decl)->sign;
+    Proc_Sign *sign = DPROC(decl)->sign;
     for ( size_t i = 0; i < sign->num_params; ++i ) {
         sign->params[i]->type = resolve_typespec(sign->params[i]->typespec);
     }
 
-    for ( size_t i = 0; i < AS_PROC(decl)->sign->num_rets; ++i ) {
+    for ( size_t i = 0; i < DPROC(decl)->sign->num_rets; ++i ) {
         sign->rets[i]->type = resolve_typespec(sign->rets[i]->typespec);
     }
 
@@ -875,8 +850,8 @@ Type *
 resolve_decl_const(Decl *decl) {
     assert(decl->kind == DECL_CONST);
 
-    Type *type = resolve_typespec(AS_VAR(decl)->typespec);
-    Operand *op = resolve_expr(AS_VAR(decl)->expr);
+    Type *type = resolve_typespec(DVAR(decl)->typespec);
+    Operand *op = resolve_expr(DVAR(decl)->expr);
 
     if ( !op->is_const ) {
         assert(!"konstanten wert erwartet");
@@ -899,7 +874,7 @@ resolve_decl_const(Decl *decl) {
 
 Type *
 resolve_decl_type(Decl *decl) {
-    Type *result = resolve_typespec(AS_TYPE(decl)->typespec);
+    Type *result = resolve_typespec(DTYPE(decl)->typespec);
 
     return result;
 }
@@ -908,8 +883,8 @@ Type *
 resolve_decl_var(Decl *decl) {
     assert(decl->kind == DECL_VAR);
 
-    Type *type = resolve_typespec(AS_VAR(decl)->typespec);
-    Operand *op = resolve_expr(AS_VAR(decl)->expr);
+    Type *type = resolve_typespec(DVAR(decl)->typespec);
+    Operand *op = resolve_expr(DVAR(decl)->expr);
 
     if ( !type && !op ) {
         assert(!"unbekannter datentyp");
@@ -937,8 +912,8 @@ resolve_decl(Decl *decl) {
 
     switch ( decl->kind ) {
         case DECL_CONST: {
-            Type *type = resolve_typespec(AS_CONST(decl)->typespec);
-            Operand *op = resolve_expr(AS_CONST(decl)->expr);
+            Type *type = resolve_typespec(DCONST(decl)->typespec);
+            Operand *op = resolve_expr(DCONST(decl)->expr);
 
             if ( !type && op->type ) {
                 type = op->type;
@@ -969,8 +944,8 @@ resolve_stmt(Stmt *stmt) {
 
     switch ( stmt->kind ) {
         case STMT_ASSIGN: {
-            Operand *lhs = resolve_expr(AS_ASSIGN(stmt)->lhs);
-            Operand *rhs = resolve_expr(AS_ASSIGN(stmt)->rhs);
+            Operand *lhs = resolve_expr(SASSIGN(stmt)->lhs);
+            Operand *rhs = resolve_expr(SASSIGN(stmt)->rhs);
 
             operand_cast(lhs->type, rhs);
             if ( lhs->type != rhs->type ) {
@@ -981,13 +956,13 @@ resolve_stmt(Stmt *stmt) {
         } break;
 
         case STMT_BLOCK: {
-            for ( int i = 0; i < AS_BLOCK(stmt)->num_stmts; ++i ) {
-                result = resolve_stmt(AS_BLOCK(stmt)->stmts[i]);
+            for ( int i = 0; i < SBLOCK(stmt)->num_stmts; ++i ) {
+                result = resolve_stmt(SBLOCK(stmt)->stmts[i]);
             }
         } break;
 
         case STMT_DECL: {
-            Decl *decl = AS_DECL(stmt)->decl;
+            Decl *decl = SDECL(stmt)->decl;
 
             switch ( decl->kind ) {
                 case DECL_VAR: {
@@ -1005,30 +980,30 @@ resolve_stmt(Stmt *stmt) {
         } break;
 
         case STMT_EXPR: {
-            Operand *operand = resolve_expr(AS_EXPR(stmt)->expr);
+            Operand *operand = resolve_expr(SEXPR(stmt)->expr);
 
             buf_push(result, resolved_stmt(stmt, NULL, operand->type, operand));
         } break;
 
         case STMT_FOR: {
             char *it = NULL;
-            if ( AS_FOR(stmt)->it ) {
-                assert(AS_FOR(stmt)->it->kind == EXPR_IDENT);
-                it = AS_IDENT(AS_FOR(stmt)->it)->val;
+            if ( SFOR(stmt)->it ) {
+                assert(SFOR(stmt)->it->kind == EXPR_IDENT);
+                it = EIDENT(SFOR(stmt)->it)->val;
             } else {
                 it = intern_str("it");
             }
 
-            Operand *cond = resolve_expr(AS_FOR(stmt)->cond);
+            Operand *cond = resolve_expr(SFOR(stmt)->cond);
 
             scope_enter("for-loop");
             Sym *sym = sym_push_var(it, cond->type);
-            resolve_stmt(AS_FOR(stmt)->block);
+            resolve_stmt(SFOR(stmt)->block);
             scope_leave();
 
-            if ( AS_FOR(stmt)->stmt_else ) {
+            if ( SFOR(stmt)->stmt_else ) {
                 scope_enter("for-else");
-                resolve_stmt(AS_FOR(stmt)->stmt_else);
+                resolve_stmt(SFOR(stmt)->stmt_else);
                 scope_leave();
             }
 
@@ -1036,34 +1011,37 @@ resolve_stmt(Stmt *stmt) {
         } break;
 
         case STMT_IF: {
-            Stmt_If *s = (Stmt_If *)stmt;
+            Operand *op = resolve_expr(SIF(stmt)->cond);
 
-            Operand *op = resolve_expr(s->cond);
             if ( op->type != type_bool ) {
                 assert(!"boolischen ausdruck erwartet");
             }
 
             scope_enter();
-            resolve_stmt(s->stmt);
+            resolve_stmt(SIF(stmt)->stmt);
             scope_leave();
+
+            if ( SIF(stmt)->stmt_else ) {
+                resolve_stmt(SIF(stmt)->stmt_else);
+            }
 
             buf_push(result, resolved_stmt(stmt, NULL, NULL, NULL));
         } break;
 
         case STMT_WHILE: {
-            Operand *cond = resolve_expr(AS_WHILE(stmt)->cond);
+            Operand *cond = resolve_expr(SWHILE(stmt)->cond);
             assert(cond->type->kind == TYPE_BOOL);
-            resolve_stmt(AS_WHILE(stmt)->block);
+            resolve_stmt(SWHILE(stmt)->block);
 
             buf_push(result, resolved_stmt(stmt, NULL, NULL, NULL));
         } break;
 
         case STMT_MATCH: {
             /* @AUFGABE: match kann result setzen */
-            Operand *op = resolve_expr(AS_MATCH(stmt)->expr);
+            Operand *op = resolve_expr(SMATCH(stmt)->expr);
 
-            for ( int i = 0; i < AS_MATCH(stmt)->num_lines; ++i ) {
-                Match_Line *line = AS_MATCH(stmt)->lines[i];
+            for ( int i = 0; i < SMATCH(stmt)->num_lines; ++i ) {
+                Match_Line *line = SMATCH(stmt)->lines[i];
 
                 Operand *res_op = resolve_expr(line->resolution);
 
@@ -1083,16 +1061,16 @@ resolve_stmt(Stmt *stmt) {
                 assert(!"return an dieser stelle nicht erlaubt.");
             }
 
-            if ( AS_RET(stmt)->num_exprs < AS_RET(stmt)->sign->num_rets ) {
+            if ( SRET(stmt)->num_exprs < SRET(stmt)->sign->num_rets ) {
                 assert(!"zu wenig rückgabewerte");
             }
 
-            if ( AS_RET(stmt)->num_exprs > 0 ) {
-                for ( uint32_t i = 0; i < AS_RET(stmt)->sign->num_rets; ++i ) {
-                    Operand *operand = resolve_expr(AS_RET(stmt)->exprs[i]);
+            if ( SRET(stmt)->num_exprs > 0 ) {
+                for ( uint32_t i = 0; i < SRET(stmt)->sign->num_rets; ++i ) {
+                    Operand *operand = resolve_expr(SRET(stmt)->exprs[i]);
 
-                    operand_cast(AS_RET(stmt)->sign->rets[i]->type, operand);
-                    if ( AS_RET(stmt)->sign->rets[i]->type != operand->type ) {
+                    operand_cast(SRET(stmt)->sign->rets[i]->type, operand);
+                    if ( SRET(stmt)->sign->rets[i]->type != operand->type ) {
                         assert(!"falscher rückgabetyp");
                     }
 
@@ -1104,7 +1082,7 @@ resolve_stmt(Stmt *stmt) {
         } break;
 
         case STMT_USING: {
-            Operand *op = resolve_expr(AS_USING(stmt)->expr);
+            Operand *op = resolve_expr(SUSING(stmt)->expr);
             type_complete(op->type);
 
             for ( int i = 0; i < buf_len(op->type->scope->sym_list); ++i ) {
@@ -1129,7 +1107,7 @@ resolve_directive(Directive *dir) {
         case DIRECTIVE_IMPORT: {
             Scope *scope = scope_new("import", sys_scope);
             Scope *prev_scope = scope_set(scope);
-            Resolved_Stmts stmts = resolve(AS_IMPORT(dir)->parsed_file);
+            Resolved_Stmts stmts = resolve(DIRIMPORT(dir)->parsed_file);
             scope_set(prev_scope);
 
             for ( int i = 0; i < buf_len(stmts); ++i ) {
@@ -1137,12 +1115,12 @@ resolve_directive(Directive *dir) {
             }
 
             Scope *push_scope = curr_scope;
-            if ( AS_IMPORT(dir)->scope_name ) {
-                Type *type = type_namespace(AS_IMPORT(dir)->scope_name);
-                Sym *sym   = sym_push_namespace(AS_IMPORT(dir)->scope_name, type);
+            if ( DIRIMPORT(dir)->scope_name ) {
+                Type *type = type_namespace(DIRIMPORT(dir)->scope_name);
+                Sym *sym   = sym_push_namespace(DIRIMPORT(dir)->scope_name, type);
 
                 type->sym = sym;
-                type->scope->name = AS_IMPORT(dir)->scope_name;
+                type->scope->name = DIRIMPORT(dir)->scope_name;
                 type->scope->parent = curr_scope;
 
                 curr_scope = type->scope;
@@ -1172,10 +1150,10 @@ resolve_directive(Directive *dir) {
                 for ( int i = 0; i < buf_len(scope->sym_list); ++i ) {
                     Sym *sym = scope->sym_list[i];
 
-                    for ( int j = 0; j < AS_IMPORT(dir)->num_syms; ++j ) {
-                        Module_Sym *mod_sym = AS_IMPORT(dir)->syms[j];
+                    for ( int j = 0; j < DIRIMPORT(dir)->num_syms; ++j ) {
+                        Module_Sym *mod_sym = DIRIMPORT(dir)->syms[j];
 
-                        if ( mod_sym->name == sym->name || AS_IMPORT(dir)->wildcard ) {
+                        if ( mod_sym->name == sym->name || DIRIMPORT(dir)->wildcard ) {
                             Sym *push_sym = sym;
 
                             if ( mod_sym->alias ) {
@@ -1190,18 +1168,18 @@ resolve_directive(Directive *dir) {
                 }
             }
 
-            if ( AS_IMPORT(dir)->scope_name ) {
+            if ( DIRIMPORT(dir)->scope_name ) {
                 scope_leave();
             }
         } break;
 
         case DIRECTIVE_EXPORT: {
-            curr_scope->export_syms     = AS_EXPORT(dir)->syms;
-            curr_scope->num_export_syms = AS_EXPORT(dir)->num_syms;
+            curr_scope->export_syms     = DIREXPORT(dir)->syms;
+            curr_scope->num_export_syms = DIREXPORT(dir)->num_syms;
         } break;
 
         case DIRECTIVE_LOAD: {
-            result = resolve(AS_LOAD(dir)->parsed_file);
+            result = resolve(DIRLOAD(dir)->parsed_file);
         } break;
 
         default: {
@@ -1235,12 +1213,12 @@ type_complete_struct(Type_Struct *type) {
     assert(decl->kind == DECL_STRUCT);
     type->scope = scope_enter(decl->name);
 
-    if ( !AS_STRUCT(decl)->num_fields ) {
+    if ( !DSTRUCT(decl)->num_fields ) {
         assert(!"datenstruktur muss mindestens ein feld enthalten!");
     }
 
-    for ( size_t i = 0; i < AS_STRUCT(decl)->num_fields; i++ ) {
-        Struct_Field *field = AS_STRUCT(decl)->fields[i];
+    for ( size_t i = 0; i < DSTRUCT(decl)->num_fields; i++ ) {
+        Struct_Field *field = DSTRUCT(decl)->fields[i];
 
         Type *field_type = 0;
         if ( field->typespec ) {
@@ -1275,15 +1253,15 @@ type_complete_struct(Type_Struct *type) {
     uint32_t offset = 0;
     uint32_t align = 0;
 
-    for ( uint32_t i = 0; i < AS_STRUCT(decl)->num_fields; ++i ) {
-        type->size += AS_STRUCT(decl)->fields[i]->type->size;
-        type->align = MAX(type->size, AS_STRUCT(decl)->fields[i]->type->align);
-        AS_STRUCT(decl)->fields[i]->offset = offset;
-        offset += AS_STRUCT(decl)->fields[i]->type->size;
+    for ( uint32_t i = 0; i < DSTRUCT(decl)->num_fields; ++i ) {
+        type->size += DSTRUCT(decl)->fields[i]->type->size;
+        type->align = MAX(type->size, DSTRUCT(decl)->fields[i]->type->align);
+        DSTRUCT(decl)->fields[i]->offset = offset;
+        offset += DSTRUCT(decl)->fields[i]->type->size;
     }
 
-    ((Type_Struct *)type)->fields     = AS_STRUCT(decl)->fields;
-    ((Type_Struct *)type)->num_fields = AS_STRUCT(decl)->num_fields;
+    ((Type_Struct *)type)->fields     = DSTRUCT(decl)->fields;
+    ((Type_Struct *)type)->num_fields = DSTRUCT(decl)->num_fields;
 }
 
 void
@@ -1293,12 +1271,12 @@ type_complete_enum(Type_Enum *type) {
     assert(decl->kind == DECL_ENUM);
     type->scope = scope_enter(decl->name);
 
-    if ( !AS_ENUM(decl)->num_fields ) {
+    if ( !DENUM(decl)->num_fields ) {
         assert(!"datenstruktur muss mindestens ein feld enthalten!");
     }
 
-    for ( size_t i = 0; i < AS_ENUM(decl)->num_fields; i++ ) {
-        Enum_Field *field = AS_ENUM(decl)->fields[i];
+    for ( size_t i = 0; i < DENUM(decl)->num_fields; i++ ) {
+        Enum_Field *field = DENUM(decl)->fields[i];
 
         Operand *operand = NULL;
         if ( field->value ) {
@@ -1320,13 +1298,13 @@ type_complete_enum(Type_Enum *type) {
 
     uint32_t align = 0;
 
-    for ( uint32_t i = 0; i < AS_ENUM(decl)->num_fields; ++i ) {
-        type->size += AS_ENUM(decl)->fields[i]->type->size;
-        type->align = MAX(type->size, AS_ENUM(decl)->fields[i]->type->align);
+    for ( uint32_t i = 0; i < DENUM(decl)->num_fields; ++i ) {
+        type->size += DENUM(decl)->fields[i]->type->size;
+        type->align = MAX(type->size, DENUM(decl)->fields[i]->type->align);
     }
 
-    ((Type_Enum *)type)->fields     = AS_ENUM(decl)->fields;
-    ((Type_Enum *)type)->num_fields = AS_ENUM(decl)->num_fields;
+    ((Type_Enum *)type)->fields     = DENUM(decl)->fields;
+    ((Type_Enum *)type)->num_fields = DENUM(decl)->num_fields;
 }
 
 void
@@ -1349,7 +1327,7 @@ type_complete(Type *type) {
 
 void
 resolve_proc(Sym *sym) {
-    Decl_Proc *decl = AS_PROC(sym->decl);
+    Decl_Proc *decl = DPROC(sym->decl);
     assert(sym->state == SYMSTATE_RESOLVED);
     Proc_Sign *sign = decl->sign;
 
@@ -1445,7 +1423,7 @@ resolve(Parsed_File *parsed_file) {
         Stmt *stmt = parsed_file->stmts[i];
 
         if ( stmt->kind == STMT_DECL ) {
-            Sym *sym = sym_get(AS_DECL(stmt)->decl->name);
+            Sym *sym = sym_get(SDECL(stmt)->decl->name);
             assert(sym);
 
             if ( sym->decl ) {

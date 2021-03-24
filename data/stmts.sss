@@ -1,37 +1,42 @@
+a : s32 = 5 + 3;
+b := a + 1;
+
+falls a == b {
+    b = 10;
+} sonst falls a > b {
+    b = 5;
+} sonst {
+    b = 0;
+}
+##(
 Vec3 :: struct {
     x, y, z : s32;
 }
 
-a : s32 = 5 + 3;
-b := a + 1;
-c := false;
+c := falsch;
 d : s32 = 0;
 
-match cast(u32)a {
+zweig cast(u32)a {
     1..7 => a += 1;
        8 => a += 2;
 }
 
-while a < b {
+solange a < b {
     a += 1;
 }
 
-if a < b {
-    b = 10;
+jedes 1..2 {
+    b = b + it;
+} sonst {
+    b = 100;
 }
 
 hallo :: proc(x: s32) -> s32 {
     result := x + 10;
 
-    return result, 7.5;
+    res result, 7.5;
 }
 
-a = hallo(15);
-
-for 1..2 {
-    d = d + it;
-} else {
-    d = 100;
-}
-
-e := d;
+e := hallo(15);
+f := d;
+##)

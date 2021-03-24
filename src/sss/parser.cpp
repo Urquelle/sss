@@ -28,49 +28,6 @@ char *keyword_type;
 char *keyword_using;
 char *keyword_while;
 
-struct Compound_Elem;
-struct Decl;
-struct Directive;
-struct Enum_Field;
-struct Expr;
-struct Match_Line;
-struct Module_Sym;
-struct Note;
-struct Operand;
-struct Parsed_File;
-struct Proc_Param;
-struct Proc_Sign;
-struct Stmt;
-struct Stmt_Block;
-struct Stmt_If;
-struct Stmt_For;
-struct Stmt_Match;
-struct Struct_Field;
-struct Sym;
-struct Type;
-struct Typespec;
-
-typedef Compound_Elem**  Compound_Elems;
-typedef Decl**           Decls;
-typedef Directive**      Directives;
-typedef Enum_Field**     Enum_Fields;
-typedef Expr**           Exprs;
-typedef Match_Line**     Match_Lines;
-typedef Module_Sym**     Module_Syms;
-typedef Note**           Notes;
-typedef Proc_Param**     Proc_Params;
-typedef Struct_Field**   Struct_Fields;
-typedef Stmt**           Stmts;
-
-Parsed_File * parse(Token_List *tokens);
-Typespec    * parse_typespec(Token_List *tokens);
-Expr        * parse_expr(Token_List *tokens, bool with_stmt = false);
-Stmt        * parse_stmt(Token_List *tokens);
-Stmt_Block  * parse_stmt_block(Token_List *tokens, Proc_Sign *sign = NULL);
-Stmt_If     * parse_stmt_if(Token_List *tokens);
-Stmt_For    * parse_stmt_for(Token_List *tokens);
-Stmt_Match  * parse_stmt_match(Token_List *tokens);
-
 #define STRUCT(Struct) \
     Struct *result = urq_allocs(Struct); \
     result->file = loc->file; \
@@ -132,56 +89,46 @@ struct Expr : Ast_Elem {
     Type      * type;
 };
 
-#define AS_AT(Expr) ((Expr_At *)(Expr))
 struct Expr_At : Expr {
     Expr *expr;
 };
 
-#define AS_INT(Expr) ((Expr_Int *)(Expr))
 struct Expr_Int : Expr {
     int64_t val;
 };
 
-#define AS_FLOAT(Expr) ((Expr_Float *)(Expr))
 struct Expr_Float : Expr {
     float val;
 };
 
-#define AS_BOOL(Expr) ((Expr_Bool *)(Expr))
 struct Expr_Bool : Expr {
     bool val;
 };
 
-#define AS_STR(Expr) ((Expr_Str *)(Expr))
 struct Expr_Str : Expr {
     uint32_t   len;
     char     * val;
 };
 
-#define AS_IDENT(Expr) ((Expr_Ident *)(Expr))
 struct Expr_Ident : Expr {
     uint32_t   len;
     Sym      * sym;
     char     * val;
 };
 
-#define AS_NEW(Expr) ((Expr_New *)(Expr))
 struct Expr_New : Expr {
     Expr *expr;
 };
 
-#define AS_RUN(Expr) ((Expr_Run *)(Expr))
 struct Expr_Run : Expr {
     Expr *expr;
 };
 
-#define AS_KEYWORD(Expr) ((Expr_Keyword *)(Expr))
 struct Expr_Keyword : Expr {
     Sym  * sym;
     char * val;
 };
 
-#define AS_CAST(Expr) ((Expr_Cast *)(Expr))
 struct Expr_Cast : Expr {
     Typespec * typespec;
     Expr     * expr;
@@ -210,63 +157,53 @@ enum Op_Kind {
     OP_OR,
     OP_LOGIC_END = OP_OR,
 };
-#define AS_BIN(Expr) ((Expr_Bin *)(Expr))
 struct Expr_Bin : Expr {
     Op_Kind op;
     Expr * left;
     Expr * right;
 };
 
-#define AS_UNARY(Expr) ((Expr_Unary *)(Expr))
 struct Expr_Unary : Expr {
     Op_Kind op;
     Expr *expr;
 };
 
-#define AS_CALL(Expr) ((Expr_Call *)(Expr))
 struct Expr_Call : Expr {
     Expr  *base;
     Exprs  args;
     size_t num_args;
 };
 
-#define AS_FIELD(Expr) ((Expr_Field *)(Expr))
 struct Expr_Field : Expr {
     Expr     * base;
     char     * field;
     uint32_t   len;
 };
 
-#define AS_INDEX(Expr) ((Expr_Index *)(Expr))
 struct Expr_Index : Expr {
     Expr *base;
     Expr *index;
 };
 
-#define AS_PAREN(Expr) ((Expr_Paren *)(Expr))
 struct Expr_Paren : Expr {
     Expr *expr;
 };
 
-#define AS_RANGE(Expr) ((Expr_Range *)(Expr))
 struct Expr_Range : Expr {
     Expr *left;
     Expr *right;
 };
 
-#define AS_TUPLE(Expr) ((Expr_Tuple *)(Expr))
 struct Expr_Tuple : Expr {
     Exprs exprs;
     size_t num_exprs;
 };
 
-#define AS_COMPOUND(Expr) ((Expr_Compound *)(Expr))
 struct Expr_Compound : Expr {
     Compound_Elems elems;
     size_t num_elems;
 };
 
-#define AS_STMT(Expr) ((Expr_Stmt *)(Expr))
 struct Expr_Stmt : Expr {
     Stmt *stmt;
 };
@@ -290,42 +227,35 @@ struct Stmt : Ast_Elem {
     Notes notes;
 };
 
-#define AS_EXPR(Stmt) ((Stmt_Expr *)(Stmt))
 struct Stmt_Expr : Stmt {
     Expr *expr;
 };
 
-#define AS_DECL(Stmt) ((Stmt_Decl *)(Stmt))
 struct Stmt_Decl : Stmt {
     Decl *decl;
 };
 
-#define AS_ASSIGN(Stmt) ((Stmt_Assign *)(Stmt))
 struct Stmt_Assign : Stmt {
     Token *op;
     Expr  *lhs;
     Expr  *rhs;
 };
 
-#define AS_BLOCK(Stmt) ((Stmt_Block *)(Stmt))
 struct Stmt_Block : Stmt {
     Stmts stmts;
     size_t num_stmts;
 };
 
-#define AS_IF(Stmt) ((Stmt_If *)(Stmt))
 struct Stmt_If : Stmt {
     Expr *cond;
     Stmt *stmt;
     Stmt_If *stmt_else;
 };
 
-#define AS_DEFER(Stmt) ((Stmt_Defer *)(Stmt))
 struct Stmt_Defer : Stmt {
     Stmt *stmt;
 };
 
-#define AS_FOR(Stmt) ((Stmt_For *)(Stmt))
 struct Stmt_For : Stmt {
     Expr *it;
     Expr *cond;
@@ -348,7 +278,6 @@ struct Directive : Ast_Elem {
     Directive_Kind kind;
 };
 
-#define AS_IMPORT(Directive) ((Directive_Import *)(Directive))
 struct Directive_Import : Directive {
     char        * scope_name;
     bool          wildcard;
@@ -357,13 +286,11 @@ struct Directive_Import : Directive {
     Parsed_File * parsed_file;
 };
 
-#define AS_EXPORT(Directive) ((Directive_Export *)(Directive))
 struct Directive_Export : Directive {
     Module_Syms syms;
     size_t      num_syms;
 };
 
-#define AS_LOAD(Directive) ((Directive_Load *)(Directive))
 struct Directive_Load : Directive {
     Parsed_File *parsed_file;
 };
@@ -373,7 +300,6 @@ struct Match_Line : Ast_Elem {
     Stmt *stmt;
 };
 
-#define AS_MATCH(Stmt) ((Stmt_Match *)(Stmt))
 struct Stmt_Match : Stmt {
     Expr *expr;
     Match_Lines lines;
@@ -399,20 +325,17 @@ struct Struct_Field : Ast_Elem {
     int32_t    offset;
 };
 
-#define AS_RET(Stmt) ((Stmt_Ret *)(Stmt))
 struct Stmt_Ret : Stmt {
     Exprs       exprs;
     uint32_t    num_exprs;
     Proc_Sign * sign;
 };
 
-#define AS_WHILE(Stmt) ((Stmt_While *)(Stmt))
 struct Stmt_While : Stmt {
     Expr * cond;
     Stmt * block;
 };
 
-#define AS_USING(Stmt) ((Stmt_Using *)(Stmt))
 struct Stmt_Using : Stmt {
     Expr *expr;
 };
@@ -435,36 +358,30 @@ struct Decl : Ast_Elem {
     Sym       * sym;
 };
 
-#define AS_VAR(Decl) ((Decl_Var *)(Decl))
 struct Decl_Var : Decl {
     Typespec *typespec;
     Expr     *expr;
 };
 
-#define AS_TYPE(Decl) ((Decl_Type *)(Decl))
 struct Decl_Type : Decl {
     Typespec *typespec;
 };
 
-#define AS_CONST(Decl) ((Decl_Const *)(Decl))
 struct Decl_Const : Decl {
     Typespec *typespec;
     Expr *expr;
 };
 
-#define AS_ENUM(Decl) ((Decl_Enum *)(Decl))
 struct Decl_Enum : Decl {
     Enum_Fields fields;
     size_t num_fields;
 };
 
-#define AS_STRUCT(Decl) ((Decl_Struct *)(Decl))
 struct Decl_Struct : Decl {
     Struct_Fields fields;
     size_t num_fields;
 };
 
-#define AS_PROC(Decl) ((Decl_Proc *)(Decl))
 struct Decl_Proc : Decl {
     Typespec *typespec;
     Proc_Sign *sign;
@@ -495,7 +412,6 @@ struct Typespec : Ast_Elem {
     Type          * type;
 };
 
-#define AS_NAME(Typespec) ((Typespec_Name *)(Typespec))
 struct Typespec_Name : Typespec {
     char     * name;
     uint32_t   len;
@@ -740,7 +656,7 @@ void
 expr_print(Expr *expr) {
     switch ( expr->kind ) {
         case EXPR_INT: {
-            printf("%lld", AS_INT(expr)->val);
+            printf("%lld", EINT(expr)->val);
         } break;
 
         default: {
@@ -966,7 +882,7 @@ parse_expr_ident(Token_List *tokens) {
 
     assert(expr->kind == EXPR_IDENT);
 
-    return AS_IDENT(expr)->val;
+    return EIDENT(expr)->val;
 }
 
 char *
@@ -975,7 +891,7 @@ parse_expr_string(Token_List *tokens) {
 
     assert(expr->kind == EXPR_STR);
 
-    return AS_STR(expr)->val;
+    return ESTR(expr)->val;
 }
 
 Expr_Cast *
@@ -1049,14 +965,14 @@ parse_expr_base(Token_List *tokens) {
 
                 if ( token_match(tokens, T_COLON) ) {
                     assert(value->kind == EXPR_IDENT);
-                    name     = AS_IDENT(value)->val;
+                    name     = EIDENT(value)->val;
                     value    = NULL;
                     typespec = parse_typespec(tokens);
                 }
 
                 if ( token_match(tokens, T_EQL_ASSIGN) ) {
                     assert(value->kind == EXPR_IDENT);
-                    name  = AS_IDENT(value)->val;
+                    name  = EIDENT(value)->val;
                     value = parse_expr(tokens);
                 }
 
@@ -1824,7 +1740,7 @@ parse_stmt_block(Token_List *tokens, Proc_Sign *sign) {
             Stmt *stmt = parse_stmt(tokens);
 
             if ( stmt->kind == STMT_RET ) {
-                AS_RET(stmt)->sign = sign;
+                SRET(stmt)->sign = sign;
             }
 
             buf_push(stmts, stmt);
@@ -1894,7 +1810,7 @@ parse_stmt_if(Token_List *tokens) {
         if ( keyword_matches(tokens, keyword_if ) ) {
             stmt_else = parse_stmt_if(tokens);
         } else {
-            stmt_else = stmt_if(curr, NULL, parse_stmt_block(tokens), NULL);
+            stmt_else = stmt_if(curr, expr_bool(curr, true), parse_stmt_block(tokens), NULL);
         }
     }
 
@@ -2216,7 +2132,8 @@ parse_stmt(Token_List *tokens) {
 
 Parsed_File *
 parse(Token_List *tokens) {
-#define KEYWORD(Key) keyword_##Key = intern_str(#Key); buf_push(keywords, keyword_##Key)
+#define KEYWORD_K(Key, Var) keyword_##Var = intern_str(#Key); buf_push(keywords, keyword_##Var)
+#define KEYWORD(Key) KEYWORD_K(Key, Key)
     KEYWORD(api);
     KEYWORD(as);
     KEYWORD(break);
@@ -2224,27 +2141,27 @@ parse(Token_List *tokens) {
     KEYWORD(const);
     KEYWORD(defer);
     KEYWORD(enum);
-    KEYWORD(else);
+    KEYWORD_K(sonst, else);
     KEYWORD(export);
-    KEYWORD(false);
-    KEYWORD(for);
+    KEYWORD_K(falsch, false);
+    KEYWORD_K(jedes, for);
     KEYWORD(free);
     KEYWORD(from);
-    KEYWORD(if);
+    KEYWORD_K(falls, if);
     KEYWORD(impl);
     KEYWORD(import);
     KEYWORD(load);
-    KEYWORD(match);
+    KEYWORD_K(zweig, match);
     KEYWORD(new);
     KEYWORD(note);
     KEYWORD(proc);
-    KEYWORD(return);
-    KEYWORD(run);
+    KEYWORD_K(res, return);
+    KEYWORD_K(ausführen, run);
     KEYWORD(struct);
-    KEYWORD(true);
+    KEYWORD_K(wahr, true);
     KEYWORD(type);
-    KEYWORD(using);
-    KEYWORD(while);
+    KEYWORD_K(mit, using);
+    KEYWORD_K(solange, while);
 #undef KEYWORD
 
     Stmts stmts = NULL;

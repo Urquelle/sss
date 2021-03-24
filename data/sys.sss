@@ -5,7 +5,7 @@
 }
 
 print :: proc(fmt: string, args: ...) {
-    using Win32;
+    mit Win32;
 
     handle := get_std_handle(cast(u32)Device_Type.STD_OUTPUT_HANDLE);
     chars_written : u32;
