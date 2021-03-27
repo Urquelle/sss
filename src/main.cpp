@@ -43,6 +43,7 @@ CALLOCATOR(custom_calloc) {
 
 int main(int argc, char* argv[]) {
     using namespace Urq::Os::api;
+    using namespace Urq::Sss::api;
 
     perm_arena = arena_new(1024);
     temp_arena = arena_new(1024);
@@ -53,22 +54,25 @@ int main(int argc, char* argv[]) {
     urq_realloc = custom_realloc;
     urq_dealloc = custom_dealloc;
 
-    using namespace Urq::Sss::api;
+    os_init();
+    resolver_init();
+
+    char *file_name = NULL;
+    Line_Args args = line_arg_push(NULL, line_arg(&file_name, "dateiname", "f", "Pfad zur Programmdatei", LINE_ARG_NOT_REQUIRED));
+    parse_args(argc, argv, args);
 
     if ( argc < 2 ) {
         sss_repl();
     } else {
         char *content = "";
-        os_file_read(argv[1], &content);
-
-        resolver_init();
+        os_file_read(file_name, &content);
 
         auto tokens   = tokenize(argv[1], content);
         auto parsed   = parse(&tokens);
         auto resolved = resolve(parsed);
         auto code     = build(parsed);
-
-        eval(code);
+             code     = optimize(code);
+                        eval(code);
     }
 
     return 0;

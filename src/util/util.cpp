@@ -3,136 +3,11 @@
 
 #include "common.cpp"
 #include "utf8.cpp"
-
-uint64_t
-uint64_hash(uint64_t x) {
-    x *= 0xff51afd7ed558ccd;
-    x ^= x >> 32;
-
-    return x;
-}
-
-uint64_t
-ptr_hash(void *ptr) {
-    return uint64_hash((uintptr_t)ptr);
-}
-
-uint64_t
-mix_hash(uint64_t x, uint64_t y) {
-    x ^= y;
-    x *= 0xff51afd7ed558ccd;
-    x ^= x >> 32;
-
-    return x;
-}
-
-uint64_t
-bytes_hash(void *ptr, size_t len) {
-    uint64_t x = 0xcbf29ce484222325;
-    char *buf = (char *)ptr;
-
-    for (size_t i = 0; i < len; i++) {
-        x ^= buf[i];
-        x *= 0x100000001b3;
-        x ^= x >> 32;
-    }
-
-    return x;
-}
-
-struct Map {
-    void **vals;
-    void **keys;
-    size_t len;
-    size_t cap;
-};
-
-void *
-map_get(Map *map, void *key) {
-    if (map->len == 0) {
-        return NULL;
-    }
-
-    assert(IS_POW2(map->cap));
-    size_t i = (size_t)ptr_hash(key);
-    assert(map->len < map->cap);
-
-    for (;;) {
-        i &= map->cap - 1;
-
-        if ( map->keys[i] == key ) {
-            return map->vals[i];
-        } else if ( !map->keys[i] ) {
-            return NULL;
-        }
-        i++;
-    }
-
-    return NULL;
-}
-
-void map_put(Map *map, void *key, void *val);
-
-void
-map_grow(Map *map, size_t new_cap) {
-    new_cap = MAX(16, new_cap);
-    Map new_map = {};
-
-    new_map.keys = (void **)urq_calloc(new_cap, sizeof(void *));
-    new_map.vals = (void **)urq_alloc(new_cap * sizeof(void *));
-    new_map.cap  = new_cap;
-
-    for ( size_t i = 0; i < map->cap; i++ ) {
-        if ( map->keys[i] ) {
-            map_put(&new_map, map->keys[i], map->vals[i]);
-        }
-    }
-
-    urq_dealloc(map->keys);
-    urq_dealloc(map->vals);
-    *map = new_map;
-}
-
-void
-map_put(Map *map, void *key, void *val) {
-    assert(key);
-    assert(val);
-
-    if (2*map->len >= map->cap) {
-        map_grow(map, 2*map->cap);
-    }
-
-    assert(2*map->len < map->cap);
-    assert(IS_POW2(map->cap));
-
-    size_t i = (size_t)ptr_hash(key);
-    for (;;) {
-        i &= map->cap - 1;
-
-        if ( !map->keys[i] ) {
-            map->len++;
-            map->keys[i] = key;
-            map->vals[i] = val;
-
-            return;
-        } else if ( map->keys[i] == key ) {
-            map->vals[i] = val;
-
-            return;
-        }
-
-        i++;
-    }
-}
-
-void
-map_reset(Map *map) {
-    for ( int i = 0; i < map->cap; ++i ) {
-        if ( map->keys[i] ) {
-            ((char **)map->keys)[i] = 0;
-        }
-    }
-}
+#include "hash.cpp"
+#include "bit.cpp"
+#include "map.cpp"
+#include "arena.cpp"
+#include "queue.cpp"
 
 struct Intern {
     size_t   len;
@@ -168,210 +43,6 @@ char *
 intern_str(Map *interns, char *value) {
     size_t len = strlen(value);
     return intern_str(interns, value, value + len);
-}
-
-struct Queue_Entry {
-    Queue_Entry * next;
-    Queue_Entry * prev;
-    void        * data;
-};
-
-struct Queue {
-    Queue_Entry   root;
-    Queue_Entry * curr;
-    size_t        num_elems;
-};
-
-void *
-queue_entry(Queue *q, size_t index) {
-    if ( index >= q->num_elems ) {
-        return NULL;
-    }
-
-    Queue_Entry *elem = q->root.next;
-    for ( int i = 0; i < index; ++i ) {
-        elem = elem->next;
-    }
-
-    return elem->data;
-}
-
-void
-queue_push(Queue *q, void *data) {
-    Queue_Entry *entry = urq_allocs(Queue_Entry);
-
-    if ( !q->curr ) {
-        q->curr = &q->root;
-    }
-
-    entry->data = data;
-    entry->next = NULL;
-    entry->prev = q->curr;
-
-    q->curr->next = entry;
-    q->curr = entry;
-    q->num_elems++;
-}
-
-void *
-queue_pop(Queue *q) {
-    void *result = q->curr->data;
-
-    if ( q->curr != &q->root) {
-        q->curr = q->curr->prev;
-    }
-
-    q->num_elems--;
-
-    return result;
-}
-
-void *
-queue_shift(Queue *q) {
-    void *result = 0;
-
-    if ( !q->root.next ) {
-        return result;
-    }
-
-    result = q->root.next->data;
-    q->root.next = q->root.next->next;
-
-    if ( q->root.next ) {
-        q->root.next->prev = &q->root;
-    }
-
-    q->num_elems--;
-
-    return result;
-}
-
-void
-queue_unshift(Queue *q, void *data) {
-    Queue_Entry *entry = urq_allocs(Queue_Entry);
-
-    entry->data = data;
-    entry->next = q->root.next;
-    entry->prev = &q->root;
-
-    q->root.next = entry;
-    q->num_elems++;
-}
-
-void
-queue_remove(Queue *q, void *data) {
-    Queue_Entry *elem = q->root.next;
-    for ( int i = 0; i < q->num_elems; ++i ) {
-        elem = elem->next;
-
-        if ( elem->data == data ) {
-            elem->prev->next = elem->next;
-            elem->next->prev = elem->prev;
-            q->num_elems--;
-
-            break;
-        }
-    }
-}
-
-uint16_t
-bit_swap16(uint16_t val) {
-    uint16_t result = ((val & 0xff00) >> 8) | ((val & 0x00ff) << 8);
-
-    return result;
-}
-
-void
-bit_load(uint8_t *base, size_t addr, uint8_t *data, size_t size) {
-    memcpy(base + addr, data, size);
-}
-
-uint8_t
-bit_write16(uint8_t *base, size_t addr, uint16_t val) {
-    *(uint16_t *)(base + addr) = val;
-
-    return 2;
-}
-
-uint8_t
-bit_write8(uint8_t *base, size_t addr, uint8_t val) {
-    *(base + addr) = val;
-
-    return 1;
-}
-
-uint8_t
-bit_read8(uint8_t *base, size_t addr) {
-    uint8_t val = *(base + addr);
-
-    return val;
-}
-
-uint16_t
-bit_read16(uint8_t *base, size_t addr) {
-    uint16_t result = *(uint16_t *)(base + addr);
-
-    return result;
-}
-
-struct Arena_Block {
-    size_t        size;
-    size_t        ptr;
-    uint8_t     * mem;
-    Arena_Block * next;
-};
-
-enum { ARENA_SIZE = 1024 };
-struct Arena {
-    Arena_Block * curr_block;
-};
-
-Arena_Block *
-arena_block(size_t size) {
-    Arena_Block *result = (Arena_Block *)malloc(sizeof(Arena_Block));
-
-    result->size = size;
-    result->mem  = (uint8_t *)Urq::Os::os_alloc(size);
-    result->ptr  = 0;
-    result->next = NULL;
-
-    return result;
-}
-
-Arena *
-arena_new(size_t size) {
-    Arena *result = (Arena *)malloc(sizeof(Arena));
-
-    result->curr_block = arena_block(size);
-
-    return result;
-}
-
-void *
-arena_alloc(Arena *arena, size_t size) {
-    Arena_Block *curr = arena->curr_block;
-
-    /* @AUFGABE: größe der angeforderten menge des speichers speichern, damit später
-     *           realloc weiß wieviel speicher kopiert werden muß.
-     */
-    if ( (curr->ptr + size) > curr->size ) {
-        size_t new_size = MAX(ARENA_SIZE, size*2);
-        curr->next = arena_block(new_size);
-        arena->curr_block = curr->next;
-        curr = curr->next;
-    }
-
-    void *result = curr->mem + curr->ptr;
-    curr->ptr += size;
-
-    return result;
-}
-
-void *
-arena_realloc(Arena *arena, void *mem, size_t size) {
-    void *result = realloc(mem, size);
-
-    return result;
 }
 
 typedef struct BufHdr {
@@ -430,6 +101,8 @@ buf__printf(char *buf, const char *fmt, ...) {
     return buf;
 }
 
+#include "args.cpp"
+
 struct Bucket {
     Bucket   * next;
     Bucket   * prev;
@@ -481,6 +154,37 @@ push(Bucket_Array *bucket_array, uint32_t size) {
     bucket_array->curr_bucket->mem_used += size;
 
     return result;
+}
+
+struct Loc {
+    char *file;
+    size_t line;
+    size_t col;
+};
+
+Loc loc_none = { "<global>", 0, 0 };
+
+void
+report_error(Loc *loc, char *fmt, ...) {
+    using namespace Urq::Os::api;
+
+    va_list args = NULL;
+    va_start(args, fmt);
+
+    os_stdout_set_font(OS_COLOR_RED, OS_FLAGS_FONT_BOLD);
+    printf("Fehler");
+    os_stdout_set_regular();
+    printf(" in %s Zeile %lld: ", loc->file, loc->line);
+    os_stdout_set_bold();
+    vprintf(fmt, args);
+    va_end(args);
+    printf("\n");
+
+#if 0
+    exit(1);
+#else
+    __debugbreak();
+#endif
 }
 
 #endif

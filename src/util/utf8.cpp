@@ -334,6 +334,10 @@ utf8_str_cmp(char *left, char *right, uint32_t length = 0, uint32_t flags = STRI
     char *lval = left;
     char *rval = right;
 
+    if ( !lval || !rval ) {
+        return -1;
+    }
+
     if ( length ) {
         if ( flags & STRING_CASESENSITIVE ) {
             return _strnicmp(left, right, length);

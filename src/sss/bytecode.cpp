@@ -1,5 +1,7 @@
 namespace Bytecode {
 
+uint32_t entry_point_index;
+
 struct Bytecode;
 struct Call_Frame;
 struct Instr;
@@ -7,7 +9,11 @@ struct Scope;
 struct Obj;
 struct Obj_Proc;
 struct Table;
+struct Value;
 struct Vm;
+
+typedef Value *  Values;
+typedef Instr ** Instrs;
 
 #define VALUES      \
     X(VAL_NONE)     \
@@ -22,7 +28,7 @@ enum Value_Kind {
 #undef X
 };
 
-struct Value {
+struct Value : Loc {
     Value_Kind kind;
     uint32_t   size;
 
@@ -33,8 +39,6 @@ struct Value {
         Obj     * obj_val;
     };
 };
-
-typedef Value* Values;
 
 #define OBJECTS         \
     X(OBJ_STRING)       \
@@ -54,7 +58,7 @@ enum Obj_Kind {
 #undef X
 };
 
-struct Obj {
+struct Obj : Loc {
     Obj_Kind   kind;
 };
 
@@ -127,7 +131,7 @@ enum Bytecode_Flags {
 
 void               bytecode_build_file(Bytecode *bc, Parsed_File *file);
 bool               bytecode_sym_set(Obj_String *key, Value val, uint32_t flags = BYTECODEFLAG_NONE);
-int32_t            bytecode_emit_const(Bytecode *bc, Value val);
+int32_t            bytecode_emit_const(Loc *loc, Bytecode *bc, Value val);
 void               bytecode_debug(Vm *vm, int32_t code);
 void               bytecode_stmt(Bytecode *bc, Stmt *stmt);
 void               bytecode_init(Bytecode *bc);
@@ -235,7 +239,7 @@ enum Instr_Opcode {
 #undef X
 };
 
-struct Instr {
+struct Instr : Loc {
     Instr_Opcode opcode;
     int32_t      op1;
     int32_t      op2;
@@ -258,8 +262,12 @@ struct Vm {
 Table strings;
 
 Instr *
-instr_new(Instr_Opcode opcode, int32_t op1) {
+instr_new(Loc *loc, Instr_Opcode opcode, int32_t op1) {
     Instr *result = urq_allocs(Instr);
+
+    result->file   = loc->file;
+    result->line   = loc->line;
+    result->col    = loc->col;
 
     result->opcode = opcode;
     result->op1    = op1;
@@ -273,8 +281,8 @@ instr_print(Instr *instr) {
 }
 
 Instr *
-instr_push(Bytecode *bc, Instr_Opcode opcode, int32_t op1) {
-    Instr *result = instr_new(opcode, op1);
+instr_push(Loc *loc, Bytecode *bc, Instr_Opcode opcode, int32_t op1) {
+    Instr *result = instr_new(loc, opcode, op1);
 
     buf_push(bc->instructions, result);
 
@@ -285,8 +293,8 @@ instr_push(Bytecode *bc, Instr_Opcode opcode, int32_t op1) {
 }
 
 Instr *
-instr_push(Bytecode *bc, Instr_Opcode opcode) {
-    return instr_push(bc, opcode, 0);
+instr_push(Loc *loc, Bytecode *bc, Instr_Opcode opcode) {
+    return instr_push(loc, bc, opcode, 0);
 }
 
 void
@@ -1353,16 +1361,16 @@ operator==(Value left, Value right) {
 }
 
 int32_t
-bytecode_emit_jmp(Bytecode *bc) {
-    instr_push(bc, BYTECODEOP_JMP);
+bytecode_emit_jmp(Loc *loc, Bytecode *bc) {
+    instr_push(loc, bc, BYTECODEOP_JMP);
     int32_t result = bc->curr;
 
     return result;
 }
 
 int32_t
-bytecode_emit_jmp_false(Bytecode *bc) {
-    instr_push(bc, BYTECODEOP_JMP_FALSE);
+bytecode_emit_jmp_false(Loc *loc, Bytecode *bc) {
+    instr_push(loc, bc, BYTECODEOP_JMP_FALSE);
     int32_t result = bc->curr;
 
     return result;
@@ -1376,10 +1384,10 @@ bytecode_push_constant(Bytecode *bc, Value value) {
 }
 
 int32_t
-bytecode_emit_const(Bytecode *bc, Value val) {
+bytecode_emit_const(Loc *loc, Bytecode *bc, Value val) {
     int32_t index = bytecode_push_constant(bc, val);
 
-    instr_push(bc, BYTECODEOP_CONST, index);
+    instr_push(loc, bc, BYTECODEOP_CONST, index);
 
     return index;
 }
@@ -1664,10 +1672,10 @@ bytecode_debug(Vm *vm, Instr *instr) {
 }
 
 void
-bytecode_op(Bytecode *bc, uint32_t unary_op) {
+bytecode_op(Loc *loc, Bytecode *bc, uint32_t unary_op) {
     switch ( unary_op ) {
         case OP_SUB: {
-            instr_push(bc, BYTECODEOP_NEG);
+            instr_push(loc, bc, BYTECODEOP_NEG);
         } break;
 
         default: {
@@ -1681,19 +1689,19 @@ bytecode_expr(Bytecode *bc, Expr *expr, uint32_t flags = BYTECODEFLAG_NONE) {
     switch ( expr->kind ) {
         case EXPR_INT: {
             assert(EINT(expr)->type);
-            bytecode_emit_const(bc, val_int(EINT(expr)->val, EINT(expr)->type->size));
+            bytecode_emit_const(expr, bc, val_int(EINT(expr)->val, EINT(expr)->type->size));
         } break;
 
         case EXPR_FLOAT: {
-            bytecode_emit_const(bc, val_float(EFLOAT(expr)->val));
+            bytecode_emit_const(expr, bc, val_float(EFLOAT(expr)->val));
         } break;
 
         case EXPR_STR: {
-            bytecode_emit_const(bc, val_str(ESTR(expr)->val, ESTR(expr)->len));
+            bytecode_emit_const(expr, bc, val_str(ESTR(expr)->val, ESTR(expr)->len));
         } break;
 
         case EXPR_BOOL: {
-            bytecode_emit_const(bc, val_bool(EBOOL(expr)->val));
+            bytecode_emit_const(expr, bc, val_bool(EBOOL(expr)->val));
         } break;
 
         case EXPR_COMPOUND: {
@@ -1703,24 +1711,24 @@ bytecode_expr(Bytecode *bc, Expr *expr, uint32_t flags = BYTECODEFLAG_NONE) {
                     bytecode_expr(bc, ECMPND(expr)->elems[i]->value);
                 }
 
-                instr_push(bc, BYTECODEOP_COMPOUND, (int32_t)ECMPND(expr)->num_elems);
+                instr_push(expr, bc, BYTECODEOP_COMPOUND, (int32_t)ECMPND(expr)->num_elems);
             } else {
-                assert(!"benamtes compound implementieren");
-                instr_push(bc, BYTECODEOP_NAMED_COMPOUND);
+                report_error(expr, "benamtes compound implementieren");
+                instr_push(expr, bc, BYTECODEOP_NAMED_COMPOUND);
             }
         } break;
 
         case EXPR_FIELD: {
             bytecode_expr(bc, EFIELD(expr)->base);
             int32_t index = bytecode_push_constant(bc, val_str(EFIELD(expr)->field, EFIELD(expr)->len));
-            instr_push(bc, BYTECODEOP_LOAD_STRUCT_FIELD, index);
+            instr_push(expr, bc, BYTECODEOP_LOAD_STRUCT_FIELD, index);
         } break;
 
         case EXPR_RANGE: {
             bytecode_expr(bc, ERNG(expr)->left);
             bytecode_expr(bc, ERNG(expr)->right);
 
-            instr_push(bc, BYTECODEOP_RANGE);
+            instr_push(expr, bc, BYTECODEOP_RANGE);
         } break;
 
         case EXPR_PAREN: {
@@ -1731,16 +1739,16 @@ bytecode_expr(Bytecode *bc, Expr *expr, uint32_t flags = BYTECODEFLAG_NONE) {
             int32_t index = bytecode_push_constant(bc, val_str(EIDENT(expr)->val, EIDENT(expr)->len));
 
             if ( flags & BYTECODEFLAG_ASSIGNABLE ) {
-                instr_push(bc, BYTECODEOP_LOAD_SYMREF, index);
+                instr_push(expr, bc, BYTECODEOP_LOAD_SYMREF, index);
             } else {
-                instr_push(bc, BYTECODEOP_LOAD_SYM, index);
+                instr_push(expr, bc, BYTECODEOP_LOAD_SYM, index);
             }
         } break;
 
         case EXPR_CAST: {
             bytecode_typespec(bc, ECAST(expr)->typespec);
             bytecode_expr(bc, ECAST(expr)->expr);
-            instr_push(bc, BYTECODEOP_CAST);
+            instr_push(expr, bc, BYTECODEOP_CAST);
         } break;
 
         case EXPR_CALL: {
@@ -1749,12 +1757,12 @@ bytecode_expr(Bytecode *bc, Expr *expr, uint32_t flags = BYTECODEFLAG_NONE) {
             }
 
             bytecode_expr(bc, ECALL(expr)->base);
-            instr_push(bc, BYTECODEOP_CALL, (int32_t)ECALL(expr)->num_args);
+            instr_push(expr, bc, BYTECODEOP_CALL, (int32_t)ECALL(expr)->num_args);
         } break;
 
         case EXPR_UNARY: {
             bytecode_expr(bc, EUNARY(expr)->expr);
-            bytecode_op(bc, EUNARY(expr)->op);
+            bytecode_op(expr, bc, EUNARY(expr)->op);
         } break;
 
         case EXPR_BIN: {
@@ -1762,31 +1770,31 @@ bytecode_expr(Bytecode *bc, Expr *expr, uint32_t flags = BYTECODEFLAG_NONE) {
             bytecode_expr(bc, EBIN(expr)->right);
 
             if ( EBIN(expr)->op == OP_ADD ) {
-                instr_push(bc, BYTECODEOP_ADD);
+                instr_push(expr, bc, BYTECODEOP_ADD);
             } else if ( EBIN(expr)->op == OP_SUB ) {
-                instr_push(bc, BYTECODEOP_SUB);
+                instr_push(expr, bc, BYTECODEOP_SUB);
             } else if ( EBIN(expr)->op == OP_MUL ) {
-                instr_push(bc, BYTECODEOP_MUL);
+                instr_push(expr, bc, BYTECODEOP_MUL);
             } else if ( EBIN(expr)->op == OP_DIV ) {
-                instr_push(bc, BYTECODEOP_DIV);
+                instr_push(expr, bc, BYTECODEOP_DIV);
             } else if ( EBIN(expr)->op == OP_LT ) {
-                instr_push(bc, BYTECODEOP_CMP_LT);
+                instr_push(expr, bc, BYTECODEOP_CMP_LT);
             } else if ( EBIN(expr)->op == OP_GT ) {
-                instr_push(bc, BYTECODEOP_CMP_GT);
+                instr_push(expr, bc, BYTECODEOP_CMP_GT);
             } else if ( EBIN(expr)->op == OP_EQ ) {
-                instr_push(bc, BYTECODEOP_CMP_EQ);
+                instr_push(expr, bc, BYTECODEOP_CMP_EQ);
             } else {
-                assert(!"unbekannter operator");
+                report_error(expr, "unbekannter operator");
             }
         } break;
 
         case EXPR_AT: {
             bytecode_expr(bc, EAT(expr)->expr);
-            instr_push(bc, BYTECODEOP_ADDR);
+            instr_push(expr, bc, BYTECODEOP_ADDR);
         } break;
 
         default: {
-            assert(!"unbekannter ausdruck");
+            report_error(expr, "unbekannter ausdruck");
         } break;
     }
 }
@@ -1798,16 +1806,16 @@ bytecode_typespec(Bytecode *bc, Typespec *typespec) {
     switch ( typespec->kind ) {
         case TYPESPEC_NAME: {
             int32_t index = bytecode_push_constant(bc, val_str(TSNAME(typespec)->name, TSNAME(typespec)->len));
-            instr_push(bc, BYTECODEOP_PUSH_TYPEVAL, index);
+            instr_push(typespec, bc, BYTECODEOP_PUSH_TYPEVAL, index);
         } break;
 
         case TYPESPEC_PTR: {
             int32_t index = bytecode_push_constant(bc, val_ptr(NULL));
-            instr_push(bc, BYTECODEOP_CONST, index);
+            instr_push(typespec, bc, BYTECODEOP_CONST, index);
         } break;
 
         default: {
-            assert(!"unbekannter typespec");
+            report_error(typespec, "unbekannter typespec");
         } break;
     }
 }
@@ -1824,7 +1832,7 @@ bytecode_decl(Bytecode *bc, Decl *decl) {
             if ( DVAR(decl)->expr ) {
                 bytecode_expr(bc, DVAR(decl)->expr);
             } else {
-                instr_push(bc, BYTECODEOP_NONE);
+                instr_push(decl, bc, BYTECODEOP_NONE);
             }
 
             int32_t index = bytecode_push_constant(bc, val_str(decl->name, decl->len));
@@ -1832,17 +1840,17 @@ bytecode_decl(Bytecode *bc, Decl *decl) {
             if ( DVAR(decl)->typespec ) {
                 bytecode_typespec(bc, DVAR(decl)->typespec);
             } else {
-                instr_push(bc, BYTECODEOP_NONE);
+                instr_push(decl, bc, BYTECODEOP_NONE);
             }
 
-            instr_push(bc, BYTECODEOP_PUSH_DECL_SYM, index);
+            instr_push(decl, bc, BYTECODEOP_PUSH_DECL_SYM, index);
         } break;
 
         case DECL_CONST: {
             if ( DCONST(decl)->expr ) {
                 bytecode_expr(bc, DCONST(decl)->expr);
             } else {
-                instr_push(bc, BYTECODEOP_NONE);
+                instr_push(decl, bc, BYTECODEOP_NONE);
             }
 
             int32_t index = bytecode_push_constant(bc, val_str(decl->name, decl->len));
@@ -1850,20 +1858,24 @@ bytecode_decl(Bytecode *bc, Decl *decl) {
             if ( DCONST(decl)->typespec ) {
                 bytecode_typespec(bc, DCONST(decl)->typespec);
             } else {
-                instr_push(bc, BYTECODEOP_NONE);
+                instr_push(decl, bc, BYTECODEOP_NONE);
             }
 
-            instr_push(bc, BYTECODEOP_PUSH_DECL_SYM, index);
+            instr_push(decl, bc, BYTECODEOP_PUSH_DECL_SYM, index);
         } break;
 
         case DECL_PROC: {
             Value val = val_proc(decl->name, decl->len, DPROC(decl)->sign->sys_call, DPROC(decl)->sign->sys_lib);
 
             int32_t index = bytecode_push_constant(bc, val);
-            instr_push(bc, BYTECODEOP_CONST, index);
+            instr_push(decl, bc, BYTECODEOP_CONST, index);
+
+            if ( decl->name == intern_str(entry_point) ) {
+                entry_point_index = index;
+            }
 
             index = bytecode_push_constant(bc, val_str(decl->name, decl->len));
-            instr_push(bc, BYTECODEOP_PUSH_SYM, index);
+            instr_push(decl, bc, BYTECODEOP_PUSH_SYM, index);
 
             Obj_Proc *proc = as_proc(val);
             proc->name = obj_string(decl->name, decl->len);
@@ -1876,14 +1888,14 @@ bytecode_decl(Bytecode *bc, Decl *decl) {
 
                 index = bytecode_push_constant(proc->bc, val_str(param->name, param->len));
 
-                instr_push(proc->bc, BYTECODEOP_PUSH_SYM, index);
+                instr_push(param, proc->bc, BYTECODEOP_PUSH_SYM, index);
             }
 
             if ( !DPROC(decl)->sign->sys_call ) {
                 bytecode_stmt(proc->bc, DPROC(decl)->block);
 
                 if ( !DPROC(decl)->sign->num_rets ) {
-                    instr_push(proc->bc, BYTECODEOP_RET);
+                    instr_push(decl, proc->bc, BYTECODEOP_RET);
                 }
             }
         } break;
@@ -1891,11 +1903,11 @@ bytecode_decl(Bytecode *bc, Decl *decl) {
         case DECL_ENUM: {
             Value val = val_enum(decl->name, decl->len);
 
-            int32_t index      = bytecode_emit_const(bc, val);
+            int32_t index      = bytecode_emit_const(decl, bc, val);
             int32_t name_index = bytecode_push_constant(bc, val_str(decl->name, decl->len));
 
-            instr_push(bc, BYTECODEOP_PUSH_SYM, name_index);
-            instr_push(bc, BYTECODEOP_PUSH, index);
+            instr_push(decl, bc, BYTECODEOP_PUSH_SYM, name_index);
+            instr_push(decl, bc, BYTECODEOP_PUSH, index);
 
             for ( int i = 0; i < DENUM(decl)->num_fields; ++i ) {
                 Enum_Field *field = DENUM(decl)->fields[i];
@@ -1903,34 +1915,34 @@ bytecode_decl(Bytecode *bc, Decl *decl) {
                 // feldnamen generieren {
                     Value field_val = val_struct_field(field->name, (uint32_t)utf8_str_size(field->name));
                     int32_t field_index = bytecode_push_constant(bc, field_val);
-                    instr_push(bc, BYTECODEOP_PUSH, field_index);
+                    instr_push(field, bc, BYTECODEOP_PUSH, field_index);
                 // }
 
                 int32_t type_index = bytecode_push_constant(bc, val_str("s32", 3));
-                instr_push(bc, BYTECODEOP_PUSH_TYPEVAL, type_index);
+                instr_push(field, bc, BYTECODEOP_PUSH_TYPEVAL, type_index);
 
                 // feldwert generieren {
                     if ( field->value ) {
                         bytecode_expr(bc, field->value);
                     } else {
-                        instr_push(bc, BYTECODEOP_NONE);
+                        instr_push(field, bc, BYTECODEOP_NONE);
                     }
                 // }
 
-                instr_push(bc, BYTECODEOP_STRUCT_FIELD);
+                instr_push(field, bc, BYTECODEOP_STRUCT_FIELD);
             }
 
-            instr_push(bc, BYTECODEOP_ENUM, (int32_t)DENUM(decl)->num_fields);
+            instr_push(decl, bc, BYTECODEOP_ENUM, (int32_t)DENUM(decl)->num_fields);
         } break;
 
         case DECL_STRUCT: {
             Value val = val_struct(decl->name, decl->len);
 
-            int32_t index      = bytecode_emit_const(bc, val);
+            int32_t index      = bytecode_emit_const(decl, bc, val);
             int32_t name_index = bytecode_push_constant(bc, val_str(decl->name, decl->len));
 
-            instr_push(bc, BYTECODEOP_PUSH_SYM, name_index);
-            instr_push(bc, BYTECODEOP_PUSH, index);
+            instr_push(decl, bc, BYTECODEOP_PUSH_SYM, name_index);
+            instr_push(decl, bc, BYTECODEOP_PUSH, index);
 
             for ( int i = 0; i < DSTRUCT(decl)->num_fields; ++i ) {
                 Struct_Field *field = DSTRUCT(decl)->fields[i];
@@ -1938,27 +1950,27 @@ bytecode_decl(Bytecode *bc, Decl *decl) {
                 // feldnamen generieren {
                     Value field_val = val_struct_field(field->name, field->len);
                     int32_t field_index = bytecode_push_constant(bc, field_val);
-                    instr_push(bc, BYTECODEOP_PUSH, field_index);
+                    instr_push(field, bc, BYTECODEOP_PUSH, field_index);
                 // }
 
                 if ( field->typespec ) {
                     bytecode_typespec(bc, field->typespec);
                 } else {
-                    instr_push(bc, BYTECODEOP_NONE);
+                    instr_push(field, bc, BYTECODEOP_NONE);
                 }
 
                 // feldwert generieren {
                     if ( field->default_value ) {
                         bytecode_expr(bc, field->default_value);
                     } else {
-                        instr_push(bc, BYTECODEOP_NONE);
+                        instr_push(field, bc, BYTECODEOP_NONE);
                     }
                 // }
 
-                instr_push(bc, BYTECODEOP_STRUCT_FIELD);
+                instr_push(field, bc, BYTECODEOP_STRUCT_FIELD);
             }
 
-            instr_push(bc, BYTECODEOP_STRUCT, (int32_t)DSTRUCT(decl)->num_fields);
+            instr_push(decl, bc, BYTECODEOP_STRUCT, (int32_t)DSTRUCT(decl)->num_fields);
         } break;
 
         default: {
@@ -1975,11 +1987,11 @@ bytecode_stmt(Bytecode *bc, Stmt *stmt) {
 
             if ( SASSIGN(stmt)->op->kind == T_PLUS_ASSIGN ) {
                 bytecode_expr(bc, SASSIGN(stmt)->lhs);
-                instr_push(bc, BYTECODEOP_ADD);
+                instr_push(SASSIGN(stmt)->lhs, bc, BYTECODEOP_ADD);
             }
 
             bytecode_expr(bc, SASSIGN(stmt)->lhs, BYTECODEFLAG_ASSIGNABLE);
-            instr_push(bc, BYTECODEOP_SET_SYM);
+            instr_push(stmt, bc, BYTECODEOP_SET_SYM);
         } break;
 
         case STMT_BLOCK: {
@@ -2007,13 +2019,13 @@ bytecode_stmt(Bytecode *bc, Stmt *stmt) {
             /* @INFO: platziert den namen der laufvariable */
             int32_t index = bytecode_push_constant(bc, val_str(it, it_len));
 
-            instr_push(bc, BYTECODEOP_SCOPE_ENTER);
+            instr_push(stmt, bc, BYTECODEOP_SCOPE_ENTER);
 
             /* @INFO: anweisung holt sich den namen der laufvariable und den wert */
-            Instr *instr = instr_push(bc, BYTECODEOP_INIT_LOOP, index);
+            Instr *instr = instr_push(stmt, bc, BYTECODEOP_INIT_LOOP, index);
 
             uint32_t loop_addr = bc->size;
-            instr_push(bc, BYTECODEOP_JMP_FALSE);
+            instr_push(stmt, bc, BYTECODEOP_JMP_FALSE);
             int32_t exit_instr = bc->curr;
 
             /* @INFO: den eigentlichen code der schleife generieren */
@@ -2022,19 +2034,19 @@ bytecode_stmt(Bytecode *bc, Stmt *stmt) {
             /* @INFO: die schleifenvariable inkrementieren und den boolischen wert für
              *        die spätere JMP_FALSE operation auf den stack laden
              */
-            instr_push(bc, BYTECODEOP_INC_LOOP, index);
+            instr_push(stmt, bc, BYTECODEOP_INC_LOOP, index);
 
             /* @INFO: bedingungsloser sprung zu der JMP_FALSE operation */
-            instr_push(bc, BYTECODEOP_JMP, loop_addr);
-            instr_push(bc, BYTECODEOP_SCOPE_LEAVE);
+            instr_push(stmt, bc, BYTECODEOP_JMP, loop_addr);
+            instr_push(stmt, bc, BYTECODEOP_SCOPE_LEAVE);
             int32_t exit_addr = bc->curr;
 
             if ( SFOR(stmt)->stmt_else ) {
-                instr_push(bc, BYTECODEOP_SCOPE_LEAVE);
-                instr_push(bc, BYTECODEOP_SCOPE_ENTER);
+                instr_push(SFOR(stmt)->stmt_else, bc, BYTECODEOP_SCOPE_LEAVE);
+                instr_push(SFOR(stmt)->stmt_else, bc, BYTECODEOP_SCOPE_ENTER);
                 instr->op2 = bc->curr;
                 bytecode_stmt(bc, SFOR(stmt)->stmt_else);
-                instr_push(bc, BYTECODEOP_SCOPE_LEAVE);
+                instr_push(SFOR(stmt)->stmt_else, bc, BYTECODEOP_SCOPE_LEAVE);
                 exit_addr = bc->curr;
             }
 
@@ -2053,7 +2065,7 @@ bytecode_stmt(Bytecode *bc, Stmt *stmt) {
                 bytecode_expr(bc, line->resolution);
 
                 /* @INFO: die beiden werte vergleichen */
-                instr_push(bc, BYTECODEOP_MATCH_CASE);
+                instr_push(stmt, bc, BYTECODEOP_MATCH_CASE);
                 /* @INFO: platzhalter für die sprungadresse schreiben */
                 int32_t addr = bc->curr;
 
@@ -2061,7 +2073,7 @@ bytecode_stmt(Bytecode *bc, Stmt *stmt) {
                 bytecode_stmt(bc, line->stmt);
 
                 /* @INFO: zum schluß ans ende der gesamten match anweisung springen */
-                instr_push(bc, BYTECODEOP_JMP);
+                instr_push(stmt, bc, BYTECODEOP_JMP);
                 buf_push(exit_addrs, bc->curr);
 
                 /* @INFO: die adresse für MATCH_CASE patchen für den fall, daß die anweisung
@@ -2076,23 +2088,23 @@ bytecode_stmt(Bytecode *bc, Stmt *stmt) {
         } break;
 
         case STMT_WHILE: {
-            instr_push(bc, BYTECODEOP_SCOPE_ENTER);
+            instr_push(stmt, bc, BYTECODEOP_SCOPE_ENTER);
 
             /* @INFO: platziert den entscheidungswert auf dem stack */
             uint32_t loop_addr = bc->size;
             bytecode_expr(bc, SWHILE(stmt)->cond);
 
-            instr_push(bc, BYTECODEOP_JMP_FALSE);
+            instr_push(stmt, bc, BYTECODEOP_JMP_FALSE);
             int32_t exit_instr = bc->curr;
 
             /* @INFO: den eigentlichen code der schleife generieren */
             bytecode_stmt(bc, SWHILE(stmt)->block);
 
             /* @INFO: bedingungsloser sprung zu der JMP_FALSE operation */
-            instr_push(bc, BYTECODEOP_JMP, loop_addr);
+            instr_push(stmt, bc, BYTECODEOP_JMP, loop_addr);
             int32_t exit_addr = bc->size;
 
-            instr_push(bc, BYTECODEOP_SCOPE_LEAVE);
+            instr_push(stmt, bc, BYTECODEOP_SCOPE_LEAVE);
             instr_patch(bc, exit_instr, (int32_t)exit_addr);
         } break;
 
@@ -2103,11 +2115,11 @@ bytecode_stmt(Bytecode *bc, Stmt *stmt) {
         case STMT_IF: {
             bytecode_expr(bc, SIF(stmt)->cond);
 
-            int32_t addr = bytecode_emit_jmp_false(bc);
-            instr_push(bc, BYTECODEOP_SCOPE_ENTER);
+            int32_t addr = bytecode_emit_jmp_false(stmt, bc);
+            instr_push(stmt, bc, BYTECODEOP_SCOPE_ENTER);
             bytecode_stmt(bc, SIF(stmt)->stmt);
-            instr_push(bc, BYTECODEOP_SCOPE_LEAVE);
-            int32_t exit_addr = bytecode_emit_jmp(bc);
+            instr_push(stmt, bc, BYTECODEOP_SCOPE_LEAVE);
+            int32_t exit_addr = bytecode_emit_jmp(stmt, bc);
             instr_patch(bc, addr, (int32_t)bc->size);
 
             if ( SIF(stmt)->stmt_else ) {
@@ -2122,7 +2134,7 @@ bytecode_stmt(Bytecode *bc, Stmt *stmt) {
                 bytecode_expr(bc, SRET(stmt)->exprs[i]);
             }
 
-            instr_push(bc, BYTECODEOP_RET, (int32_t)SRET(stmt)->num_exprs);
+            instr_push(stmt, bc, BYTECODEOP_RET, (int32_t)SRET(stmt)->num_exprs);
         } break;
 
         case STMT_EXPR: {
@@ -2131,11 +2143,11 @@ bytecode_stmt(Bytecode *bc, Stmt *stmt) {
 
         case STMT_USING: {
             bytecode_expr(bc, SUSING(stmt)->expr);
-            instr_push(bc, BYTECODEOP_IMPORT_SYMS);
+            instr_push(stmt, bc, BYTECODEOP_IMPORT_SYMS);
         } break;
 
         default: {
-            assert(!"unbekannte anweisung");
+            report_error(stmt, "unbekannte anweisung");
         } break;
     }
 }
@@ -2201,38 +2213,6 @@ is_proc(Value val) {
     bool result = val.kind == VAL_OBJ && as_obj(val)->kind == OBJ_PROC;
 
     return result;
-}
-
-#include <strsafe.h>
-void error_exit(LPTSTR lpszFunction) {
-    // Retrieve the system error message for the last-error code
-
-    LPVOID lpMsgBuf;
-    LPVOID lpDisplayBuf;
-    DWORD dw = GetLastError();
-
-    FormatMessage(
-        FORMAT_MESSAGE_ALLOCATE_BUFFER |
-        FORMAT_MESSAGE_FROM_SYSTEM |
-        FORMAT_MESSAGE_IGNORE_INSERTS,
-        NULL,
-        dw,
-        MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
-        (LPTSTR) &lpMsgBuf,
-        0, NULL );
-
-    // Display the error message and exit the process
-
-    lpDisplayBuf = (LPVOID)LocalAlloc(LMEM_ZEROINIT,
-        (lstrlen((LPCTSTR)lpMsgBuf) + lstrlen((LPCTSTR)lpszFunction) + 40) * sizeof(TCHAR));
-    StringCchPrintf((LPTSTR)lpDisplayBuf,
-        LocalSize(lpDisplayBuf) / sizeof(TCHAR),
-        TEXT("%s failed with error %d: %s"),
-        lpszFunction, dw, lpMsgBuf);
-    MessageBox(NULL, (LPCTSTR)lpDisplayBuf, TEXT("Error"), MB_OK);
-
-    LocalFree(lpMsgBuf);
-    LocalFree(lpDisplayBuf);
 }
 
 void
@@ -2328,9 +2308,7 @@ call_sys_proc(Vm *vm, Value val, uint32_t num_args) {
             } break;
         }
     } else {
-        HANDLE h = GetStdHandle(STD_OUTPUT_HANDLE);
         dcCallVoid(call_vm , proc_ptr);
-        error_exit(to_str(as_proc(val)->name));
     }
 }
 
@@ -2449,26 +2427,26 @@ bytecode_directive(Bytecode *bc, Directive *dir) {
 
             bytecode_build_file(ns->proc->bc, DIRIMPORT(dir)->parsed_file);
 
-            bytecode_emit_const(ns->proc->bc, ns_val);
-            instr_push(ns->proc->bc, BYTECODEOP_NAMESPACE_LEAVE);
+            bytecode_emit_const(dir, ns->proc->bc, ns_val);
+            instr_push(dir, ns->proc->bc, BYTECODEOP_NAMESPACE_LEAVE);
 
-            bytecode_emit_const(bc, ns_val);
-            instr_push(bc, BYTECODEOP_NAMESPACE_ENTER);
+            bytecode_emit_const(dir, bc, ns_val);
+            instr_push(dir, bc, BYTECODEOP_NAMESPACE_ENTER);
         } break;
 
         case DIRECTIVE_EXPORT: {
             for ( int i = 0; i < DIREXPORT(dir)->num_syms; ++i ) {
                 Module_Sym *sym = DIREXPORT(dir)->syms[i];
 
-                bytecode_emit_const(bc, val_str(sym->name, (uint32_t)utf8_str_size(sym->name)));
+                bytecode_emit_const(dir, bc, val_str(sym->name, (uint32_t)utf8_str_size(sym->name)));
 
                 if ( sym->alias ) {
-                    bytecode_emit_const(bc, val_str(sym->alias, (uint32_t)utf8_str_size(sym->alias)));
+                    bytecode_emit_const(dir, bc, val_str(sym->alias, (uint32_t)utf8_str_size(sym->alias)));
                 } else {
-                    instr_push(bc, BYTECODEOP_NONE);
+                    instr_push(dir, bc, BYTECODEOP_NONE);
                 }
 
-                instr_push(bc, BYTECODEOP_EXPORT_SYM);
+                instr_push(dir, bc, BYTECODEOP_EXPORT_SYM);
             }
         } break;
 
@@ -3062,6 +3040,60 @@ bytecode_init(Bytecode *bc) {
     sym_push_sys("typeid", type_typeid);
 #endif
 #undef REGISTER_TYPE
+}
+
+struct Basic_Block {
+    Instrs instrs;
+};
+
+Basic_Block *
+basic_block(Instrs instrs) {
+    Basic_Block *result = urq_allocs(Basic_Block);
+
+    result->instrs = instrs;
+
+    return result;
+}
+
+Bytecode *
+optimize(Bytecode *bc) {
+    Basic_Block **bbs = NULL;
+    Instrs instrs = NULL;
+
+    Value val = value_get(&bc->constants, entry_point_index);
+    assert(is_proc(val));
+    Obj_Proc *proc = as_proc(val);
+    Bytecode *code = proc->bc;
+
+    for ( uint32_t i = 0; i < code->size; ++i ) {
+        Instr *instr = code->instructions[i];
+
+        if (
+                instr->opcode == BYTECODEOP_JMP_FALSE ||
+                instr->opcode == BYTECODEOP_JMP ||
+                instr->opcode == BYTECODEOP_CALL ||
+                instr->opcode == BYTECODEOP_RET )
+        {
+            buf_push(instrs, instr);
+
+            if ( buf_len(instrs) > 0 ) {
+                buf_push(bbs, basic_block(instrs));
+            }
+
+            instrs = NULL;
+
+            if ( instr->opcode == BYTECODEOP_CALL ) {
+            }
+        } else if ( instr->opcode == BYTECODEOP_NAMESPACE_ENTER ) {
+            // später gucken was hier gemacht werden kann
+        } else {
+            buf_push(instrs, instr);
+        }
+    }
+
+    printf("anzahl basic blocks %zd", buf_len(bbs));
+
+    return bc;
 }
 
 }

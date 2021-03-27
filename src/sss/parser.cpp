@@ -434,7 +434,7 @@ struct Typespec_Proc : Typespec {
     uint32_t     num_rets;
 };
 
-struct Proc_Param {
+struct Proc_Param : Loc {
     char     * name;
     uint32_t   len;
     Sym      * sym;
@@ -556,7 +556,8 @@ token_expect(Token_List *tokens, Token_Kind expected) {
     if ( !token_is(tokens, expected) ) {
         tokens->has_error = true;
         tokens->error_msg = "nicht das erwartete token";
-        assert(!"nicht das erwartete token");
+
+        report_error(token_get(tokens), "nicht das erwartete token");
     }
 
     token_eat(tokens);
@@ -594,7 +595,7 @@ token_op(Token *t) {
         case T_OR:         return OP_OR;
 
         default:           {
-            assert(!"unbekanntes token");
+            report_error(t, "unbekanntes token");
             return OP_NONE;
         }
     }
@@ -625,7 +626,7 @@ keyword_matches(Token_List *tokens, char *keyword) {
 void
 keyword_expect(Token_List *tokens, char *keyword) {
     if ( !keyword_matches(tokens, keyword) ) {
-        assert(!"keyword erwartet");
+        report_error(token_get(tokens), "keyword %s erwartet", keyword);
         return;
     }
 }
@@ -660,7 +661,7 @@ expr_print(Expr *expr) {
         } break;
 
         default: {
-            assert(!"unbekannter ausdruck");
+            report_error(expr, "unbekannter ausdruck");
         } break;
     }
 }
@@ -1420,8 +1421,12 @@ directive_load(Ast_Elem *loc, Parsed_File *parsed_file) {
 }
 
 Proc_Param *
-proc_param(char *name, Typespec *typespec, Expr *default_value = NULL) {
+proc_param(Loc *loc, char *name, Typespec *typespec, Expr *default_value = NULL) {
     Proc_Param *result = urq_allocs(Proc_Param);
+
+    result->file     = loc->file;
+    result->line     = loc->line;
+    result->col      = loc->col;
 
     result->name     = name;
     result->len      = (uint32_t)utf8_str_size(name);
@@ -1433,6 +1438,8 @@ proc_param(char *name, Typespec *typespec, Expr *default_value = NULL) {
 
 Proc_Param *
 parse_proc_param(Token_List *tokens) {
+    Token *loc = token_get(tokens);
+
     char *name = NULL;
     Typespec *typespec = NULL;
     Expr *default_value = NULL;
@@ -1456,7 +1463,7 @@ parse_proc_param(Token_List *tokens) {
         default_value = parse_expr(tokens);
     }
 
-    return proc_param(name, typespec, default_value);
+    return proc_param(loc, name, typespec, default_value);
 }
 
 Typespec_Name *
@@ -1676,7 +1683,7 @@ parse_decl_proc(Token_List *tokens, char *name, Typespec *typespec) {
             sign->sys_call = true;
             sign->sys_lib = parse_expr_string(tokens);
         } else {
-            assert(!"unbekannte direktive");
+            report_error(curr, "unbekannte direktive");
         }
     }
 
@@ -1968,14 +1975,14 @@ parse_directive_import(Token_List *tokens) {
 
     char *ident = ((Expr_Ident *)module)->val;
     size_t len = utf8_str_size(ident);
-    char *file_name = (char *)urq_alloc(len+5); // plus 5 zeichen weil ".sss\0"
+    char *file_name = (char *)urq_alloc(len+5); // @INFO: plus 5 zeichen weil ".sss\0"
 
     memcpy(file_name, ident, len);
     memcpy(file_name + len, ".sss", 4);
 
     char *content = "";
     if ( !Urq::Os::os_file_read(file_name, &content) ) {
-        assert(!"konnte datei nicht lesen");
+        report_error(curr, "konnte datei %s nicht lesen", file_name);
     }
 
     auto imported_tokens = tokenize(file_name, content);
@@ -1996,7 +2003,7 @@ parse_directive_load(Token_List *tokens) {
 
     char *content = "";
     if ( !Urq::Os::os_file_read(file_name, &content) ) {
-        assert(!"konnte datei nicht lesen");
+        report_error(curr, "konnte datei %s nicht lesen", file_name);
     }
 
     auto imported_tokens = tokenize(file_name, content);
@@ -2112,7 +2119,7 @@ parse_stmt(Token_List *tokens) {
                     result = stmt_expr(expr, expr);
                 } else {
                     if ( !token_is_assign(tokens) ) {
-                        assert(!"unerwarteter token");
+                        report_error(token_get(tokens), "unerwartetes token");
                     }
 
                     Token *op = token_read(tokens);
@@ -2120,7 +2127,7 @@ parse_stmt(Token_List *tokens) {
                 }
             }
         } else {
-            assert(!"unbekannter ausdruck");
+            report_error(curr, "unbekannter ausdruck");
         }
     }
 
@@ -2158,7 +2165,7 @@ parse(Token_List *tokens) {
     KEYWORD(proc);
     KEYWORD_K(res, return);
     KEYWORD_K(ausführen, run);
-    KEYWORD(struct);
+    KEYWORD_K(struktur, struct);
     KEYWORD_K(wahr, true);
     KEYWORD(type);
     KEYWORD_K(mit, using);

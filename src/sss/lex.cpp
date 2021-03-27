@@ -1,9 +1,6 @@
 Map interns;
 
-struct Ast_Elem {
-    char *file;
-    size_t line;
-    size_t col;
+struct Ast_Elem : Loc {
     bool has_error;
     char *error_msg;
 };

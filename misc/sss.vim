@@ -12,7 +12,7 @@ syntax keyword sssTypeinfo typeinfo
 syntax keyword sssTypedef typedef
 syntax keyword sssAlignOf alignof
 syntax keyword sssOffsetOf offsetof
-syntax keyword sssSwitch match
+syntax keyword sssSwitch zweig
 syntax keyword sssOn on
 syntax keyword sssDefault default
 

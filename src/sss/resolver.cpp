@@ -1,3 +1,5 @@
+Resolved_Stmts resolve_file(Parsed_File *parsed_file);
+
 Types types;
 
 enum Sym_Kind {
@@ -144,6 +146,24 @@ Type *type_bool;
 Type *type_typeid;
 Type *type_string;
 Type *type_vararg;
+
+char *
+to_str(Expr *expr) {
+    switch ( expr->kind ) {
+        case EXPR_INT: {
+            return "1";
+        } break;
+
+        case EXPR_IDENT: {
+            return EIDENT(expr)->val;
+        } break;
+
+        default: {
+            assert(!"unbekannt");
+            return "unbekannt";
+        } break;
+    }
+}
 
 Resolved_Stmt *
 resolved_stmt(Stmt *stmt, Sym *sym, Type *type, Operand *operand) {
@@ -625,7 +645,7 @@ resolve_expr(Expr *expr, Type *given_type = NULL) {
             Sym *sym = resolve_name(EIDENT(expr)->val);
 
             if ( !sym ) {
-                assert(!"unbekanntes symbol");
+                report_error(expr, "unbekanntes symbol: %s", EIDENT(expr)->val);
             }
 
             EIDENT(expr)->sym = sym;
@@ -650,7 +670,7 @@ resolve_expr(Expr *expr, Type *given_type = NULL) {
             Operand *op = resolve_expr(EUNARY(expr)->expr);
 
             if ( !type_isnum(op->type) ) {
-                assert(!"numerischer ausdruck erwartet");
+                report_error(expr, "numerischen ausdruck erwartet");
             }
 
             result = operand(type_s32);
@@ -707,7 +727,7 @@ resolve_expr(Expr *expr, Type *given_type = NULL) {
             Type_Proc *op_type = TPROC(op->type);
 
             if ( op_type->num_params > ECALL(expr)->num_args ) {
-                assert(!"ungenügend anzahl argumente");
+                report_error(expr, "argumente übergeben %d, erwartet wurden %d", ECALL(expr)->num_args, op_type->num_params);
             }
 
             for ( uint32_t i = 0; i < TPROC(op->type)->num_params; ++i ) {
@@ -721,7 +741,7 @@ resolve_expr(Expr *expr, Type *given_type = NULL) {
 
                 operand_cast(param->type, arg);
                 if ( param->type != arg->type ) {
-                    assert(!"datentyp des übergebenen arguments passt nicht");
+                    report_error(expr, "datentyp erwartet %s, bekommen %s", param->type->name, arg->type->name);
                 }
             }
 
@@ -747,8 +767,8 @@ resolve_expr(Expr *expr, Type *given_type = NULL) {
             assert(given_type);
             assert(given_type->kind == TYPE_STRUCT);
 
-            if ( ((Type_Struct *)given_type)->num_fields != ECMPND(expr)->num_elems ) {
-                assert(!"falsche anzahl der argumente");
+            if ( TSTRUCT(given_type)->num_fields != ECMPND(expr)->num_elems ) {
+                report_error(expr, "anzahl der argumente erwartet %d, bekommen %d", TSTRUCT(given_type)->num_fields, ECMPND(expr)->num_elems);
             }
 
             Compound_Elems args = NULL;
@@ -757,13 +777,13 @@ resolve_expr(Expr *expr, Type *given_type = NULL) {
                 Compound_Elem * arg          = ECMPND(expr)->elems[i];
 
                 if ( arg->name ) {
-                    assert(!"unbehandelter fall");
+                    assert(!"unbehandelter fall: benamtes argument");
                 } else {
                     Operand *operand = resolve_expr(arg->value);
                     operand_cast(struct_field->type, operand);
 
                     if ( struct_field->type != operand->type ) {
-                        assert(!"falschen datentyp übergeben");
+                        report_error(arg->value, "datentype erwartet %s, bekommen %s", struct_field->type->name, operand->type->name);
                     }
 
                     arg->type = struct_field->type;
@@ -775,7 +795,7 @@ resolve_expr(Expr *expr, Type *given_type = NULL) {
         } break;
 
         default: {
-            assert(!"unbekannter ausdruck");
+            report_error(expr, "unbekannter ausdruck");
         } break;
     }
 
@@ -785,38 +805,36 @@ resolve_expr(Expr *expr, Type *given_type = NULL) {
 }
 
 Type *
-resolve_typespec(Typespec *t) {
+resolve_typespec(Typespec *typespec) {
     Type *result = NULL;
 
-    if ( !t ) {
+    if ( !typespec ) {
         return result;
     }
 
-    switch ( t->kind ) {
+    switch ( typespec->kind ) {
         case TYPESPEC_PTR: {
-            Typespec_Ptr *typespec = (Typespec_Ptr *)t;
-            result = type_ptr(resolve_typespec(typespec->base));
+            result = type_ptr(resolve_typespec(TSPTR(typespec)->base));
         } break;
 
         case TYPESPEC_NAME: {
-            Typespec_Name *typespec = (Typespec_Name *)t;
-            Sym *sym = sym_get(typespec->name);
+            Sym *sym = sym_get(TSNAME(typespec)->name);
 
             if ( !sym ) {
-                assert(!"keinen datentyp gefunden");
+                report_error(typespec, "keinen datentyp %s gefunden", TSNAME(typespec)->name);
             }
 
             if ( sym->kind != SYM_TYPE ) {
-                assert(!"symbol muß ein datentyp sein");
+                report_error(typespec, "symbol %s muß ein datentyp sein", sym->name);
             }
 
             return sym->type;
         } break;
 
         case TYPESPEC_ARRAY: {
-            Operand *op = resolve_expr(TSARRAY(t)->num_elems);
+            Operand *op = resolve_expr(TSARRAY(typespec)->num_elems);
             /* @AUFGABE: den wert 1 mit dem wert aus op ersetzen */
-            result = type_array(resolve_typespec(TSARRAY(t)->base), 1);
+            result = type_array(resolve_typespec(TSARRAY(typespec)->base), 1);
         } break;
 
         case TYPESPEC_VARARG: {
@@ -827,7 +845,7 @@ resolve_typespec(Typespec *t) {
         } break;
 
         default: {
-            assert(!"unbekannter typespec");
+            report_error(typespec, "unbekannter typespec");
         } break;
     }
 
@@ -858,7 +876,7 @@ resolve_decl_const(Decl *decl) {
     Operand *op = resolve_expr(DVAR(decl)->expr);
 
     if ( !op->is_const ) {
-        assert(!"konstanten wert erwartet");
+        report_error(decl, "konstanten wert erwartet");
     }
 
     if ( !type ) {
@@ -868,7 +886,7 @@ resolve_decl_const(Decl *decl) {
     /* @AUFGABE: prüfen ob type aus dem typespec und dem op passen */
     operand_cast(type, op);
     if ( type != op->type ) {
-        assert(!"typespec stimmt mit dem zugewiesenem datentyp nicht überein");
+        report_error(decl, "datentyp erwartet %s, bekommen %s", type->name, op->type->name);
     }
 
     type_complete(type);
@@ -891,7 +909,7 @@ resolve_decl_var(Decl *decl) {
     Operand *op = resolve_expr(DVAR(decl)->expr);
 
     if ( !type && !op ) {
-        assert(!"unbekannter datentyp");
+        report_error(decl, "datentyp der variable %s konnte nicht ermittelt werden", DVAR(decl)->name);
     }
 
     if ( !type ) {
@@ -901,7 +919,7 @@ resolve_decl_var(Decl *decl) {
     if ( op ) {
         operand_cast(type, op);
         if ( type != op->type ) {
-            assert(!"typespec stimmt mit dem zugewiesenem datentyp nicht überein");
+            report_error(decl, "datentyp erwartet %s, bekommen %s", type->name, op->type->name);
         }
     }
 
@@ -935,7 +953,7 @@ resolve_decl(Decl *decl) {
         } break;
 
         default: {
-            assert(!"unbekannte deklaration");
+            report_error(decl, "unbekannte deklaration");
         } break;
     }
 
@@ -951,9 +969,13 @@ resolve_stmt(Stmt *stmt) {
             Operand *lhs = resolve_expr(SASSIGN(stmt)->lhs);
             Operand *rhs = resolve_expr(SASSIGN(stmt)->rhs);
 
+            if ( lhs->is_const ) {
+                report_error(stmt, "versuch der konstanten %s einen wert zuzuweisen", to_str(SASSIGN(stmt)->lhs));
+            }
+
             operand_cast(lhs->type, rhs);
             if ( lhs->type != rhs->type ) {
-                assert(!"zuweisung eines falschen datentyps");
+                report_error(stmt, "datentyp erwartet %s, bekommen %s", lhs->type->name, rhs->type->name);
             }
 
             buf_push(result, resolved_stmt(stmt, NULL, rhs->type, rhs));
@@ -978,7 +1000,7 @@ resolve_stmt(Stmt *stmt) {
                 } break;
 
                 default: {
-                    assert(!"unbekannte deklaration");
+                    report_error(decl, "unbekannte deklaration");
                 } break;
             }
         } break;
@@ -1018,7 +1040,7 @@ resolve_stmt(Stmt *stmt) {
             Operand *op = resolve_expr(SIF(stmt)->cond);
 
             if ( op->type != type_bool ) {
-                assert(!"boolischen ausdruck erwartet");
+                report_error(stmt, "boolischen ausdruck erwartet, bekommen %s", op->type->name);
             }
 
             scope_enter();
@@ -1051,7 +1073,7 @@ resolve_stmt(Stmt *stmt) {
 
                 operand_cast(op->type, res_op);
                 if ( op->type != res_op->type ) {
-                    assert(!"falscher datentyp");
+                    report_error(line->resolution, "datentyp erwartet %s, bekommen %s", res_op->type->name, op->type->name);
                 }
 
                 resolve_stmt(line->stmt);
@@ -1062,11 +1084,12 @@ resolve_stmt(Stmt *stmt) {
 
         case STMT_RET: {
             if ( curr_scope == global_scope ) {
-                assert(!"return an dieser stelle nicht erlaubt.");
+                report_error(stmt, "return an dieser stelle nicht erlaubt.");
             }
 
             if ( SRET(stmt)->num_exprs < SRET(stmt)->sign->num_rets ) {
-                assert(!"zu wenig rückgabewerte");
+                report_error(stmt, "rückgabewerte erwartet %d, übergeben bekommen %d",
+                        SRET(stmt)->sign->num_rets, SRET(stmt)->num_exprs);
             }
 
             if ( SRET(stmt)->num_exprs > 0 ) {
@@ -1075,7 +1098,7 @@ resolve_stmt(Stmt *stmt) {
 
                     operand_cast(SRET(stmt)->sign->rets[i]->type, operand);
                     if ( SRET(stmt)->sign->rets[i]->type != operand->type ) {
-                        assert(!"falscher rückgabetyp");
+                        report_error(SRET(stmt)->exprs[i], "datentyp erwartet %s, bekommen %s", SRET(stmt)->sign->rets[i]->type->name, operand->type->name);
                     }
 
                     buf_push(result, resolved_stmt(stmt, NULL, operand->type, operand));
@@ -1096,7 +1119,7 @@ resolve_stmt(Stmt *stmt) {
         } break;
 
         default: {
-            assert(!"unbekannte anweisung");
+            report_error(stmt, "unbekannte anweisung");
         } break;
     }
 
@@ -1111,7 +1134,7 @@ resolve_directive(Directive *dir) {
         case DIRECTIVE_IMPORT: {
             Scope *scope = scope_new("import", sys_scope);
             Scope *prev_scope = scope_set(scope);
-            Resolved_Stmts stmts = resolve(DIRIMPORT(dir)->parsed_file);
+            Resolved_Stmts stmts = resolve_file(DIRIMPORT(dir)->parsed_file);
             scope_set(prev_scope);
 
             for ( int i = 0; i < buf_len(stmts); ++i ) {
@@ -1183,11 +1206,11 @@ resolve_directive(Directive *dir) {
         } break;
 
         case DIRECTIVE_LOAD: {
-            result = resolve(DIRLOAD(dir)->parsed_file);
+            result = resolve_file(DIRLOAD(dir)->parsed_file);
         } break;
 
         default: {
-            assert(!"unbekannte direktive");
+            report_error(dir, "unbekannte direktive");
         } break;
     }
 
@@ -1218,7 +1241,7 @@ type_complete_struct(Type_Struct *type) {
     type->scope = scope_enter(decl->name);
 
     if ( !DSTRUCT(decl)->num_fields ) {
-        assert(!"datenstruktur muss mindestens ein feld enthalten!");
+        report_error(decl, "datenstruktur %s muss mindestens ein feld enthalten", decl->name);
     }
 
     for ( size_t i = 0; i < DSTRUCT(decl)->num_fields; i++ ) {
@@ -1240,7 +1263,7 @@ type_complete_struct(Type_Struct *type) {
         }
 
         if ( !field_type ) {
-            assert(!"datentyp des feldes konnte nicht ermittelt werden");
+            report_error(field, "datentyp des feldes %s konnte nicht ermittelt werden", field->name);
         }
 
         type_complete(field_type);
@@ -1276,7 +1299,7 @@ type_complete_enum(Type_Enum *type) {
     type->scope = scope_enter(decl->name);
 
     if ( !DENUM(decl)->num_fields ) {
-        assert(!"datenstruktur muss mindestens ein feld enthalten!");
+        report_error(decl, "datenstruktur %s muss mindestens ein feld enthalten", decl->name);
     }
 
     for ( size_t i = 0; i < DENUM(decl)->num_fields; i++ ) {
@@ -1354,7 +1377,7 @@ resolve_proc(Sym *sym) {
 
     if ( sign->sys_call || sign->num_rets == 0 ) {
     } else if ( !returns ) {
-        assert(!"nicht alle zweige liefern einen wert zurueck!");
+        report_error(decl, "nicht alle zweige liefern einen wert zurueck!");
     }
 }
 
@@ -1419,7 +1442,7 @@ sym_finalize(Sym *sym) {
 }
 
 Resolved_Stmts
-resolve(Parsed_File *parsed_file) {
+resolve_file(Parsed_File *parsed_file) {
     Resolved_Stmts result = resolve_directives(parsed_file->directives);
     register_global_syms(parsed_file->stmts);
 
@@ -1442,6 +1465,17 @@ resolve(Parsed_File *parsed_file) {
                 buf_push(result, stmts[j]);
             }
         }
+    }
+
+    return result;
+}
+
+Resolved_Stmts
+resolve(Parsed_File *parsed_file) {
+    Resolved_Stmts result = resolve_file(parsed_file);
+
+    if ( !sym_get(global_scope, intern_str(entry_point)) ) {
+        report_error(&loc_none, "einstiegspunkt \"%s\" wurde nicht gefunden", entry_point);
     }
 
     return result;

@@ -7,6 +7,8 @@
 
 namespace Urq { namespace Sss {
 
+char * entry_point = "master";
+
 struct Compound_Elem;
 struct Decl;
 struct Directive;
@@ -89,6 +91,7 @@ void             type_complete(Type *type);
 #define EINDEX(Expr)     ((Expr_Index *)(Expr))
 
 #define TSNAME(Ts)       ((Typespec_Name *)(Ts))
+#define TSPTR(Ts)        ((Typespec_Ptr *)(Ts))
 #define TSARRAY(Ts)      ((Typespec_Array *)(Ts))
 
 #define SDECL(Stmt)      ((Stmt_Decl *)(Stmt))
@@ -133,8 +136,6 @@ void sss_repl() {
         printf(">>> ");
         gets_s(buf, sizeof(buf));
 
-        resolver_init();
-
         auto tokens   = tokenize("<repl>", buf);
         auto parsed   = parse(&tokens);
         auto resolved = resolve(parsed);
@@ -147,6 +148,8 @@ namespace api {
     using Urq::Sss::Bytecode::Bytecode;
 
     using Urq::Sss::Bytecode::build;
+    using Urq::Sss::Bytecode::optimize;
+
     using Urq::Sss::parse;
     using Urq::Sss::resolve;
     using Urq::Sss::resolver_init;
