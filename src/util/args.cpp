@@ -112,7 +112,6 @@ parse_args(int32_t count, char **line_args, Line_Args app_args, bool exit_on_err
     }
 
     Line_Args given_args = NULL;
-    int32_t given_args_num = 0;
     for ( int i = 1; i < count; ++i ) {
         char *arg = line_args[i];
 
@@ -132,12 +131,14 @@ parse_args(int32_t count, char **line_args, Line_Args app_args, bool exit_on_err
             }
 
             buf_push(given_args, line_arg(name, option, val));
-            given_args_num++;
         } else {
-            buf_push(given_args, app_args[i]);
+            Line_Arg *app_arg = app_args[i-1];
+
+            buf_push(given_args, line_arg(app_arg->name, app_arg->option, arg));
         }
     }
 
+    int32_t given_args_num = buf_len(given_args);
     if ( required_args_num > given_args_num ) {
         print_usage(line_args, app_args);
 
