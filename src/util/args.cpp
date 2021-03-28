@@ -67,8 +67,8 @@ print_usage(char **cmd_args, Line_Args args) {
     os_print(cmd_args[0]);
     os_stdout_set_regular();
 
-    uint32_t args_num = (uint32_t)buf_len(args);
-    for ( uint32_t i = 0; i < args_num; ++i ) {
+    int args_num = buf_len(args);
+    for ( int i = 0; i < args_num; ++i ) {
         Line_Arg *arg = args[i];
 
         if ( arg->flags & LINE_ARG_NOT_REQUIRED ) {
@@ -88,7 +88,7 @@ print_usage(char **cmd_args, Line_Args args) {
 
     os_print("\nArgumente:\n");
 
-    for ( uint32_t i = 0; i < args_num; ++i ) {
+    for ( int i = 0; i < args_num; ++i ) {
         os_print("\t");
         line_arg_print(args[i]);
     }
@@ -97,13 +97,13 @@ print_usage(char **cmd_args, Line_Args args) {
 }
 
 void
-parse_args(int32_t count, char **line_args, Line_Args app_args) {
+parse_args(int32_t count, char **line_args, Line_Args app_args, bool exit_on_error = false) {
     using namespace Urq::Os::api;
 
-    uint32_t app_args_num = (uint32_t)buf_len(app_args);
+    int32_t app_args_num = buf_len(app_args);
 
-    uint32_t required_args_num = 0;
-    for ( uint32_t i = 0; i < app_args_num; ++i ) {
+    int32_t required_args_num = 0;
+    for ( int i = 0; i < app_args_num; ++i ) {
         Line_Arg *arg = app_args[i];
 
         if ( arg->flags & LINE_ARG_REQUIRED && !arg->default_value ) {
@@ -112,7 +112,7 @@ parse_args(int32_t count, char **line_args, Line_Args app_args) {
     }
 
     Line_Args given_args = NULL;
-    uint32_t given_args_num = 0;
+    int32_t given_args_num = 0;
     for ( int i = 1; i < count; ++i ) {
         char *arg = line_args[i];
 
@@ -140,13 +140,16 @@ parse_args(int32_t count, char **line_args, Line_Args app_args) {
 
     if ( required_args_num > given_args_num ) {
         print_usage(line_args, app_args);
-        assert(0);
-        exit(1);
+
+        if ( exit_on_error ) {
+            assert(0);
+            exit(1);
+        }
     }
 
-    for ( uint32_t i = 0; i < given_args_num; ++i ) {
+    for ( int i = 0; i < given_args_num; ++i ) {
         Line_Arg *given_arg = given_args[i];
-        for ( uint32_t j = 0; j < app_args_num; ++j ) {
+        for ( int j = 0; j < app_args_num; ++j ) {
             Line_Arg *app_arg = app_args[j];
 
             if ( utf8_str_eq(given_arg->name, app_arg->name) ||

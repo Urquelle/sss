@@ -1,4 +1,4 @@
-static size_t
+static int32_t
 utf8_char_size(char *str) {
     if ( (*str & 0x80) == 0x00 ) {
         return 1;
@@ -15,17 +15,17 @@ utf8_char_size(char *str) {
     return 0;
 }
 
-static size_t
+static int32_t
 utf8_str_len(char *str) {
     if ( !str ) {
         return 0;
     }
 
-    size_t result = 0;
+    int32_t result = 0;
     char *ptr = str;
 
     while ( *ptr ) {
-        size_t size = utf8_char_size(ptr);
+        int32_t size = utf8_char_size(ptr);
         ptr += size;
         result++;
     }
@@ -33,10 +33,10 @@ utf8_str_len(char *str) {
     return result;
 }
 
-static size_t
+static int32_t
 utf8_str_size(char *str) {
-    size_t len = utf8_str_len(str);
-    size_t result = 0;
+    int32_t len = utf8_str_len(str);
+    int32_t result = 0;
     char *ptr = str;
 
     for ( int i = 0; i < len; ++i ) {
@@ -47,16 +47,16 @@ utf8_str_size(char *str) {
 }
 
 static char * utf8_char_toupper(char *str);
-static size_t
+static int32_t
 utf8_str_uppersize(char *str) {
     char *ptr = str;
-    size_t len = utf8_str_len(str);
-    size_t result = 0;
+    int32_t len = utf8_str_len(str);
+    int32_t result = 0;
 
     for ( int i = 0; i < len; ++i ) {
-        size_t old_size = utf8_char_size(ptr);
+        int32_t old_size = utf8_char_size(ptr);
         char *c = utf8_char_toupper(ptr);
-        size_t size = utf8_char_size(c);
+        int32_t size = utf8_char_size(c);
         result += size;
         ptr += old_size;
     }
@@ -65,16 +65,16 @@ utf8_str_uppersize(char *str) {
 }
 
 static char * utf8_char_tolower(char *str);
-static size_t
+static int32_t
 utf8_str_lowersize(char *str) {
     char *ptr = str;
-    size_t len = utf8_str_len(str);
-    size_t result = 0;
+    int32_t len = utf8_str_len(str);
+    int32_t result = 0;
 
     for ( int i = 0; i < len; ++i ) {
-        size_t old_size = utf8_char_size(ptr);
+        int32_t old_size = utf8_char_size(ptr);
         char *c = utf8_char_tolower(ptr);
-        size_t size = utf8_char_size(c);
+        int32_t size = utf8_char_size(c);
         result += size;
         ptr += old_size;
     }

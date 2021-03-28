@@ -30,7 +30,7 @@ enum Value_Kind {
 
 struct Value : Loc {
     Value_Kind kind;
-    uint32_t   size;
+    int32_t    size;
 
     union {
         int64_t   int_val;
@@ -60,6 +60,7 @@ enum Obj_Kind {
 
 struct Obj : Loc {
     Obj_Kind   kind;
+    Scope    * scope;
 };
 
 struct Obj_String : Obj {
@@ -70,14 +71,13 @@ struct Obj_String : Obj {
 
 struct Obj_Compound : Obj {
     Values   elems;
-    uint32_t num_elems;
+    int32_t num_elems;
 };
 
 struct Obj_Proc : Obj {
     Obj_String     * name;
-    Scope          * scope;
     Bytecode       * bc;
-    uint32_t         num_params;
+    int32_t          num_params;
     bool             sys_call;
     char           * lib;
     Proc_Sign      * sign;
@@ -87,7 +87,6 @@ struct Obj_Namespace : Obj {
     Obj_String     * name;
     char           * scope_name;
     Obj_Proc       * proc;
-    Scope          * scope;
     Scope          * prev_scope;
 };
 
@@ -151,9 +150,9 @@ Obj_Struct_Field * as_struct_field(Value val);
 #define AS_NAMESPACE(Val) ((Obj_Namespace *)(Val).obj_val)
 
 struct Value_Array {
-    uint32_t   size;
-    uint32_t   cap;
-    Value    * values;
+    int32_t   size;
+    int32_t   cap;
+    Value   * values;
 };
 
 #define TABLE_MAX_LOAD 0.75f
@@ -163,17 +162,17 @@ struct Table_Entry {
 };
 
 struct Table {
-    int32_t       size;
-    int32_t       cap;
-    Table_Entry * entries;
-    Table_Entry ** ordered_entries;
+    uint32_t       size;
+    uint32_t       cap;
+    Table_Entry  * entries;
+    Table_Entry  ** ordered_entries;
 };
 
 struct Scope {
-    char           * name;
+    char  * name;
     Scope * parent;
-    Table            syms;
-    Table            export_syms;
+    Table   syms;
+    Table   export_syms;
 };
 
 Scope   sys_scope    = {"sys",    NULL,       {}};
@@ -183,8 +182,8 @@ Scope * curr_scope   = &global_scope;
 struct Bytecode {
     Bytecode *  parent;
     Instr    ** instructions;
-    uint32_t    curr;
-    uint32_t    size;
+    int32_t     curr;
+    int32_t     size;
     Value_Array constants;
 };
 
@@ -246,10 +245,10 @@ struct Instr : Loc {
 };
 
 struct Call_Frame {
-    Obj_Proc       * proc;
-    Scope * prev_scope;
-    uint32_t         pc;
-    uint32_t         sp;
+    Obj_Proc   * proc;
+    Scope      * prev_scope;
+    int32_t      pc;
+    int32_t      sp;
 };
 
 enum { MAX_STACK_SIZE = 1024, MAX_FRAME_NUM = 100 };
@@ -399,8 +398,9 @@ table_find_string(Table *table, char* chars, uint32_t size, uint32_t hash) {
                 return NULL;
             }
         } else if (entry->key->size == size &&
-                entry->key->hash == hash &&
-                memcmp(entry->key->ptr, chars, size) == 0) {
+                   entry->key->hash == hash &&
+                   memcmp(entry->key->ptr, chars, size) == 0)
+        {
             return entry->key;
         }
 
@@ -418,7 +418,7 @@ table_adjust(Table* table, int cap) {
     }
 
     table->size = 0;
-    for (int i = 0; i < table->cap; i++) {
+    for ( uint32_t i = 0; i < table->cap; i++) {
         Table_Entry *entry = &table->entries[i];
         if (entry->key == NULL) continue;
 
@@ -458,7 +458,7 @@ table_set(Table *table, Obj_String *key, Value val) {
 
 void
 table_add_all(Table* from, Table* to) {
-    for (int i = 0; i < from->cap; i++) {
+    for ( uint32_t i = 0; i < from->cap; i++) {
         Table_Entry* entry = &from->entries[i];
         if (entry->key != NULL) {
             table_set(to, entry->key, entry->val);
@@ -535,7 +535,7 @@ vm_debug(Vm *vm) {
     }
     printf("\n\n***************** STACK *************************\n");
     if ( frame->sp ) {
-        for ( uint32_t i = 0; i < frame->sp; ++i ) {
+        for ( int i = 0; i < frame->sp; ++i ) {
             printf("%s%02d[", (i % 4 == 0) ? "\n" : "", i);
             val_print(vm->stack[i]);
             printf("] ");
@@ -607,66 +607,9 @@ value_set(Value_Array *array, int32_t index, Value val) {
     array->values[index] = val;
 }
 
-#if 0
-void
-bytecode_resize(Bytecode *bc, int32_t size) {
-    if ( bc->size + size > bc->cap ) {
-        uint32_t cap = ( bc->cap < 16 ) ? 16 : bc->cap*2;
-        uint8_t *code = (uint8_t *)urq_alloc(cap);
-        memcpy(code, bc->code, bc->size);
-
-        bc->code = code;
-        bc->cap  = cap;
-    }
-}
-
-void
-bytecode_write8(Bytecode *bc, uint8_t val) {
-    bytecode_resize(bc, 1);
-
-    bc->code[bc->size] = val;
-    bc->size += 1;
-}
-
-void
-bytecode_write16(Bytecode *bc, uint16_t val) {
-    bytecode_resize(bc, 2);
-
-    *(uint16_t *)(bc->code + bc->size) = val;
-    bc->size += 2;
-}
-
-void
-bytecode_write16(Bytecode *bc, int32_t addr, uint16_t val) {
-    bytecode_resize(bc, 2);
-
-    *(uint16_t *)(bc->code + addr) = val;
-}
-
-uint8_t
-bytecode_read8(Vm *vm) {
-    Call_Frame *frame = vm_curr_frame(vm);
-
-    uint8_t result = frame->proc->bc->code[frame->pc];
-    frame->pc += 1;
-
-    return result;
-}
-
-uint16_t
-bytecode_read16(Vm *vm) {
-    Call_Frame *frame = vm_curr_frame(vm);
-
-    uint16_t result = *(uint16_t *)(frame->proc->bc->instructions[frame->pc]);
-    frame->pc += 2;
-
-    return result;
-}
-#endif
-
 Obj_String *
-obj_string(char *ptr, uint32_t size) {
-    uint32_t hash = hash_string(ptr, size);
+obj_string(char *ptr, int32_t size) {
+    int32_t hash = hash_string(ptr, size);
     Obj_String *interned = table_find_string(&strings, ptr, size, hash);
 
     if ( interned ) {
@@ -675,10 +618,11 @@ obj_string(char *ptr, uint32_t size) {
 
     Obj_String *result = urq_allocs(Obj_String);
 
-    result->kind = OBJ_STRING;
-    result->ptr  = ptr;
-    result->size = size;
-    result->hash = hash;
+    result->kind  = OBJ_STRING;
+    result->scope = bytecode_scope_new("string");
+    result->ptr   = ptr;
+    result->size  = size;
+    result->hash  = hash;
 
     table_set(&strings, result, val_none());
 
@@ -728,7 +672,7 @@ obj_namespace(char *name, char *scope_name) {
     Obj_Namespace *result = urq_allocs(Obj_Namespace);
 
     result->kind       = OBJ_NAMESPACE;
-    result->name       = obj_string(name, (uint32_t)utf8_str_size(name));
+    result->name       = obj_string(name, utf8_str_size(name));
     result->scope_name = scope_name;
     result->proc       = obj_proc();
     result->scope      = bytecode_scope_new(scope_name, &sys_scope);
@@ -820,7 +764,7 @@ obj_print(Obj *obj) {
         case OBJ_COMPOUND: {
             Obj_Compound *c = ((Obj_Compound *)obj);
             printf("(compound: ");
-            for ( uint32_t i = 0; i < c->num_elems; ++i ) {
+            for ( int i = 0; i < c->num_elems; ++i ) {
                 printf("[%01d: ", i);
                 val_print(c->elems[i]);
                 printf("]");
@@ -936,6 +880,8 @@ val_ptr(void *ptr) {
 Value
 val_str(char *ptr, uint32_t size) {
     Value result = val_obj(obj_string(ptr, size));
+
+    table_set(&result.obj_val->scope->syms, obj_string("size", 4), val_int(size));
 
     return result;
 }
@@ -2220,13 +2166,20 @@ call_sys_proc(Vm *vm, Value val, uint32_t num_args) {
     DCCallVM *call_vm = dcNewCallVM(1024);
     dcMode(call_vm, DC_CALL_C_DEFAULT);
 
-    auto lib = LoadLibrary(as_proc(val)->lib);
+    Obj_Proc *proc = as_proc(val);
+
+    auto lib = LoadLibrary(proc->lib);
     assert(lib);
-    auto proc_ptr = GetProcAddress(lib, to_str(as_proc(val)->name));
+    auto proc_ptr = GetProcAddress(lib, to_str(proc->name));
     assert(proc_ptr);
 
-    for ( uint32_t i = 0; i < num_args; ++i ) {
-        Value arg = stack_pop(vm);
+    Values args = NULL;
+    for ( int32_t i = num_args; i > 0; --i ) {
+        buf_push(args, stack_pop(vm));
+    }
+
+    for ( int32_t i = num_args; i > 0; --i ) {
+        Value arg = args[i-1];
 
         switch ( arg.kind ) {
             case VAL_INT: {
@@ -2262,8 +2215,6 @@ call_sys_proc(Vm *vm, Value val, uint32_t num_args) {
             } break;
         }
     }
-
-    Obj_Proc *proc = as_proc(val);
 
     if ( proc->sign->num_rets ) {
         Type *type = proc->sign->rets[0]->type;
@@ -2719,6 +2670,15 @@ step(Vm *vm) {
                 }
 
                 stack_push(vm, field_val);
+            } else if ( IS_VSTR(val) ) {
+                Obj_String *str = ((Obj_String *)val.obj_val);
+
+                Value field_val;
+                if ( !table_get(&str->scope->syms, as_str(field), &field_val) ) {
+                    assert(!"feld konnte nicht gefunden werden");
+                }
+
+                stack_push(vm, field_val);
             } else if ( IS_VENUM(val) ) {
                 Obj_Enum *enumeration = ((Obj_Enum *)val.obj_val);
 
@@ -2974,7 +2934,7 @@ step(Vm *vm) {
                 Obj_Struct   * structure = (Obj_Struct *)type_val.obj_val;
                                new_val   = val_struct(((Obj_String *)structure->name)->ptr, ((Obj_String *)structure->name)->size);
 
-                for ( uint32_t i = 0; i < compound->num_elems; ++i ) {
+                for ( int i = 0; i < compound->num_elems; ++i ) {
                     Value compound_val = compound->elems[i];
                     table_set(((Obj_Struct *)new_val.obj_val)->fields, structure->fieldnames_ordered[i], compound_val);
                 }
@@ -3043,13 +3003,15 @@ bytecode_init(Bytecode *bc) {
 }
 
 struct Basic_Block {
-    Instrs instrs;
+    int32_t id;
+    Instrs   instrs;
 };
 
 Basic_Block *
-basic_block(Instrs instrs) {
+basic_block(int32_t id, Instrs instrs) {
     Basic_Block *result = urq_allocs(Basic_Block);
 
+    result->id     = id;
     result->instrs = instrs;
 
     return result;
@@ -3065,19 +3027,18 @@ optimize(Bytecode *bc) {
     Obj_Proc *proc = as_proc(val);
     Bytecode *code = proc->bc;
 
-    for ( uint32_t i = 0; i < code->size; ++i ) {
+    for ( int i = 0; i < code->size; ++i ) {
         Instr *instr = code->instructions[i];
 
-        if (
-                instr->opcode == BYTECODEOP_JMP_FALSE ||
-                instr->opcode == BYTECODEOP_JMP ||
-                instr->opcode == BYTECODEOP_CALL ||
-                instr->opcode == BYTECODEOP_RET )
+        if (instr->opcode == BYTECODEOP_JMP_FALSE ||
+            instr->opcode == BYTECODEOP_JMP       ||
+            instr->opcode == BYTECODEOP_CALL      ||
+            instr->opcode == BYTECODEOP_RET        )
         {
             buf_push(instrs, instr);
 
             if ( buf_len(instrs) > 0 ) {
-                buf_push(bbs, basic_block(instrs));
+                buf_push(bbs, basic_block(buf_len(bbs), instrs));
             }
 
             instrs = NULL;
@@ -3090,8 +3051,6 @@ optimize(Bytecode *bc) {
             buf_push(instrs, instr);
         }
     }
-
-    printf("anzahl basic blocks %zd", buf_len(bbs));
 
     return bc;
 }

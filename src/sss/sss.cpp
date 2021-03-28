@@ -121,6 +121,7 @@ void             type_complete(Type *type);
 #define TARRAY(T)        ((Type_Array *)(T))
 
 #define IS_VSTRUCT(Val)  ((Val).kind == VAL_OBJ && (Val).obj_val->kind == OBJ_STRUCT)
+#define IS_VSTR(Val)     ((Val).kind == VAL_OBJ && (Val).obj_val->kind == OBJ_STRING)
 #define IS_VENUM(Val)    ((Val).kind == VAL_OBJ && (Val).obj_val->kind == OBJ_ENUM)
 #define IS_VNS(Val)      ((Val).kind == VAL_OBJ && (Val).obj_val->kind == OBJ_NAMESPACE)
 

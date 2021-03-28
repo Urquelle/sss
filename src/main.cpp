@@ -58,8 +58,12 @@ int main(int argc, char* argv[]) {
     resolver_init();
 
     char *file_name = NULL;
-    Line_Args args = line_arg_push(NULL, line_arg(&file_name, "dateiname", "f", "Pfad zur Programmdatei", LINE_ARG_NOT_REQUIRED));
-    parse_args(argc, argv, args);
+    char *output    = NULL;
+
+    Line_Args args = line_arg_push(NULL, line_arg(&file_name, "dateiname", "d", "Pfad zur Programmdatei", LINE_ARG_NOT_REQUIRED));
+                     line_arg_push(args, line_arg(&output, "ausgabe", "a", "Dateiname der Ausgabedatei", LINE_ARG_NOT_REQUIRED, "a.exe"));
+
+    parse_args(argc, argv, args, true);
 
     if ( argc < 2 ) {
         sss_repl();
@@ -67,7 +71,7 @@ int main(int argc, char* argv[]) {
         char *content = "";
         os_file_read(file_name, &content);
 
-        auto tokens   = tokenize(argv[1], content);
+        auto tokens   = tokenize(file_name, content);
         auto parsed   = parse(&tokens);
         auto resolved = resolve(parsed);
         auto code     = build(parsed);
