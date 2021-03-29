@@ -452,7 +452,7 @@ struct Proc_Sign : Ast_Elem {
     char        * sys_lib;
 };
 
-struct Compound_Elem {
+struct Compound_Elem : Ast_Elem {
     char     * name;
     Sym      * sym;
     Typespec * typespec;
@@ -634,6 +634,10 @@ keyword_expect(Token_List *tokens, char *keyword) {
 Compound_Elem *
 compound_elem(Ast_Elem *loc, char *name, Typespec *typespec, Expr *value) {
     Compound_Elem *result = urq_allocs(Compound_Elem);
+
+    result->file     = loc->file;
+    result->line     = loc->line;
+    result->col      = loc->col;
 
     result->name     = name;
     result->typespec = typespec;

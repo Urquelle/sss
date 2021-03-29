@@ -166,7 +166,7 @@ struct Loc {
     size_t col;
 };
 
-Loc loc_none = { "<global>", 0, 0 };
+Loc loc_none = { "<unbekannt>", 0, 0 };
 
 void
 report_error(Loc *loc, char *fmt, ...) {

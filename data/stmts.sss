@@ -2,6 +2,8 @@ Vec3 :: struktur {
     x, y, z : s32;
 }
 
+z := new Vec3;
+
 a : s32 = 5 + 3;
 b := a + 1;
 c := falsch;
@@ -30,12 +32,13 @@ jedes 1..2 {
     b = 100;
 }
 
-hallo :: proc(x: s32) -> s32 {
-    ergebnis := x + 10;
+master :: proc(args: [] string) -> string {
+    ergebnis := args[0];
 
     res ergebnis, 7.5;
 }
 
-e := hallo(15);
+args : [] string = { "a", "b", "c" };
+e := master(args);
 f := d;
 

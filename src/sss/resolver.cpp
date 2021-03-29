@@ -37,9 +37,29 @@ Scope *sys_scope;
 Scope *global_scope;
 Scope *curr_scope;
 
+enum Value_Kind {
+    VAL_NONE,
+    VAL_INT,
+    VAL_STR,
+    VAL_FLOAT,
+    VAL_BOOL,
+};
+struct Value {
+    Value_Kind kind;
+
+    union {
+        int32_t i32;
+        float   f32;
+        char *  str;
+        bool    b;
+    };
+};
+
 struct Operand {
-    Type *type;
-    bool is_const;
+    Type * type;
+    Sym  * sym;
+    bool   is_const;
+    Value  val;
 };
 
 enum Type_Kind {
@@ -163,6 +183,63 @@ to_str(Expr *expr) {
             return "unbekannt";
         } break;
     }
+}
+
+char *
+to_str(Type *type) {
+    char *result = NULL;
+
+    switch ( type->kind ) {
+        case TYPE_ARRAY: {
+            buf_printf(result, "[] %s", to_str(TARRAY(type)->base));
+        } break;
+
+        default: {
+            buf_printf(result, "%s", type->name);
+        } break;
+    }
+
+    return result;
+}
+
+Value
+val_int(int32_t val) {
+    Value result = {};
+
+    result.kind = VAL_INT;
+    result.i32  = val;
+
+    return result;
+}
+
+Value
+val_str(char * val) {
+    Value result = {};
+
+    result.kind = VAL_STR;
+    result.str  = val;
+
+    return result;
+}
+
+Value
+val_float(float val) {
+    Value result = {};
+
+    result.kind = VAL_FLOAT;
+    result.f32  = val;
+
+    return result;
+}
+
+Value
+val_bool(bool val) {
+    Value result = {};
+
+    result.kind = VAL_BOOL;
+    result.b    = val;
+
+    return result;
 }
 
 Resolved_Stmt *
@@ -323,6 +400,19 @@ type_iscastable(Type *left, Type *right) {
     return false;
 }
 
+bool
+type_are_compatible(Type *left, Type *right) {
+    if ( left == right ) {
+        return true;
+    }
+
+    if ( left->kind == TYPE_ARRAY && right->kind == TYPE_ARRAY ) {
+        return type_iscastable(TARRAY(left)->base, TARRAY(right)->base);
+    }
+
+    return false;
+}
+
 Operand *
 operand(Type *type) {
     Operand *result = urq_allocs(Operand);
@@ -338,6 +428,16 @@ operand_const(Type *type) {
     Operand *result = operand(type);
 
     result->is_const = true;
+
+    return result;
+}
+
+Operand *
+operand_const(Type *type, Value val) {
+    Operand *result = operand(type);
+
+    result->is_const = true;
+    result->val      = val;
 
     return result;
 }
@@ -626,19 +726,19 @@ resolve_expr(Expr *expr, Type *given_type = NULL) {
 
     switch ( expr->kind ) {
         case EXPR_STR: {
-            result = operand_const(type_string);
+            result = operand_const(type_string, val_str(ESTR(expr)->val));
         } break;
 
         case EXPR_INT: {
-            result = operand_const(type_u32);
+            result = operand_const(type_u32, val_int((int32_t)EINT(expr)->val));
         } break;
 
         case EXPR_FLOAT: {
-            result = operand_const(type_f32);
+            result = operand_const(type_f32, val_float(EFLOAT(expr)->val));
         } break;
 
         case EXPR_BOOL: {
-            result = operand_const(type_bool);
+            result = operand_const(type_bool, val_bool(EBOOL(expr)->val));
         } break;
 
         case EXPR_IDENT: {
@@ -650,8 +750,24 @@ resolve_expr(Expr *expr, Type *given_type = NULL) {
 
             EIDENT(expr)->sym = sym;
             result = operand(sym->type);
+            result->sym = sym;
 
             result->is_const = sym->kind == SYM_CONST;
+        } break;
+
+        case EXPR_NEW: {
+            Operand *op = resolve_expr(ENEW(expr)->expr);
+
+            if ( !op->type ) {
+                report_error(expr, "fehlender datentyp für new anweisung");
+            }
+
+            assert(op->sym);
+            if ( op->sym->kind != SYM_TYPE ) {
+                report_error(ENEW(expr)->expr, "ausdruck muß ein datentyp sein");
+            }
+
+            result = operand(type_ptr(op->type));
         } break;
 
         case EXPR_CAST: {
@@ -713,6 +829,12 @@ resolve_expr(Expr *expr, Type *given_type = NULL) {
         case EXPR_INDEX: {
             Operand *base = resolve_expr(EINDEX(expr)->base);
             assert(base->type && base->type->kind == TYPE_ARRAY);
+            Operand *index = resolve_expr(EINDEX(expr)->index);
+
+            if ( !type_isint(index->type) ) {
+                report_error(EINDEX(expr)->index, "index muß vom datentyp int sein, bekommen %s", to_str(index->type));
+            }
+
             result = operand(TARRAY(base->type)->base);
         } break;
 
@@ -740,8 +862,9 @@ resolve_expr(Expr *expr, Type *given_type = NULL) {
                 Operand *arg = resolve_expr(ECALL(expr)->args[i]);
 
                 operand_cast(param->type, arg);
-                if ( param->type != arg->type ) {
-                    report_error(expr, "datentyp erwartet %s, bekommen %s", param->type->name, arg->type->name);
+                /* @AUFGABE: array und zeiger datentypen auf kompatibilität überprüfen */
+                if ( !type_are_compatible(param->type, arg->type) ) {
+                    report_error(expr, "datentyp erwartet %s, bekommen %s", to_str(param->type), to_str(arg->type));
                 }
             }
 
@@ -765,33 +888,56 @@ resolve_expr(Expr *expr, Type *given_type = NULL) {
 
         case EXPR_COMPOUND: {
             assert(given_type);
-            assert(given_type->kind == TYPE_STRUCT);
 
-            if ( TSTRUCT(given_type)->num_fields != ECMPND(expr)->num_elems ) {
-                report_error(expr, "anzahl der argumente erwartet %d, bekommen %d", TSTRUCT(given_type)->num_fields, ECMPND(expr)->num_elems);
-            }
-
-            Compound_Elems args = NULL;
-            for ( int i = 0; i < TSTRUCT(given_type)->num_fields; ++i ) {
-                Struct_Field  * struct_field = TSTRUCT(given_type)->fields[i];
-                Compound_Elem * arg          = ECMPND(expr)->elems[i];
-
-                if ( arg->name ) {
-                    assert(!"unbehandelter fall: benamtes argument");
-                } else {
-                    Operand *operand = resolve_expr(arg->value);
-                    operand_cast(struct_field->type, operand);
-
-                    if ( struct_field->type != operand->type ) {
-                        report_error(arg->value, "datentype erwartet %s, bekommen %s", struct_field->type->name, operand->type->name);
+            if ( given_type->kind == TYPE_ARRAY ) {
+                if ( TARRAY(given_type)->num_elems ) {
+                    if ( ECMPND(expr)->num_elems != TARRAY(given_type)->num_elems ) {
+                        report_error(expr, "erwartete anzahl der ausdrücke %d, bekommen %d", TARRAY(given_type)->num_elems, ECMPND(expr)->num_elems);
                     }
-
-                    arg->type = struct_field->type;
-                    buf_push(args, arg);
+                } else {
+                    TARRAY(given_type)->num_elems = ECMPND(expr)->num_elems;
                 }
-            }
 
-            result = operand(type_compound(args, (uint32_t)buf_len(args)));
+                for ( int i = 0; i < ECMPND(expr)->num_elems; ++i ) {
+                    Compound_Elem *arg = ECMPND(expr)->elems[i];
+                    Operand *op = resolve_expr(arg->value);
+
+                    operand_cast(TARRAY(given_type)->base, op);
+                    if ( TARRAY(given_type)->base != op->type ) {
+                        report_error(arg, "datentyp erwartet %s, bekommen %s", TARRAY(given_type)->base, op->type);
+                    }
+                }
+
+                result = operand(given_type);
+            } else {
+                assert(given_type->kind == TYPE_STRUCT);
+
+                if ( TSTRUCT(given_type)->num_fields != ECMPND(expr)->num_elems ) {
+                    report_error(expr, "anzahl der argumente erwartet %d, bekommen %d", TSTRUCT(given_type)->num_fields, ECMPND(expr)->num_elems);
+                }
+
+                Compound_Elems args = NULL;
+                for ( int i = 0; i < TSTRUCT(given_type)->num_fields; ++i ) {
+                    Struct_Field  * struct_field = TSTRUCT(given_type)->fields[i];
+                    Compound_Elem * arg          = ECMPND(expr)->elems[i];
+
+                    if ( arg->name ) {
+                        assert(!"unbehandelter fall: benamtes argument");
+                    } else {
+                        Operand *operand = resolve_expr(arg->value);
+                        operand_cast(struct_field->type, operand);
+
+                        if ( struct_field->type != operand->type ) {
+                            report_error(arg, "datentyp erwartet %s, bekommen %s", struct_field->type->name, operand->type->name);
+                        }
+
+                        arg->type = struct_field->type;
+                        buf_push(args, arg);
+                    }
+                }
+
+                result = operand(type_compound(args, (uint32_t)buf_len(args)));
+            }
         } break;
 
         default: {
@@ -832,9 +978,25 @@ resolve_typespec(Typespec *typespec) {
         } break;
 
         case TYPESPEC_ARRAY: {
-            Operand *op = resolve_expr(TSARRAY(typespec)->num_elems);
-            /* @AUFGABE: den wert 1 mit dem wert aus op ersetzen */
-            result = type_array(resolve_typespec(TSARRAY(typespec)->base), 1);
+            Type *type = resolve_typespec(TSARRAY(typespec)->base);
+
+            if ( TSARRAY(typespec)->num_elems ) {
+                Operand *op = resolve_expr(TSARRAY(typespec)->num_elems);
+
+                operand_cast(type_u32, op);
+                if ( op->type != type_u32 ) {
+                    report_error(TSARRAY(typespec)->num_elems, "numerischen datentyp erwartet");
+                }
+
+                if ( op->is_const ) {
+                    assert(op->val.kind != VAL_NONE);
+                    result = type_array(type, op->val.i32);
+                } else {
+                    result = type_array(type, 0);
+                }
+            } else {
+                result = type_array(type, 0);
+            }
         } break;
 
         case TYPESPEC_VARARG: {
@@ -906,7 +1068,7 @@ resolve_decl_var(Decl *decl) {
     assert(decl->kind == DECL_VAR);
 
     Type *type = resolve_typespec(DVAR(decl)->typespec);
-    Operand *op = resolve_expr(DVAR(decl)->expr);
+    Operand *op = resolve_expr(DVAR(decl)->expr, type);
 
     if ( !type && !op ) {
         report_error(decl, "datentyp der variable %s konnte nicht ermittelt werden", DVAR(decl)->name);
@@ -1098,7 +1260,7 @@ resolve_stmt(Stmt *stmt) {
 
                     operand_cast(SRET(stmt)->sign->rets[i]->type, operand);
                     if ( SRET(stmt)->sign->rets[i]->type != operand->type ) {
-                        report_error(SRET(stmt)->exprs[i], "datentyp erwartet %s, bekommen %s", SRET(stmt)->sign->rets[i]->type->name, operand->type->name);
+                        report_error(SRET(stmt)->exprs[i], "rückgabewert vom datentyp erwartet %s, bekommen %s", SRET(stmt)->sign->rets[i]->type->name, operand->type->name);
                     }
 
                     buf_push(result, resolved_stmt(stmt, NULL, operand->type, operand));
@@ -1471,11 +1633,28 @@ resolve_file(Parsed_File *parsed_file) {
 }
 
 Resolved_Stmts
-resolve(Parsed_File *parsed_file) {
+resolve(Parsed_File *parsed_file, bool check_entry_point) {
     Resolved_Stmts result = resolve_file(parsed_file);
 
-    if ( !sym_get(global_scope, intern_str(entry_point)) ) {
-        report_error(&loc_none, "einstiegspunkt \"%s\" wurde nicht gefunden", entry_point);
+    if ( check_entry_point ) {
+        Sym *entry_point_sym = sym_get(global_scope, intern_str(entry_point));
+        if ( !entry_point_sym ) {
+            report_error(&loc_none, "einstiegspunkt \"%s\" wurde nicht gefunden", entry_point);
+        }
+
+        Type *type = entry_point_sym->type;
+        if ( type->kind != TYPE_PROC ) {
+            report_error(entry_point_sym->decl, "\"%s\" muss eine prozedur sein", entry_point);
+        }
+
+        if ( TPROC(type)->num_params != 1 ) {
+            report_error(entry_point_sym->decl, "\"%s\" muss einen parameter entgegennehmen", entry_point);
+        }
+
+        Proc_Param *param = TPROC(type)->params[0];
+        if ( param->type->kind != TYPE_ARRAY || TARRAY(param->type)->base->kind != TYPE_STRING ) {
+            report_error(&loc_none, "%s muss ein [] string sein", param->name);
+        }
     }
 
     return result;

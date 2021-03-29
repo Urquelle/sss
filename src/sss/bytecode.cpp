@@ -42,6 +42,7 @@ struct Value : Loc {
 
 #define OBJECTS         \
     X(OBJ_STRING)       \
+    X(OBJ_ARRAY)        \
     X(OBJ_RANGE)        \
     X(OBJ_PROC)         \
     X(OBJ_ITER)         \
@@ -70,7 +71,7 @@ struct Obj_String : Obj {
 };
 
 struct Obj_Compound : Obj {
-    Values   elems;
+    Values  elems;
     int32_t num_elems;
 };
 
@@ -120,6 +121,11 @@ struct Obj_Enum : Obj {
 
 struct Obj_Ptr : Obj {
     void *ptr;
+};
+
+struct Obj_Array : Obj {
+    Values   vals;
+    uint32_t num_vals;
 };
 
 enum Bytecode_Flags {
@@ -189,6 +195,7 @@ struct Bytecode {
 
 #define BYTECODES                   \
     X(BYTECODEOP_HLT)               \
+    X(BYTECODEOP_ALLOC)             \
     X(BYTECODEOP_ADDR)              \
     X(BYTECODEOP_NEG)               \
     X(BYTECODEOP_ADD)               \
@@ -229,8 +236,9 @@ struct Bytecode {
     X(BYTECODEOP_SET_SYM)           \
     X(BYTECODEOP_STRUCT)            \
     X(BYTECODEOP_STRUCT_FIELD)      \
-    X(BYTECODEOP_ENUM)              \
     X(BYTECODEOP_SUB)               \
+    X(BYTECODEOP_SUBSCRIPT)         \
+    X(BYTECODEOP_ENUM)              \
 
 enum Instr_Opcode {
 #define X(Elem) Elem,
@@ -667,6 +675,16 @@ obj_proc() {
     return result;
 }
 
+Obj_Proc *
+obj_proc(bool sys_call, char *lib) {
+    Obj_Proc *result = obj_proc();
+
+    result->sys_call = sys_call;
+    result->lib      = lib;
+
+    return result;
+}
+
 Obj_Namespace *
 obj_namespace(char *name, char *scope_name) {
     Obj_Namespace *result = urq_allocs(Obj_Namespace);
@@ -676,16 +694,6 @@ obj_namespace(char *name, char *scope_name) {
     result->scope_name = scope_name;
     result->proc       = obj_proc();
     result->scope      = bytecode_scope_new(scope_name, &sys_scope);
-
-    return result;
-}
-
-Obj_Proc *
-obj_proc(bool sys_call, char *lib) {
-    Obj_Proc *result = obj_proc();
-
-    result->sys_call = sys_call;
-    result->lib      = lib;
 
     return result;
 }
@@ -742,6 +750,17 @@ obj_ptr(void *ptr) {
 
     result->kind = OBJ_PTR;
     result->ptr = ptr;
+
+    return result;
+}
+
+Obj_Array *
+obj_array(Values vals, uint32_t num_vals) {
+    Obj_Array *result = urq_allocs(Obj_Array);
+
+    result->kind     = OBJ_ARRAY;
+    result->vals     = vals;
+    result->num_vals = num_vals;
 
     return result;
 }
@@ -942,6 +961,13 @@ val_namespace(Obj_Namespace *ns) {
     return result;
 }
 
+Value
+val_array(Values vals, uint32_t num_vals) {
+    Value result = val_obj(obj_array(vals, num_vals));
+
+    return result;
+}
+
 void
 val_print(Value val) {
     switch ( val.kind ) {
@@ -969,6 +995,35 @@ val_print(Value val) {
             assert(!"unbekannter wert");
         } break;
     }
+}
+
+Value
+val_to_ptr(Value val) {
+    Value result = {};
+
+    switch ( val.kind ) {
+        case VAL_INT: {
+            result = val_ptr(&val.int_val);
+        } break;
+
+        case VAL_FLOAT: {
+            result = val_ptr(&val.flt_val);
+        } break;
+
+        case VAL_BOOL: {
+            result = val_ptr(&val.bool_val);
+        } break;
+
+        case VAL_OBJ: {
+            result = val_ptr(val.obj_val);
+        } break;
+
+        default: {
+            assert(!"unbekannter datentyp");
+        } break;
+    }
+
+    return result;
 }
 
 Value
@@ -1366,6 +1421,14 @@ bytecode_debug(Vm *vm, Instr *instr) {
             printf("]\n");
         } break;
 
+        case BYTECODEOP_SUBSCRIPT: {
+            printf("subscript ");
+            val_print(vm->stack[frame->sp-2]);
+            printf("[");
+            val_print(vm->stack[frame->sp-1]);
+            printf("]\n");
+        } break;
+
         case BYTECODEOP_MUL: {
             printf("BYTECODEOP_MUL [left: ");
             val_print(vm->stack[frame->sp-2]);
@@ -1605,6 +1668,12 @@ bytecode_debug(Vm *vm, Instr *instr) {
             printf("\n");
         } break;
 
+        case BYTECODEOP_ALLOC: {
+            printf("alloc ");
+            val_print(vm->stack[frame->sp-1]);
+            printf("\n");
+        } break;
+
         case BYTECODEOP_ADDR: {
             printf("@");
             val_print(vm->stack[frame->sp-1]);
@@ -1662,6 +1731,11 @@ bytecode_expr(Bytecode *bc, Expr *expr, uint32_t flags = BYTECODEFLAG_NONE) {
                 report_error(expr, "benamtes compound implementieren");
                 instr_push(expr, bc, BYTECODEOP_NAMED_COMPOUND);
             }
+        } break;
+
+        case EXPR_NEW: {
+            bytecode_expr(bc, ENEW(expr)->expr);
+            instr_push(expr, bc, BYTECODEOP_ALLOC);
         } break;
 
         case EXPR_FIELD: {
@@ -1739,6 +1813,12 @@ bytecode_expr(Bytecode *bc, Expr *expr, uint32_t flags = BYTECODEFLAG_NONE) {
             instr_push(expr, bc, BYTECODEOP_ADDR);
         } break;
 
+        case EXPR_INDEX: {
+            bytecode_expr(bc, EINDEX(expr)->base);
+            bytecode_expr(bc, EINDEX(expr)->index);
+            instr_push(expr, bc, BYTECODEOP_SUBSCRIPT);
+        } break;
+
         default: {
             report_error(expr, "unbekannter ausdruck");
         } break;
@@ -1757,6 +1837,11 @@ bytecode_typespec(Bytecode *bc, Typespec *typespec) {
 
         case TYPESPEC_PTR: {
             int32_t index = bytecode_push_constant(bc, val_ptr(NULL));
+            instr_push(typespec, bc, BYTECODEOP_CONST, index);
+        } break;
+
+        case TYPESPEC_ARRAY: {
+            int32_t index = bytecode_push_constant(bc, val_array(NULL, 0));
             instr_push(typespec, bc, BYTECODEOP_CONST, index);
         } break;
 
@@ -2519,6 +2604,20 @@ step(Vm *vm) {
             stack_push(vm, left - right);
         } break;
 
+        case BYTECODEOP_SUBSCRIPT: {
+            Value index = stack_pop(vm);
+            Value base  = stack_pop(vm);
+
+            assert(IS_VARRAY(base));
+            Obj_Array *arr = (Obj_Array *)base.obj_val;
+
+            if ( index.int_val >= arr->num_vals ) {
+                report_error(instr, "index liegt außerhalb der array grenzen");
+            }
+
+            stack_push(vm, arr->vals[index.int_val]);
+        } break;
+
         case BYTECODEOP_MUL: {
             Value right = stack_pop(vm);
             Value left  = stack_pop(vm);
@@ -2599,6 +2698,14 @@ step(Vm *vm) {
             Value expr_val = stack_pop(vm);
 
             Value val = (expr_val.kind == VAL_NONE) ? type_val : expr_val;
+
+            if ( IS_VCMPND(expr_val) ) {
+                if ( IS_VSTRUCT(type_val) ) {
+                    assert(!"compound für struct umsetzen");
+                } else if ( IS_VARRAY(type_val) ) {
+                    val = val_array(VCMPND(val)->elems, VCMPND(val)->num_elems);
+                }
+            }
 
             if ( !bytecode_sym_set(name, val) ) {
                 assert(!"symbol konnte nicht gesetzt werden");
@@ -2888,25 +2995,12 @@ step(Vm *vm) {
             stack_push(vm, -val);
         } break;
 
+        case BYTECODEOP_ALLOC: {
+            stack_push(vm, val_to_ptr(stack_pop(vm)));
+        } break;
+
         case BYTECODEOP_ADDR: {
-            Value val = stack_pop(vm);
-            switch ( val.kind ) {
-                case VAL_INT: {
-                    stack_push(vm, val_ptr(&val.int_val));
-                } break;
-
-                case VAL_FLOAT: {
-                    stack_push(vm, val_ptr(&val.flt_val));
-                } break;
-
-                case VAL_BOOL: {
-                    stack_push(vm, val_ptr(&val.bool_val));
-                } break;
-
-                default: {
-                    assert(!"unbekannter datentyp");
-                } break;
-            }
+            stack_push(vm, val_to_ptr(stack_pop(vm)));
         } break;
 
         case BYTECODEOP_IMPORT_SYMS: {

@@ -62,7 +62,7 @@ Stmt_If        * parse_stmt_if(Token_List *tokens);
 Stmt_For       * parse_stmt_for(Token_List *tokens);
 Stmt_Match     * parse_stmt_match(Token_List *tokens);
 Typespec       * parse_typespec(Token_List *tokens);
-Resolved_Stmts   resolve(Parsed_File *parsed_file);
+Resolved_Stmts   resolve(Parsed_File *parsed_file, bool check_entry_point = true);
 Type           * resolve_decl(Decl *d);
 Type           * resolve_decl_const(Decl *decl);
 Type_Proc      * resolve_decl_proc(Decl *decl);
@@ -89,6 +89,7 @@ void             type_complete(Type *type);
 #define EBIN(Expr)       ((Expr_Bin *)(Expr))
 #define EAT(Expr)        ((Expr_At *)(Expr))
 #define EINDEX(Expr)     ((Expr_Index *)(Expr))
+#define ENEW(Expr)       ((Expr_New *)(Expr))
 
 #define TSNAME(Ts)       ((Typespec_Name *)(Ts))
 #define TSPTR(Ts)        ((Typespec_Ptr *)(Ts))
@@ -120,10 +121,14 @@ void             type_complete(Type *type);
 #define TPROC(T)         ((Type_Proc *)(T))
 #define TARRAY(T)        ((Type_Array *)(T))
 
+#define IS_VARRAY(Val)   ((Val).kind == VAL_OBJ && (Val).obj_val->kind == OBJ_ARRAY)
+#define IS_VCMPND(Val)   ((Val).kind == VAL_OBJ && (Val).obj_val->kind == OBJ_COMPOUND)
 #define IS_VSTRUCT(Val)  ((Val).kind == VAL_OBJ && (Val).obj_val->kind == OBJ_STRUCT)
 #define IS_VSTR(Val)     ((Val).kind == VAL_OBJ && (Val).obj_val->kind == OBJ_STRING)
 #define IS_VENUM(Val)    ((Val).kind == VAL_OBJ && (Val).obj_val->kind == OBJ_ENUM)
 #define IS_VNS(Val)      ((Val).kind == VAL_OBJ && (Val).obj_val->kind == OBJ_NAMESPACE)
+
+#define VCMPND(Val)      ((Obj_Compound *)(Val).obj_val)
 
 #include "lex.cpp"
 #include "parser.cpp"
@@ -139,7 +144,7 @@ void sss_repl() {
 
         auto tokens   = tokenize("<repl>", buf);
         auto parsed   = parse(&tokens);
-        auto resolved = resolve(parsed);
+        auto resolved = resolve(parsed, false);
         auto code     = Bytecode::build(parsed);
         Bytecode::eval(code);
     }
