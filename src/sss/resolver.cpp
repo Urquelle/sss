@@ -15,7 +15,7 @@ enum Sym_State {
     SYMSTATE_RESOLVING,
     SYMSTATE_RESOLVED,
 };
-struct Sym {
+struct Sym : Loc {
     Sym_Kind kind;
     Sym_State state;
     char *name;
@@ -279,7 +279,7 @@ type_string_new() {
     result->id    = type_id++;
     result->scope = scope_new("string");
 
-    sym_push_scope(result->scope, "size", type_u64);
+    sym_push_scope(&loc_none, result->scope, "size", type_u64);
 
     buf_push(types, result);
 
@@ -478,6 +478,9 @@ type_array(Type *base, size_t num_elems) {
     result->kind      = TYPE_ARRAY;
     result->base      = base;
     result->num_elems = num_elems;
+    result->scope     = scope_new("array");
+
+    sym_push_scope(&loc_none, result->scope, "size", type_u64);
 
     return result;
 }
@@ -546,7 +549,7 @@ scope_push(Scope *scope, Sym *sym) {
     Sym *s = (Sym *)map_get(&scope->syms, sym->name);
 
     if ( s ) {
-        assert(!"symbol bereits registriert");
+        report_error(sym, "%s kann nicht nochmal in deklaration verwendet werden", sym->name);
     }
 
     map_put(&scope->syms, sym->name, sym);
@@ -559,8 +562,10 @@ scope_push_global(Sym *sym) {
 }
 
 Sym *
-sym_new(char *name) {
+sym_new(Loc *loc, char *name) {
     Sym *result = urq_allocs(Sym);
+
+    loc_copy(loc, result);
 
     result->kind = SYM_NONE;
     result->name = intern_str(name);
@@ -571,8 +576,8 @@ sym_new(char *name) {
 }
 
 Sym *
-sym_push_scope(Scope *scope, char *name, Type *type) {
-    Sym *result = sym_new(name);
+sym_push_scope(Loc *loc, Scope *scope, char *name, Type *type) {
+    Sym *result = sym_new(loc, name);
 
     result->type = type;
     scope_push(scope, result);
@@ -586,8 +591,8 @@ sym_push(Sym *sym) {
 }
 
 Sym *
-sym_push(char *name, Decl *decl) {
-    Sym *result = sym_new(name);
+sym_push(Loc *loc, char *name, Decl *decl) {
+    Sym *result = sym_new(loc, name);
 
     result->decl = decl;
     scope_push(curr_scope, result);
@@ -597,7 +602,7 @@ sym_push(char *name, Decl *decl) {
 
 Sym *
 sym_push_namespace(char *name, Type *type) {
-    Sym *result = sym_push(name, NULL);
+    Sym *result = sym_push(&loc_none, name, NULL);
 
     result->kind  = SYM_NAMESPACE;
     result->state = SYMSTATE_RESOLVED;
@@ -607,8 +612,8 @@ sym_push_namespace(char *name, Type *type) {
 }
 
 Sym *
-sym_push_type(char *name, Decl *decl) {
-    Sym *result = sym_push(name, decl);
+sym_push_type(Loc *loc, char *name, Decl *decl) {
+    Sym *result = sym_push(&loc_none, name, decl);
 
     result->kind = SYM_TYPE;
 
@@ -616,8 +621,8 @@ sym_push_type(char *name, Decl *decl) {
 }
 
 Sym *
-sym_push_var(char *name, Decl *decl) {
-    Sym *result = sym_push(name, decl);
+sym_push_var(Loc *loc, char *name, Decl *decl) {
+    Sym *result = sym_push(loc, name, NULL);
 
     result->kind = SYM_VAR;
 
@@ -625,8 +630,8 @@ sym_push_var(char *name, Decl *decl) {
 }
 
 Sym *
-sym_push_var(char *name, Type *type) {
-    Sym *result = sym_push(name, NULL);
+sym_push_var(Loc *loc, char *name, Type *type) {
+    Sym *result = sym_push(loc, name, NULL);
 
     result->kind = SYM_VAR;
     result->type = type;
@@ -636,7 +641,7 @@ sym_push_var(char *name, Type *type) {
 
 Sym *
 sym_push_sys(char *name, Type *type) {
-    Sym *result = sym_new(intern_str(name));
+    Sym *result = sym_new(&loc_none, intern_str(name));
 
     type->name = result->name;
 
@@ -848,7 +853,7 @@ resolve_expr(Expr *expr, Type *given_type = NULL) {
 
             Type_Proc *op_type = TPROC(op->type);
 
-            if ( op_type->num_params > ECALL(expr)->num_args ) {
+            if ( op_type->num_params != ECALL(expr)->num_args ) {
                 report_error(expr, "argumente übergeben %d, erwartet wurden %d", ECALL(expr)->num_args, op_type->num_params);
             }
 
@@ -859,7 +864,7 @@ resolve_expr(Expr *expr, Type *given_type = NULL) {
                     break;
                 }
 
-                Operand *arg = resolve_expr(ECALL(expr)->args[i]);
+                Operand *arg = resolve_expr(ECALL(expr)->args[i], param->type);
 
                 operand_cast(param->type, arg);
                 /* @AUFGABE: array und zeiger datentypen auf kompatibilität überprüfen */
@@ -1156,7 +1161,7 @@ resolve_stmt(Stmt *stmt) {
                 case DECL_VAR: {
                     Type *type = resolve_decl_var(decl);
                     type_complete(type);
-                    Sym *sym = sym_push_var(decl->name, type);
+                    Sym *sym = sym_push_var(decl, decl->name, type);
 
                     buf_push(result, resolved_stmt(stmt, sym, type, NULL));
                 } break;
@@ -1183,9 +1188,14 @@ resolve_stmt(Stmt *stmt) {
             }
 
             Operand *cond = resolve_expr(SFOR(stmt)->cond);
+            Type *type = cond->type;
+
+            if ( type->kind == TYPE_ARRAY ) {
+                type = TARRAY(type)->base;
+            }
 
             scope_enter("for-loop");
-            Sym *sym = sym_push_var(it, cond->type);
+            Sym *sym = sym_push_var(stmt, it, type);
             resolve_stmt(SFOR(stmt)->block);
             scope_leave();
 
@@ -1325,7 +1335,7 @@ resolve_directive(Directive *dir) {
 
                     if ( export_sym ) {
                         char *export_name = (module_sym->alias) ? module_sym->alias : module_sym->name;
-                        Sym *push_sym = sym_new(export_name);
+                        Sym *push_sym = sym_new(module_sym, export_name);
 
                         push_sym->decl = export_sym->decl;
                         push_sym->type = export_sym->type;
@@ -1346,7 +1356,7 @@ resolve_directive(Directive *dir) {
                             Sym *push_sym = sym;
 
                             if ( mod_sym->alias ) {
-                                push_sym = sym_new(mod_sym->alias);
+                                push_sym = sym_new(mod_sym, mod_sym->alias);
                                 push_sym->decl = sym->decl;
                                 push_sym->type = sym->type;
                             }
@@ -1433,7 +1443,7 @@ type_complete_struct(Type_Struct *type) {
         field->type = field_type;
         field->operand = operand;
 
-        sym_push_var(field->name, field_type);
+        sym_push_var(field, field->name, field_type);
     }
 
     scope_leave();
@@ -1479,7 +1489,7 @@ type_complete_enum(Type_Enum *type) {
         field->type = type_s32;
         field->operand = operand;
 
-        sym_push_var(field->name, type_s32);
+        sym_push_var(field, field->name, type_s32);
     }
 
     scope_leave();
@@ -1523,7 +1533,7 @@ resolve_proc(Sym *sym) {
     scope_enter(decl->name);
     for ( uint32_t i = 0; i < sign->num_params; ++i ) {
         Proc_Param *param = sign->params[i];
-        sym_push_var(param->name, resolve_typespec(param->typespec));
+        sym_push_var(param, param->name, resolve_typespec(param->typespec));
     }
 
     for ( uint32_t i = 0; i < sign->num_rets; ++i ) {
@@ -1557,7 +1567,7 @@ register_global_syms(Stmts stmts) {
         }
 
         Decl *decl = stmt->decl;
-        Sym *sym = sym_push(decl->name, decl);
+        Sym *sym = sym_push(decl, decl->name, decl);
 
         switch ( decl->kind ) {
             case DECL_TYPE:

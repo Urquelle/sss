@@ -1,10 +1,16 @@
 #import Sys = (*) from sys;
 
-#load "zeugs.sss";
+#load "W:/sss/data/zeugs.sss";
 
-master :: proc() {
-    Sys.print("hallo", "du");
+master :: proc(args: [] string) {
+    jedes 0..args.size {
+        Sys.ausgabe(args[it]);
+    }
+
+    falls wahr Sys.ausgabe("wahrhaftig");
+
+    jedes args Sys.ausgabe(it);
 }
 
-master();
+master({ "hallo✨\n", "was✨\n", "machst✨\n", "du\n" });
 

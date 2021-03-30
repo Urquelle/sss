@@ -1,0 +1,10 @@
+proc1 :: proc(str: string) -> string {
+    res str;
+}
+
+master :: proc( args: [] string ) {
+    proc1("eins");
+    proc1("zwei");
+}
+
+master({ "eins", "zwei", "drei" });

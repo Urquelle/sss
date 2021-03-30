@@ -25,6 +25,13 @@ enum Os_Flags {
 
 HANDLE os_stdout;
 
+static char *
+os_env(char *name) {
+    char *result = getenv(name);
+
+    return result;
+}
+
 void
 os_error(char *proc_name) {
     LPVOID lpMsgBuf;
@@ -159,6 +166,7 @@ os_init() {
 namespace api {
     using Urq::Os::os_file_read;
     using Urq::Os::os_alloc;
+    using Urq::Os::os_env;
     using Urq::Os::os_init;
     using Urq::Os::os_error;
     using Urq::Os::os_print;

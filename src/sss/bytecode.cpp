@@ -7,6 +7,7 @@ struct Call_Frame;
 struct Instr;
 struct Scope;
 struct Obj;
+struct Obj_Array;
 struct Obj_Proc;
 struct Table;
 struct Value;
@@ -96,10 +97,23 @@ struct Obj_Range : Obj {
     Value right;
 };
 
+enum Iter_Kind {
+    ITER_NONE,
+    ITER_RANGE,
+    ITER_ARRAY,
+};
 struct Obj_Iter : Obj {
+    Iter_Kind   iter_kind;
     Value       iter;
-    Obj_Range * range;
     uint32_t    curr_index;
+};
+
+struct Obj_Iter_Range : Obj_Iter {
+    Obj_Range * range;
+};
+
+struct Obj_Iter_Array : Obj_Iter {
+    Obj_Array * array;
 };
 
 struct Obj_Struct : Obj {
@@ -124,8 +138,8 @@ struct Obj_Ptr : Obj {
 };
 
 struct Obj_Array : Obj {
-    Values   vals;
-    uint32_t num_vals;
+    Values   elems;
+    uint32_t num_elems;
 };
 
 enum Bytecode_Flags {
@@ -148,8 +162,6 @@ void               val_print(Value val);
 Call_Frame       * vm_curr_frame(Vm *vm);
 Obj_Proc         * obj_proc();
 Obj_Proc         * as_proc(Value val);
-Obj_Range        * as_range(Value val);
-Obj_String       * as_str(Value val);
 Obj_Struct       * as_struct(Value val);
 Obj_Struct_Field * as_struct_field(Value val);
 
@@ -272,9 +284,7 @@ Instr *
 instr_new(Loc *loc, Instr_Opcode opcode, int32_t op1) {
     Instr *result = urq_allocs(Instr);
 
-    result->file   = loc->file;
-    result->line   = loc->line;
-    result->col    = loc->col;
+    loc_copy(loc, result);
 
     result->opcode = opcode;
     result->op1    = op1;
@@ -644,6 +654,7 @@ obj_compound(Values elems, uint32_t num_elems) {
     result->kind      = OBJ_COMPOUND;
     result->elems     = elems;
     result->num_elems = num_elems;
+    result->scope     = bytecode_scope_new("compound");
 
     return result;
 }
@@ -698,12 +709,26 @@ obj_namespace(char *name, char *scope_name) {
     return result;
 }
 
-Obj_Iter *
-obj_iter(Obj_Range *range, Value iter) {
-    Obj_Iter *result = urq_allocs(Obj_Iter);
+Obj_Iter_Range *
+obj_iter_range(Obj_Range *range, Value iter) {
+    Obj_Iter_Range *result = urq_allocs(Obj_Iter_Range);
 
     result->kind       = OBJ_ITER;
+    result->iter_kind  = ITER_RANGE;
     result->range      = range;
+    result->iter       = iter;
+    result->curr_index = 0;
+
+    return result;
+}
+
+Obj_Iter_Array *
+obj_iter_array(Obj_Array *array, Value iter) {
+    Obj_Iter_Array *result = urq_allocs(Obj_Iter_Array);
+
+    result->kind       = OBJ_ITER;
+    result->iter_kind  = ITER_ARRAY;
+    result->array      = array;
     result->iter       = iter;
     result->curr_index = 0;
 
@@ -755,12 +780,13 @@ obj_ptr(void *ptr) {
 }
 
 Obj_Array *
-obj_array(Values vals, uint32_t num_vals) {
+obj_array(Values elems, uint32_t num_elems) {
     Obj_Array *result = urq_allocs(Obj_Array);
 
-    result->kind     = OBJ_ARRAY;
-    result->vals     = vals;
-    result->num_vals = num_vals;
+    result->kind      = OBJ_ARRAY;
+    result->elems     = elems;
+    result->num_elems = num_elems;
+    result->scope     = bytecode_scope_new("array");
 
     return result;
 }
@@ -773,11 +799,11 @@ obj_print(Obj *obj) {
         } break;
 
         case OBJ_RANGE: {
-            printf("(range: [left: ");
+            printf("(range: ");
             val_print(((Obj_Range *)obj)->left);
-            printf("]..[right: ");
+            printf("..");
             val_print(((Obj_Range *)obj)->right);
-            printf("])");
+            printf(")");
         } break;
 
         case OBJ_COMPOUND: {
@@ -799,9 +825,16 @@ obj_print(Obj *obj) {
 
         case OBJ_ITER: {
             printf("(iter: [");
-            obj_print(((Obj_Iter *)obj)->range);
+
+            if ( OITER(obj)->iter_kind == ITER_RANGE ) {
+                obj_print((OITERRNG(obj)->range));
+            } else {
+                assert(IS_OITERARRAY(obj));
+                obj_print((OITERARRAY(obj)->array));
+            }
+
             printf("][it: ");
-            val_print(((Obj_Iter *)obj)->iter);
+            val_print((OITER(obj))->iter);
             printf("]\n");
         } break;
 
@@ -909,6 +942,8 @@ Value
 val_compound(Values elems, uint32_t num_elems) {
     Value result = val_obj(obj_compound(elems, num_elems));
 
+    table_set(&result.obj_val->scope->syms, obj_string("size", 4), val_int(num_elems));
+
     return result;
 }
 
@@ -927,8 +962,15 @@ val_proc(char *ptr, uint32_t size, bool sys_call, char *lib) {
 }
 
 Value
-val_iter(Obj_Range *range, Value iter) {
-    Value result = val_obj(obj_iter(range, iter));
+val_iter_range(Obj_Range *range, Value iter) {
+    Value result = val_obj(obj_iter_range(range, iter));
+
+    return result;
+}
+
+Value
+val_iter_array(Obj_Array *array, Value iter) {
+    Value result = val_obj(obj_iter_array(array, iter));
 
     return result;
 }
@@ -962,8 +1004,10 @@ val_namespace(Obj_Namespace *ns) {
 }
 
 Value
-val_array(Values vals, uint32_t num_vals) {
-    Value result = val_obj(obj_array(vals, num_vals));
+val_array(Values elems, uint32_t num_elems) {
+    Value result = val_obj(obj_array(elems, num_elems));
+
+    table_set(&result.obj_val->scope->syms, obj_string("size", 4), val_int(num_elems));
 
     return result;
 }
@@ -1057,7 +1101,18 @@ operator+(Value left, int32_t right) {
 
         case VAL_OBJ: {
             assert(left.obj_val->kind == OBJ_ITER);
-            ((Obj_Iter *)left.obj_val)->iter = ((Obj_Iter *)left.obj_val)->iter + 1;
+            OITER(left.obj_val)->curr_index += right;
+
+            if ( IS_OITERRNG(left.obj_val) ) {
+                Obj_Iter_Range *iter = OITERRNG(left.obj_val);
+                iter->iter = iter->iter + 1;
+            } else {
+                Obj_Iter_Array *iter = OITERARRAY(left.obj_val);
+                if ( iter->curr_index < iter->array->num_elems ) {
+                    iter->iter = iter->array->elems[iter->curr_index];
+                }
+            }
+
             return left;
         } break;
 
@@ -1538,8 +1593,12 @@ bytecode_debug(Vm *vm, Instr *instr) {
             val_print(value_get(&constants, (uint16_t)(instr->op1)));
             printf("][val: ");
             Value val = vm->stack[frame->sp-1];
-            assert(val.kind == VAL_OBJ && val.obj_val->kind == OBJ_RANGE);
-            val_print(as_range(val)->left);
+
+            if ( IS_OITERRNG(val.obj_val) ) {
+                val_print(VRANGE(val)->left);
+            } else {
+                val_print(VARRAY(val)->elems[0]);
+            }
             printf("]\n");
         } break;
 
@@ -1553,8 +1612,8 @@ bytecode_debug(Vm *vm, Instr *instr) {
             printf("BYTECODEOP_RET ");
 
             /*
-            uint32_t num_vals = instr->op1;
-            for ( uint32_t i = 0; i < num_vals; ++i ) {
+            uint32_t num_elems = instr->op1;
+            for ( uint32_t i = 0; i < num_elems; ++i ) {
                 val_print(vm->stack[frame->sp-(1+i)]);
             }
             */
@@ -1722,8 +1781,8 @@ bytecode_expr(Bytecode *bc, Expr *expr, uint32_t flags = BYTECODEFLAG_NONE) {
         case EXPR_COMPOUND: {
             if ( ECMPND(expr)->elems[0]->name == NULL ) {
                 /* @AUFGABE: alle elemente des ausdrucks durchgehen und auf den stack holen */
-                for ( int i = 0; i < ECMPND(expr)->num_elems; ++i ) {
-                    bytecode_expr(bc, ECMPND(expr)->elems[i]->value);
+                for ( int i = (int32_t)ECMPND(expr)->num_elems; i > 0; --i ) {
+                    bytecode_expr(bc, ECMPND(expr)->elems[i-1]->value);
                 }
 
                 instr_push(expr, bc, BYTECODEOP_COMPOUND, (int32_t)ECMPND(expr)->num_elems);
@@ -2032,8 +2091,6 @@ bytecode_stmt(Bytecode *bc, Stmt *stmt) {
         } break;
 
         case STMT_FOR: {
-            assert(SFOR(stmt)->cond->kind == EXPR_RANGE);
-
             /* @INFO: platziert einen wert auf dem stack */
             bytecode_expr(bc, SFOR(stmt)->cond);
 
@@ -2188,20 +2245,6 @@ to_str(Obj_String *str) {
     return str->ptr;
 }
 
-Obj_String *
-as_str(Value val) {
-    Obj_String *result = (Obj_String *)val.obj_val;
-
-    return result;
-}
-
-Obj_Range *
-as_range(Value val) {
-    Obj_Range *result = (Obj_Range *)val.obj_val;
-
-    return result;
-}
-
 Obj_Proc *
 as_proc(Value val) {
     Obj_Proc *result = (Obj_Proc *)val.obj_val;
@@ -2235,13 +2278,6 @@ as_obj(Value val) {
 int32_t
 as_int(Value val) {
     int32_t result = (int32_t)val.int_val;
-
-    return result;
-}
-
-bool
-is_proc(Value val) {
-    bool result = val.kind == VAL_OBJ && as_obj(val)->kind == OBJ_PROC;
 
     return result;
 }
@@ -2355,7 +2391,7 @@ call_proc(Vm *vm, Value val, uint32_t num_args) {
     Call_Frame *prev_frame = vm_curr_frame(vm);
     Call_Frame *frame = vm->frames + vm->frame_num++;
 
-    assert(is_proc(val));
+    assert(IS_VPROC(val));
     Obj_Proc *proc = as_proc(val);
 
     frame->proc = proc;
@@ -2608,14 +2644,18 @@ step(Vm *vm) {
             Value index = stack_pop(vm);
             Value base  = stack_pop(vm);
 
+            if ( IS_VCMPND(base) ) {
+                base = val_array(VCMPND(base)->elems, VCMPND(base)->num_elems);
+            }
+
             assert(IS_VARRAY(base));
             Obj_Array *arr = (Obj_Array *)base.obj_val;
 
-            if ( index.int_val >= arr->num_vals ) {
+            if ( index.int_val >= arr->num_elems ) {
                 report_error(instr, "index liegt außerhalb der array grenzen");
             }
 
-            stack_push(vm, arr->vals[index.int_val]);
+            stack_push(vm, arr->elems[index.int_val]);
         } break;
 
         case BYTECODEOP_MUL: {
@@ -2643,7 +2683,7 @@ step(Vm *vm) {
             Scope *prev_scope = curr_scope;
             curr_scope = &sys_scope;
 
-            Obj_String *name = as_str(value_get(&frame->proc->bc->constants, instr->op1));
+            Obj_String *name = VSTR(value_get(&frame->proc->bc->constants, instr->op1));
             Value val = stack_pop(vm);
 
             if ( !bytecode_sym_set(name, val) ) {
@@ -2658,12 +2698,12 @@ step(Vm *vm) {
             Value name  = stack_pop(vm);
 
             Value val;
-            if ( !bytecode_sym_get(as_str(name), &val) ) {
+            if ( !bytecode_sym_get(VSTR(name), &val) ) {
                 assert(!"symbol nicht gefunden");
             }
 
             Value new_name = alias.kind == VAL_NONE ? name : alias;
-            table_set(&curr_scope->export_syms, as_str(new_name), val);
+            table_set(&curr_scope->export_syms, VSTR(new_name), val);
         } break;
 
         case BYTECODEOP_NAMESPACE_ENTER: {
@@ -2679,20 +2719,18 @@ step(Vm *vm) {
         } break;
 
         case BYTECODEOP_PUSH_SYM: {
-            Obj_String *name = as_str(value_get(&frame->proc->bc->constants, instr->op1));
+            Obj_String *name = VSTR(value_get(&frame->proc->bc->constants, instr->op1));
+
             Value val = stack_pop(vm);
+            bytecode_sym_set(name, val);
 
-            if ( !bytecode_sym_set(name, val) ) {
-                assert(!"symbol konnte nicht gesetzt werden");
-            }
-
-            if ( is_proc(val) ) {
+            if ( IS_VPROC(val) ) {
                 as_proc(val)->scope->parent = curr_scope;
             }
         } break;
 
         case BYTECODEOP_PUSH_DECL_SYM: {
-            Obj_String *name = as_str(value_get(&frame->proc->bc->constants, instr->op1));
+            Obj_String *name = VSTR(value_get(&frame->proc->bc->constants, instr->op1));
 
             Value type_val = stack_pop(vm);
             Value expr_val = stack_pop(vm);
@@ -2707,56 +2745,80 @@ step(Vm *vm) {
                 }
             }
 
-            if ( !bytecode_sym_set(name, val) ) {
-                assert(!"symbol konnte nicht gesetzt werden");
-            }
-
-            if ( is_proc(val) ) {
+            bytecode_sym_set(name, val);
+            if ( IS_VPROC(val) ) {
                 as_proc(val)->scope->parent = curr_scope;
             }
         } break;
 
         case BYTECODEOP_INIT_LOOP: {
-            Obj_String *name = as_str(value_get(&frame->proc->bc->constants, instr->op1));
-            Value val = stack_pop(vm);
+            Obj_String *name = VSTR(value_get(&frame->proc->bc->constants, instr->op1));
+            Value iter = stack_pop(vm);
 
-            assert(val.kind == VAL_OBJ);
-            assert(val.obj_val->kind == OBJ_RANGE);
-
-            Value diff = as_range(val)->right - as_range(val)->left;
-            if ( diff <= (int64_t)0 ) {
-                frame->pc = instr->op2;
+            if ( IS_VCMPND(iter) ) {
+                iter = val_array(VCMPND(iter)->elems, VCMPND(iter)->num_elems);
             }
 
-            bytecode_sym_set(name, val_iter(as_range(val), as_range(val)->left));
-            stack_push(vm, val_bool(as_range(val)->left < as_range(val)->right));
+            if ( IS_VRANGE(iter) ) {
+                Value diff = VRANGE(iter)->right - VRANGE(iter)->left;
+                if ( diff <= (int64_t)0 ) {
+                    frame->pc = instr->op2;
+                }
+
+                bytecode_sym_set(name, val_iter_range(VRANGE(iter), VRANGE(iter)->left));
+                stack_push(vm, val_bool(VRANGE(iter)->left < VRANGE(iter)->right));
+            } else {
+                assert(IS_VARRAY(iter));
+
+                if ( VARRAY(iter)->num_elems == 0 ) {
+                    frame->pc = instr->op2;
+                } else {
+                    bytecode_sym_set(name, val_iter_array(VARRAY(iter), VARRAY(iter)->elems[0]));
+                    stack_push(vm, val_bool(0 < VARRAY(iter)->num_elems));
+                }
+            }
         } break;
 
         case BYTECODEOP_INC_LOOP: {
             int32_t index = instr->op1;
-            Obj_String *name = as_str(value_get(&frame->proc->bc->constants, index));
+            Obj_String *name = VSTR(value_get(&frame->proc->bc->constants, index));
 
             Value val;
-
             if ( !bytecode_sym_get(name, &val) ) {
                 assert(!"symbol nicht gefunden");
             }
 
             bytecode_sym_set(name, val + 1);
             Obj_Iter *iter = ((Obj_Iter *)val.obj_val);
-            Value cond = val_bool(iter->iter < ((Obj_Range *)iter->range)->right);
-            stack_push(vm, cond);
+
+            if ( iter->iter_kind == ITER_RANGE ) {
+                Obj_Iter_Range *iter_range = OITERRNG(iter);
+
+                Value cond = val_bool(iter_range->iter < iter_range->range->right);
+                stack_push(vm, cond);
+            } else {
+                assert(IS_OITERARRAY(iter));
+
+                Obj_Iter_Array *iter_array = OITERARRAY(iter);
+
+                Value cond = val_bool(iter_array->curr_index < iter_array->array->num_elems);
+                stack_push(vm, cond);
+            }
         } break;
 
         case BYTECODEOP_LOAD_SYM: {
-            Obj_String *name = as_str(value_get(&frame->proc->bc->constants, instr->op1));
+            Obj_String *name = VSTR(value_get(&frame->proc->bc->constants, instr->op1));
             Value val;
 
             if ( !bytecode_sym_get(name, &val) ) {
                 assert(!"symbol nicht gefunden");
             }
 
-            stack_push(vm, val);
+            if ( IS_VOBJ(val) && IS_OITER(val.obj_val)) {
+                stack_push(vm, OITER(val.obj_val)->iter);
+            } else {
+                stack_push(vm, val);
+            }
         } break;
 
         case BYTECODEOP_LOAD_SYMREF: {
@@ -2772,16 +2834,7 @@ step(Vm *vm) {
                 Obj_Struct *structure = ((Obj_Struct *)val.obj_val);
 
                 Value field_val;
-                if ( !table_get(structure->fields, as_str(field), &field_val) ) {
-                    assert(!"feld konnte nicht gefunden werden");
-                }
-
-                stack_push(vm, field_val);
-            } else if ( IS_VSTR(val) ) {
-                Obj_String *str = ((Obj_String *)val.obj_val);
-
-                Value field_val;
-                if ( !table_get(&str->scope->syms, as_str(field), &field_val) ) {
+                if ( !table_get(structure->fields, VSTR(field), &field_val) ) {
                     assert(!"feld konnte nicht gefunden werden");
                 }
 
@@ -2790,26 +2843,25 @@ step(Vm *vm) {
                 Obj_Enum *enumeration = ((Obj_Enum *)val.obj_val);
 
                 Value field_val;
-                if ( !table_get(enumeration->fields, as_str(field), &field_val) ) {
+                if ( !table_get(enumeration->fields, VSTR(field), &field_val) ) {
                     assert(!"feld konnte nicht gefunden werden");
                 }
 
                 stack_push(vm, field_val);
-            } else {
-                assert(IS_VNS(val));
-                Obj_Namespace *ns = ((Obj_Namespace *)val.obj_val);
+            } else if ( IS_VOBJ(val) ) {
+                Obj *obj = val.obj_val;
 
-                Value ns_val;
-                if ( !table_get(&ns->scope->syms, as_str(field), &ns_val) ) {
-                    assert(!"symbol konnte nicht gefunden werden");
+                Value field_val;
+                if ( !table_get(&obj->scope->syms, VSTR(field), &field_val) ) {
+                    assert(!"feld konnte nicht gefunden werden");
                 }
 
-                stack_push(vm, ns_val);
+                stack_push(vm, field_val);
             }
         } break;
 
         case BYTECODEOP_SET_SYM: {
-            Obj_String *name = as_str(stack_pop(vm));
+            Obj_String *name = VSTR(stack_pop(vm));
             Value val = stack_pop(vm);
 
             bytecode_sym_set(name, val, BYTECODEFLAG_SET_EXISTING);
@@ -2875,14 +2927,14 @@ step(Vm *vm) {
         } break;
 
         case BYTECODEOP_COMPOUND: {
-            int32_t num_vals = instr->op1;
+            int32_t num_elems = instr->op1;
 
-            Values vals = NULL;
-            for ( int i = 0; i < num_vals; ++i ) {
-                buf_push(vals, stack_pop(vm));
+            Values elems = NULL;
+            for ( int i = 0; i < num_elems; ++i ) {
+                buf_push(elems, stack_pop(vm));
             }
 
-            stack_push(vm, val_compound(vals, num_vals));
+            stack_push(vm, val_compound(elems, num_elems));
         } break;
 
         case BYTECODEOP_HLT: {
@@ -2909,18 +2961,18 @@ step(Vm *vm) {
         } break;
 
         case BYTECODEOP_RET: {
-            int32_t num_vals = instr->op1;
+            int32_t num_elems = instr->op1;
 
-            Values vals = NULL;
-            for ( int i = 0; i < num_vals; ++i ) {
+            Values elems = NULL;
+            for ( int i = 0; i < num_elems; ++i ) {
                 Value val = stack_pop(vm);
-                buf_push(vals, val);
+                buf_push(elems, val);
             }
 
             vm->frame_num -= 1;
 
-            for ( int i = 0; i < num_vals; ++i ) {
-                stack_push(vm, vals[i]);
+            for ( int i = 0; i < num_elems; ++i ) {
+                stack_push(vm, elems[i]);
             }
 
             curr_scope = frame->prev_scope;
@@ -2937,15 +2989,15 @@ step(Vm *vm) {
         case BYTECODEOP_STRUCT: {
             int32_t num_fields = instr->op1;
 
-            Values vals = NULL;
+            Values elems = NULL;
             for ( int i = 0; i < num_fields; ++i ) {
-                buf_push(vals, stack_pop(vm));
+                buf_push(elems, stack_pop(vm));
             }
 
             Value structure = stack_pop(vm);
 
             for ( int i = 0; i < num_fields; ++i ) {
-                Obj_Struct_Field *field = ((Obj_Struct_Field *)vals[i].obj_val);
+                Obj_Struct_Field *field = ((Obj_Struct_Field *)elems[i].obj_val);
                 table_set(((Obj_Struct *)structure.obj_val)->fields, field->name, field->default_value);
                 buf_push(((Obj_Struct *)structure.obj_val)->fieldnames_ordered, field->name);
             }
@@ -2954,15 +3006,15 @@ step(Vm *vm) {
         case BYTECODEOP_ENUM: {
             int32_t num_fields = instr->op1;
 
-            Values vals = NULL;
+            Values elems = NULL;
             for ( int i = 0; i < num_fields; ++i ) {
-                buf_push(vals, stack_pop(vm));
+                buf_push(elems, stack_pop(vm));
             }
 
             Value enumeration = stack_pop(vm);
 
             for ( int i = 0; i < num_fields; ++i ) {
-                Obj_Struct_Field *field = ((Obj_Struct_Field *)vals[i].obj_val);
+                Obj_Struct_Field *field = ((Obj_Struct_Field *)elems[i].obj_val);
                 table_set(((Obj_Enum *)enumeration.obj_val)->fields, field->name, field->default_value);
                 buf_push(((Obj_Enum *)enumeration.obj_val)->fieldnames_ordered, field->name);
             }
@@ -2973,7 +3025,7 @@ step(Vm *vm) {
             Value val = value_get(&frame->proc->bc->constants, index);
 
             Value type_val;
-            if ( !bytecode_sym_get(as_str(val), &type_val) ) {
+            if ( !bytecode_sym_get(VSTR(val), &type_val) ) {
                 assert(!"unbekannter datentyp");
             }
 
@@ -3069,7 +3121,7 @@ bytecode_init(Bytecode *bc) {
             Scope *prev_scope = curr_scope;                                  \
             curr_scope = &sys_scope;                                         \
             int32_t index = bytecode_push_constant(bc, val_str(Name, Size)); \
-            Obj_String *name = as_str(value_get(&bc->constants, index));     \
+            Obj_String *name = VSTR(value_get(&bc->constants, index));     \
             if ( !bytecode_sym_set(name, Val) ) {                            \
                 assert(!"symbol konnte nicht gesetzt werden");               \
             }                                                                \
@@ -3117,8 +3169,8 @@ optimize(Bytecode *bc) {
     Instrs instrs = NULL;
 
     Value val = value_get(&bc->constants, entry_point_index);
-    assert(is_proc(val));
-    Obj_Proc *proc = as_proc(val);
+    assert(IS_VPROC(val));
+    Obj_Proc *proc = VPROC(val);
     Bytecode *code = proc->bc;
 
     for ( int i = 0; i < code->size; ++i ) {

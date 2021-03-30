@@ -30,16 +30,12 @@ char *keyword_while;
 
 #define STRUCT(Struct) \
     Struct *result = urq_allocs(Struct); \
-    result->file = loc->file; \
-    result->line = loc->line; \
-    result->col  = loc->col;
+    loc_copy(loc, result)
 
 #define STRUCTK(Struct, Kind) \
     Struct *result = urq_allocs(Struct); \
     result->kind = Kind; \
-    result->file = loc->file; \
-    result->line = loc->line; \
-    result->col  = loc->col;
+    loc_copy(loc, result)
 
 void *
 memdup(void *src, size_t size) {
@@ -635,9 +631,7 @@ Compound_Elem *
 compound_elem(Ast_Elem *loc, char *name, Typespec *typespec, Expr *value) {
     Compound_Elem *result = urq_allocs(Compound_Elem);
 
-    result->file     = loc->file;
-    result->line     = loc->line;
-    result->col      = loc->col;
+    loc_copy(loc, result);
 
     result->name     = name;
     result->typespec = typespec;
@@ -1428,9 +1422,7 @@ Proc_Param *
 proc_param(Loc *loc, char *name, Typespec *typespec, Expr *default_value = NULL) {
     Proc_Param *result = urq_allocs(Proc_Param);
 
-    result->file     = loc->file;
-    result->line     = loc->line;
-    result->col      = loc->col;
+    loc_copy(loc, result);
 
     result->name     = name;
     result->len      = (uint32_t)utf8_str_size(name);
@@ -1813,7 +1805,7 @@ Stmt_If *
 parse_stmt_if(Token_List *tokens) {
     Token *curr = token_get(tokens);
     Expr *cond  = parse_expr(tokens);
-    Stmt *stmt  = parse_stmt_block(tokens);
+    Stmt *stmt  = parse_stmt(tokens);
     Stmt_If *stmt_else = NULL;
 
     curr = token_get(tokens);
@@ -1840,7 +1832,7 @@ parse_stmt_for(Token_List *tokens) {
         cond = parse_expr(tokens);
     }
 
-    Stmt *stmt  = parse_stmt_block(tokens);
+    Stmt *stmt = parse_stmt(tokens);
 
     Stmt *stmt_else = NULL;
     if ( keyword_matches(tokens, keyword_else) ) {
@@ -1979,10 +1971,13 @@ parse_directive_import(Token_List *tokens) {
 
     char *ident = ((Expr_Ident *)module)->val;
     size_t len = utf8_str_size(ident);
-    char *file_name = (char *)urq_alloc(len+5); // @INFO: plus 5 zeichen weil ".sss\0"
 
-    memcpy(file_name, ident, len);
-    memcpy(file_name + len, ".sss", 4);
+    char *sss_dir = Urq::Os::os_env("SSS_DIR");
+    if ( !sss_dir ) {
+        report_error(curr, "SSS_DIR umgebungsvariable setzen");
+    }
+
+    char *file_name = path_concat(sss_dir, ident, ".sss");
 
     char *content = "";
     if ( !Urq::Os::os_file_read(file_name, &content) ) {

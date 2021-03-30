@@ -106,6 +106,7 @@ buf__printf(char *buf, const char *fmt, ...) {
 }
 
 #include "args.cpp"
+#include "string.cpp"
 
 struct Bucket {
     Bucket   * next;
@@ -167,6 +168,13 @@ struct Loc {
 };
 
 Loc loc_none = { "<unbekannt>", 0, 0 };
+
+void
+loc_copy(Loc *from, Loc *to) {
+    to->file = from->file;
+    to->line = from->line;
+    to->col  = from->col;
+}
 
 void
 report_error(Loc *loc, char *fmt, ...) {

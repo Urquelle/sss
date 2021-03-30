@@ -1,10 +1,14 @@
 #import Win32 = (*) from win32;
 
 #export {
-    print
+    ausgabe
 }
 
-print :: proc(fmt: string, args: ...) {
+Optional :: struktur {
+    value : *void;
+}
+
+ausgabe :: proc(fmt: string) {
     mit Win32;
 
     handle := get_std_handle(cast(u32)Device_Type.STD_OUTPUT_HANDLE);
