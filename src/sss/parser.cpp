@@ -22,9 +22,12 @@ char *keyword_note;
 char *keyword_proc;
 char *keyword_return;
 char *keyword_run;
+char *keyword_sizeof;
 char *keyword_struct;
 char *keyword_true;
 char *keyword_type;
+char *keyword_typeof;
+char *keyword_typeinfo;
 char *keyword_using;
 char *keyword_while;
 
@@ -76,7 +79,10 @@ enum Expr_Kind {
     EXPR_PAREN,
     EXPR_CALL,
     EXPR_RANGE,
+    EXPR_SIZEOF,
     EXPR_TUPLE,
+    EXPR_TYPEINFO,
+    EXPR_TYPEOF,
     EXPR_COMPOUND,
     EXPR_STMT,
 };
@@ -102,12 +108,10 @@ struct Expr_Bool : Expr {
 };
 
 struct Expr_Str : Expr {
-    uint32_t   len;
     char     * val;
 };
 
 struct Expr_Ident : Expr {
-    uint32_t   len;
     Sym      * sym;
     char     * val;
 };
@@ -128,6 +132,18 @@ struct Expr_Keyword : Expr {
 struct Expr_Cast : Expr {
     Typespec * typespec;
     Expr     * expr;
+};
+
+struct Expr_Sizeof : Expr {
+    Typespec * typespec;
+};
+
+struct Expr_Typeinfo : Expr {
+    Expr * expr;
+};
+
+struct Expr_Typeof : Expr {
+    Expr * expr;
 };
 
 enum Op_Kind {
@@ -173,7 +189,6 @@ struct Expr_Call : Expr {
 struct Expr_Field : Expr {
     Expr     * base;
     char     * field;
-    uint32_t   len;
 };
 
 struct Expr_Index : Expr {
@@ -197,7 +212,8 @@ struct Expr_Tuple : Expr {
 
 struct Expr_Compound : Expr {
     Compound_Elems elems;
-    size_t num_elems;
+    size_t         num_elems;
+    bool           is_named;
 };
 
 struct Expr_Stmt : Expr {
@@ -312,7 +328,6 @@ struct Enum_Field : Ast_Elem {
 
 struct Struct_Field : Ast_Elem {
     char     * name;
-    uint32_t   len;
     Sym      * sym;
     Type     * type;
     Typespec * typespec;
@@ -350,7 +365,6 @@ enum Decl_Kind {
 struct Decl : Ast_Elem {
     Decl_Kind   kind;
     char      * name;
-    uint32_t    len;
     Sym       * sym;
 };
 
@@ -410,7 +424,6 @@ struct Typespec : Ast_Elem {
 
 struct Typespec_Name : Typespec {
     char     * name;
-    uint32_t   len;
     Sym      * sym;
 };
 
@@ -432,7 +445,6 @@ struct Typespec_Proc : Typespec {
 
 struct Proc_Param : Loc {
     char     * name;
-    uint32_t   len;
     Sym      * sym;
     Typespec * typespec;
     Type     * type;
@@ -466,7 +478,7 @@ Token * empty_token = &empty_token_str;
 
 Token *
 token_get(Token_List *tokens) {
-    if ( tokens->curr >= tokens->list.size() ) {
+    if ( tokens->curr >= buf_len(tokens->list) ) {
         return empty_token;
     }
 
@@ -477,7 +489,7 @@ token_get(Token_List *tokens) {
 
 Token *
 token_peek(Token_List *tokens, size_t i = 1) {
-    if ( (tokens->curr + i) >= tokens->list.size() ) {
+    if ( (tokens->curr + i) >= buf_len(tokens->list) ) {
         return empty_token;
     }
 
@@ -486,14 +498,14 @@ token_peek(Token_List *tokens, size_t i = 1) {
 
 void
 token_eat(Token_List *tokens, size_t i = 1) {
-    if ( (tokens->curr + i) < tokens->list.size() ) {
+    if ( (tokens->curr + i) < buf_len(tokens->list) ) {
         tokens->curr += i;
     }
 }
 
 bool
 token_end(Token_List *tokens) {
-    bool result = tokens->curr == ( tokens->list.size() - 1 );
+    bool result = tokens->curr == ( buf_len(tokens->list) - 1 );
 
     return result;
 }
@@ -701,22 +713,20 @@ expr_bool(Ast_Elem *loc, bool val) {
 }
 
 Expr_Str *
-expr_str(Ast_Elem *loc, char *val, uint32_t len) {
+expr_str(Ast_Elem *loc, char *val) {
     STRUCTK(Expr_Str, EXPR_STR);
 
     result->val = val;
-    result->len = len;
 
     return result;
 }
 
 Expr_Ident *
-expr_ident(Ast_Elem *loc, char *val, uint32_t len) {
+expr_ident(Ast_Elem *loc, char *val) {
     STRUCTK(Expr_Ident, EXPR_IDENT);
 
     result->sym = NULL;
     result->val = val;
-    result->len = len;
 
     return result;
 }
@@ -786,7 +796,6 @@ expr_field(Ast_Elem *loc, Expr *base, char *field) {
 
     result->base  = base;
     result->field = field;
-    result->len   = (uint32_t)utf8_str_size(field);
 
     return result;
 }
@@ -821,11 +830,12 @@ expr_range(Ast_Elem *loc, Expr *left, Expr *right) {
 }
 
 Expr_Compound *
-expr_compound(Ast_Elem *loc, Compound_Elems elems, size_t num_elems) {
+expr_compound(Ast_Elem *loc, Compound_Elems elems, size_t num_elems, bool is_named) {
     STRUCTK(Expr_Compound, EXPR_COMPOUND);
 
     result->elems     = (Compound_Elems)MEMDUP(elems);
     result->num_elems = num_elems;
+    result->is_named  = is_named;
 
     return result;
 }
@@ -855,6 +865,33 @@ expr_cast(Ast_Elem *loc, Typespec *typespec, Expr *expr) {
 
     result->typespec = typespec;
     result->expr     = expr;
+
+    return result;
+}
+
+Expr_Sizeof *
+expr_sizeof(Ast_Elem *loc, Typespec *typespec) {
+    STRUCTK(Expr_Sizeof, EXPR_SIZEOF);
+
+    result->typespec = typespec;
+
+    return result;
+}
+
+Expr_Typeinfo *
+expr_typeinfo(Ast_Elem *loc, Expr *expr) {
+    STRUCTK(Expr_Typeinfo, EXPR_TYPEINFO);
+
+    result->expr = expr;
+
+    return result;
+}
+
+Expr_Typeof *
+expr_typeof(Loc *loc, Expr *expr) {
+    STRUCTK(Expr_Typeof, EXPR_TYPEOF);
+
+    result->expr = expr;
 
     return result;
 }
@@ -895,14 +932,47 @@ parse_expr_string(Token_List *tokens) {
 
 Expr_Cast *
 parse_expr_cast(Token_List *tokens) {
-    Token *curr = token_get(tokens);
+    Token *loc = token_get(tokens);
 
     token_expect(tokens, T_LPAREN);
     Typespec *typespec = parse_typespec(tokens);
     token_expect(tokens, T_RPAREN);
     Expr *expr = parse_expr(tokens);
 
-    return expr_cast(curr, typespec, expr);
+    return expr_cast(loc, typespec, expr);
+}
+
+Expr_Sizeof *
+parse_expr_sizeof(Token_List *tokens) {
+    Token *loc = token_get(tokens);
+
+    token_expect(tokens, T_LPAREN);
+    Typespec *typespec = parse_typespec(tokens);
+    token_expect(tokens, T_RPAREN);
+
+    return expr_sizeof(loc, typespec);
+}
+
+Expr_Typeinfo *
+parse_expr_typeinfo(Token_List *tokens) {
+    Token *loc = token_get(tokens);
+
+    token_expect(tokens, T_LPAREN);
+    Expr *expr = parse_expr(tokens);
+    token_expect(tokens, T_RPAREN);
+
+    return expr_typeinfo(loc, expr);
+}
+
+Expr_Typeof *
+parse_expr_typeof(Token_List *tokens) {
+    Token *loc = token_get(tokens);
+
+    token_expect(tokens, T_LPAREN);
+    Expr *expr = parse_expr(tokens);
+    token_expect(tokens, T_RPAREN);
+
+    return expr_typeof(loc, expr);
 }
 
 Expr *
@@ -915,7 +985,7 @@ parse_expr_base(Token_List *tokens) {
         result = expr_int(curr, t->val_int);
     } else if ( token_is(tokens, T_STR) ) {
         Token *t = token_read(tokens);
-        result = expr_str(curr, t->val_str, t->len);
+        result = expr_str(curr, t->val_str);
     } else if ( token_is(tokens, T_FLOAT) ) {
         Token *t = token_read(tokens);
         result = expr_float(curr, t->val_float);
@@ -937,6 +1007,12 @@ parse_expr_base(Token_List *tokens) {
                 result = expr_new(tokens, parse_expr(tokens));
             } else if ( keyword_matches(tokens, keyword_cast) ) {
                 result = parse_expr_cast(tokens);
+            } else if ( keyword_matches(tokens, keyword_sizeof) ) {
+                result = parse_expr_sizeof(tokens);
+            } else if ( keyword_matches(tokens, keyword_typeinfo) ) {
+                result = parse_expr_typeinfo(tokens);
+            } else if ( keyword_matches(tokens, keyword_typeof) ) {
+                result = parse_expr_typeof(tokens);
             } else {
                 Token *t = token_read(tokens);
 
@@ -944,7 +1020,7 @@ parse_expr_base(Token_List *tokens) {
             }
         } else {
             Token *t = token_read(tokens);
-            result = expr_ident(curr, t->val_str, t->len);
+            result = expr_ident(curr, t->val_str);
         }
     } else if ( token_match(tokens, T_LPAREN) ) {
         result = expr_paren(curr, parse_expr(tokens));
@@ -954,6 +1030,7 @@ parse_expr_base(Token_List *tokens) {
         }
     } else if ( token_match(tokens, T_LBRACE) ) {
         Compound_Elems elems = NULL;
+        bool is_named = false;
 
         if ( !token_is(tokens, T_RBRACE) ) {
             do {
@@ -965,6 +1042,7 @@ parse_expr_base(Token_List *tokens) {
                 if ( token_match(tokens, T_COLON) ) {
                     assert(value->kind == EXPR_IDENT);
                     name     = EIDENT(value)->val;
+                    is_named = true;
                     value    = NULL;
                     typespec = parse_typespec(tokens);
                 }
@@ -982,7 +1060,7 @@ parse_expr_base(Token_List *tokens) {
         }
 
         token_expect(tokens, T_RBRACE);
-        result = expr_compound(curr, elems, buf_len(elems));
+        result = expr_compound(curr, elems, buf_len(elems), is_named);
     }
 
     return result;
@@ -1160,7 +1238,6 @@ struct_field(Ast_Elem *loc, char *name, Typespec *typespec, Expr *default_value)
     STRUCT(Struct_Field);
 
     result->name          = name;
-    result->len           = (uint32_t)utf8_str_size(name);
     result->typespec      = typespec;
     result->default_value = default_value;
     result->type          = NULL;
@@ -1185,7 +1262,6 @@ decl_var(Ast_Elem *loc, char *name, Typespec *typespec, Expr *expr) {
     STRUCTK(Decl_Var, DECL_VAR);
 
     result->name     = name;
-    result->len      = (uint32_t)utf8_str_size(name);
     result->typespec = typespec;
     result->expr     = expr;
 
@@ -1197,7 +1273,6 @@ decl_const(Ast_Elem *loc, char *name, Typespec *typespec, Expr *expr) {
     STRUCTK(Decl_Const, DECL_CONST);
 
     result->name     = name;
-    result->len      = (uint32_t)utf8_str_size(name);
     result->typespec = typespec;
     result->expr     = expr;
 
@@ -1209,7 +1284,6 @@ decl_enum(Ast_Elem *loc, char *name, Enum_Fields fields, size_t num_fields) {
     STRUCTK(Decl_Enum, DECL_ENUM);
 
     result->name       = name;
-    result->len        = (uint32_t)utf8_str_size(name);
     result->fields     = (Enum_Fields)MEMDUP(fields);
     result->num_fields = num_fields;
 
@@ -1221,7 +1295,6 @@ decl_struct(Ast_Elem *loc, char *name, Struct_Fields fields, size_t num_fields) 
     STRUCTK(Decl_Struct, DECL_STRUCT);
 
     result->name       = name;
-    result->len        = (uint32_t)utf8_str_size(name);
     result->fields     = (Struct_Fields)MEMDUP(fields);
     result->num_fields = num_fields;
 
@@ -1233,7 +1306,6 @@ decl_proc(Ast_Elem *loc, char *name, Typespec *typespec, Proc_Sign *sign, Stmt *
     STRUCTK(Decl_Proc, DECL_PROC);
 
     result->name     = name;
-    result->len      = (uint32_t)utf8_str_size(name);
     result->typespec = typespec;
     result->sign     = sign;
     result->block    = block;
@@ -1246,7 +1318,6 @@ decl_api(Ast_Elem *loc, char *name, Decls decls, size_t num_decls) {
     STRUCTK(Decl_Api, DECL_API);
 
     result->name      = name;
-    result->len       = (uint32_t)utf8_str_size(name);
     result->decls     = decls;
     result->num_decls = num_decls;
 
@@ -1258,7 +1329,6 @@ decl_impl(Ast_Elem *loc, char *name, Exprs exprs, size_t num_exprs, Stmt *block)
     STRUCTK(Decl_Impl, DECL_IMPL);
 
     result->name      = name;
-    result->len       = (uint32_t)utf8_str_size(name);
     result->exprs     = (Exprs)MEMDUP(exprs);
     result->num_exprs = num_exprs;
     result->block     = block;
@@ -1425,7 +1495,6 @@ proc_param(Loc *loc, char *name, Typespec *typespec, Expr *default_value = NULL)
     loc_copy(loc, result);
 
     result->name     = name;
-    result->len      = (uint32_t)utf8_str_size(name);
     result->typespec = typespec;
     result->type     = NULL;
 
@@ -1467,7 +1536,6 @@ typespec_name(Ast_Elem *loc, char *name) {
     STRUCTK(Typespec_Name, TYPESPEC_NAME);
 
     result->name = name;
-    result->len  = (uint32_t)utf8_str_size(name);
 
     return result;
 }
@@ -2143,10 +2211,10 @@ parse(Token_List *tokens) {
 #define KEYWORD(Key) KEYWORD_K(Key, Key)
     KEYWORD(api);
     KEYWORD(as);
-    KEYWORD(break);
-    KEYWORD(cast);
+    KEYWORD_K(weg, break);
+    KEYWORD_K(als, cast);
     KEYWORD(const);
-    KEYWORD(defer);
+    KEYWORD_K(defer, defer);
     KEYWORD(enum);
     KEYWORD_K(sonst, else);
     KEYWORD(export);
@@ -2166,8 +2234,11 @@ parse(Token_List *tokens) {
     KEYWORD_K(ausführen, run);
     KEYWORD_K(struktur, struct);
     KEYWORD_K(wahr, true);
-    KEYWORD(type);
+    KEYWORD_K(typedef, type);
+    KEYWORD_K(typeof, typeof);
+    KEYWORD(typeinfo);
     KEYWORD_K(mit, using);
+    KEYWORD_K(sizeof, sizeof);
     KEYWORD_K(solange, while);
 #undef KEYWORD
 

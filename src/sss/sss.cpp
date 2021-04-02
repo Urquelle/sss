@@ -90,6 +90,9 @@ void             type_complete(Type *type);
 #define EAT(Expr)             ((Expr_At *)(Expr))
 #define EINDEX(Expr)          ((Expr_Index *)(Expr))
 #define ENEW(Expr)            ((Expr_New *)(Expr))
+#define ESIZEOF(Expr)         ((Expr_Sizeof *)(Expr))
+#define ETYPEINFO(Expr)       ((Expr_Typeinfo *)(Expr))
+#define ETYPEOF(Expr)         ((Expr_Typeof *)(Expr))
 
 #define TSNAME(Ts)            ((Typespec_Name *)(Ts))
 #define TSPTR(Ts)             ((Typespec_Ptr *)(Ts))
@@ -118,8 +121,12 @@ void             type_complete(Type *type);
 #define DIRLOAD(Dir)          ((Directive_Load *)(Dir))
 
 #define TSTRUCT(T)            ((Type_Struct *)(T))
+#define TENUM(T)              ((Type_Enum *)(T))
 #define TPROC(T)              ((Type_Proc *)(T))
 #define TARRAY(T)             ((Type_Array *)(T))
+#define TPTR(T)               ((Type_Ptr *)(T))
+#define TCMPND(T)             ((Type_Compound *)(T))
+#define TVARIADIC(T)          ((Type_Variadic *)(T))
 
 #define IS_VOBJ(Val)          ((Val).kind == VAL_OBJ)
 #define IS_VARRAY(Val)        (IS_VOBJ(Val) && (Val).obj_val->kind == OBJ_ARRAY)
@@ -130,13 +137,17 @@ void             type_complete(Type *type);
 #define IS_VNS(Val)           (IS_VOBJ(Val) && (Val).obj_val->kind == OBJ_NAMESPACE)
 #define IS_VRANGE(Val)        (IS_VOBJ(Val) && (Val).obj_val->kind == OBJ_RANGE)
 #define IS_VPROC(Val)         (IS_VOBJ(Val) && (Val).obj_val->kind == OBJ_PROC)
+#define IS_VPTR(Val)          (IS_VOBJ(Val) && (Val).obj_val->kind == OBJ_PTR)
 
 #define VOBJ(Val)             ((Val).obj_val)
 #define VCMPND(Val)           ((Obj_Compound *)(Val).obj_val)
+#define VSTRUCT(Val)          ((Obj_Struct *)(Val).obj_val)
 #define VRANGE(Val)           ((Obj_Range *)(Val).obj_val)
 #define VARRAY(Val)           ((Obj_Array *)(Val).obj_val)
 #define VSTR(Val)             ((Obj_String *)(Val).obj_val)
 #define VPROC(Val)            ((Obj_Proc *)(Val).obj_val)
+#define VTYPE(Val)            ((Obj_Type *)(Val).obj_val)
+#define VPTR(Val)             ((Obj_Ptr *)(Val).obj_val)
 
 #define OITER(Obj)            ((Obj_Iter *)(Obj))
 #define OITERRNG(Obj)         ((Obj_Iter_Range *)(Obj))
@@ -149,7 +160,7 @@ void             type_complete(Type *type);
 #include "lex.cpp"
 #include "parser.cpp"
 #include "resolver.cpp"
-#include "bytecode.cpp"
+#include "vm.cpp"
 
 void sss_repl() {
     char buf[1000];
@@ -161,16 +172,16 @@ void sss_repl() {
         auto tokens   = tokenize("<repl>", buf);
         auto parsed   = parse(&tokens);
         auto resolved = resolve(parsed, false);
-        auto code     = Bytecode::build(parsed);
-        Bytecode::eval(code);
+        auto code     = Vm::build(parsed);
+        Vm::eval(code);
     }
 }
 
 namespace api {
-    using Urq::Sss::Bytecode::Bytecode;
+    using Urq::Sss::Vm::Bytecode;
 
-    using Urq::Sss::Bytecode::build;
-    using Urq::Sss::Bytecode::optimize;
+    using Urq::Sss::Vm::build;
+    using Urq::Sss::Vm::optimize;
 
     using Urq::Sss::parse;
     using Urq::Sss::resolve;

@@ -78,8 +78,10 @@ struct Token : Ast_Elem {
     float    val_float;
 };
 
+typedef Token ** Tokens;
+
 struct Token_List : Ast_Elem {
-    std::vector<Token *> list;
+    Tokens list;
     size_t curr;
 };
 
@@ -104,7 +106,7 @@ token_new(Token_Kind kind, char *file, size_t line, size_t col) {
 
 void
 token_push(Token_List *list, Token *token) {
-    list->list.push_back(token);
+    buf_push(list->list, token);
 }
 
 Token *

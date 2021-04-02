@@ -82,7 +82,6 @@ enum Type_Kind {
     TYPE_F32,
     TYPE_F64,
 
-    TYPE_TYPEID,
     TYPE_STRING,
     TYPE_BOOL,
     TYPE_PTR,
@@ -92,7 +91,7 @@ enum Type_Kind {
     TYPE_ARRAY,
     TYPE_NAMESPACE,
     TYPE_COMPOUND,
-    TYPE_VARARG,
+    TYPE_VARIADIC,
 };
 
 struct Type {
@@ -141,6 +140,11 @@ struct Type_Proc : Type {
     uint32_t    num_rets;
 };
 
+struct Type_Variadic : Type {
+    Types    types;
+    uint32_t num_types;
+};
+
 struct Resolved_Stmt {
     Stmt    * stmt;
     Sym     * sym;
@@ -165,7 +169,7 @@ Type *type_f64;
 Type *type_bool;
 Type *type_typeid;
 Type *type_string;
-Type *type_vararg;
+Type *type_variadic;
 
 char *
 to_str(Expr *expr) {
@@ -279,7 +283,7 @@ type_string_new() {
     result->id    = type_id++;
     result->scope = scope_new("string");
 
-    sym_push_scope(&loc_none, result->scope, "size", type_u64);
+    sym_push_scope(&loc_none, result->scope, "größe", type_u64);
 
     buf_push(types, result);
 
@@ -323,6 +327,8 @@ type_namespace(char *name) {
     Type *result = type_new(0, TYPE_NAMESPACE);
 
     result->name = name;
+
+    buf_push(types, result);
 
     return result;
 }
@@ -395,6 +401,23 @@ type_iscastable(Type *left, Type *right) {
         }
 
         return false;
+    }
+
+    if ( left->kind == TYPE_STRUCT && right->kind == TYPE_COMPOUND ) {
+        if ( TSTRUCT(left)->num_fields > TCMPND(right)->num_elems ) {
+            return false;
+        }
+
+        for ( int i = 0; i < TSTRUCT(left)->num_fields; ++i ) {
+            Struct_Field *field = TSTRUCT(left)->fields[i];
+            Compound_Elem *elem = TCMPND(right)->elems[i];
+
+            if ( !type_iscastable(field->type, elem->type) ) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     return false;
@@ -480,7 +503,7 @@ type_array(Type *base, size_t num_elems) {
     result->num_elems = num_elems;
     result->scope     = scope_new("array");
 
-    sym_push_scope(&loc_none, result->scope, "size", type_u64);
+    sym_push_scope(&loc_none, result->scope, "größe", type_u64);
 
     return result;
 }
@@ -783,6 +806,35 @@ resolve_expr(Expr *expr, Type *given_type = NULL) {
             result = operand(type_to_cast_to);
         } break;
 
+        case EXPR_SIZEOF: {
+            Type *type = resolve_typespec(ESIZEOF(expr)->typespec);
+
+            result = operand(type_u32);
+        } break;
+
+        case EXPR_TYPEINFO: {
+            Operand *op = resolve_expr(ETYPEINFO(expr)->expr);
+
+            if ( !type_isint(op->type) ) {
+                report_error(expr, "eine typid erwartet, aber %s bekommen", to_str(op->type));
+            }
+
+            Sym *sym = sym_get(intern_str("Datentyp"));
+
+            if ( !sym ) {
+                report_error(expr, "Interner Compilerfehler: symbol \"Datentyp\" konnte nicht ermittelt werden");
+            }
+
+            result = operand(sym->type);
+            result->sym = sym;
+        } break;
+
+        case EXPR_TYPEOF: {
+            Operand *op = resolve_expr(ETYPEOF(expr)->expr);
+
+            result = operand(type_u32);
+        } break;
+
         case EXPR_KEYWORD: {
             assert(!"schlüsselwort");
         } break;
@@ -826,7 +878,9 @@ resolve_expr(Expr *expr, Type *given_type = NULL) {
             assert( base->type->scope );
 
             Sym *sym = sym_get(base->type->scope, EFIELD(expr)->field);
-            assert(sym);
+            if ( !sym ) {
+                report_error(expr, "symbol %s konnte in %s nicht ermittelt werden", EFIELD(expr)->field, base->type->sym->name);
+            }
 
             result = operand(sym->type);
         } break;
@@ -860,7 +914,7 @@ resolve_expr(Expr *expr, Type *given_type = NULL) {
             for ( uint32_t i = 0; i < TPROC(op->type)->num_params; ++i ) {
                 Proc_Param *param = TPROC(op->type)->params[i];
 
-                if ( param->type == type_vararg ) {
+                if ( param->type == type_variadic ) {
                     break;
                 }
 
@@ -921,27 +975,31 @@ resolve_expr(Expr *expr, Type *given_type = NULL) {
                     report_error(expr, "anzahl der argumente erwartet %d, bekommen %d", TSTRUCT(given_type)->num_fields, ECMPND(expr)->num_elems);
                 }
 
-                Compound_Elems args = NULL;
-                for ( int i = 0; i < TSTRUCT(given_type)->num_fields; ++i ) {
-                    Struct_Field  * struct_field = TSTRUCT(given_type)->fields[i];
-                    Compound_Elem * arg          = ECMPND(expr)->elems[i];
+                if ( ECMPND(expr)->is_named ) {
+                    assert(!"benamtes compound");
+                } else {
+                    Compound_Elems args = NULL;
+                    for ( int i = 0; i < TSTRUCT(given_type)->num_fields; ++i ) {
+                        Struct_Field  * struct_field = TSTRUCT(given_type)->fields[i];
+                        Compound_Elem * arg          = ECMPND(expr)->elems[i];
 
-                    if ( arg->name ) {
-                        assert(!"unbehandelter fall: benamtes argument");
-                    } else {
-                        Operand *operand = resolve_expr(arg->value);
-                        operand_cast(struct_field->type, operand);
+                        if ( arg->name ) {
+                            assert(!"unbehandelter fall: benamtes argument");
+                        } else {
+                            Operand *operand = resolve_expr(arg->value);
+                            operand_cast(struct_field->type, operand);
 
-                        if ( struct_field->type != operand->type ) {
-                            report_error(arg, "datentyp erwartet %s, bekommen %s", struct_field->type->name, operand->type->name);
+                            if ( struct_field->type != operand->type ) {
+                                report_error(arg, "datentyp erwartet %s, bekommen %s", struct_field->type->name, operand->type->name);
+                            }
+
+                            arg->type = struct_field->type;
+                            buf_push(args, arg);
                         }
-
-                        arg->type = struct_field->type;
-                        buf_push(args, arg);
                     }
                 }
 
-                result = operand(type_compound(args, (uint32_t)buf_len(args)));
+                result = operand(given_type);
             }
         } break;
 
@@ -979,7 +1037,7 @@ resolve_typespec(Typespec *typespec) {
                 report_error(typespec, "symbol %s muß ein datentyp sein", sym->name);
             }
 
-            return sym->type;
+            result = sym->type;
         } break;
 
         case TYPESPEC_ARRAY: {
@@ -1005,7 +1063,7 @@ resolve_typespec(Typespec *typespec) {
         } break;
 
         case TYPESPEC_VARARG: {
-            result = type_vararg;
+            result = type_variadic;
         } break;
 
         case TYPESPEC_PROC: {
@@ -1014,6 +1072,10 @@ resolve_typespec(Typespec *typespec) {
         default: {
             report_error(typespec, "unbekannter typespec");
         } break;
+    }
+
+    if ( result ) {
+        typespec->type = result;
     }
 
     return result;
@@ -1416,6 +1478,8 @@ type_complete_struct(Type_Struct *type) {
         report_error(decl, "datenstruktur %s muss mindestens ein feld enthalten", decl->name);
     }
 
+    type->kind = TYPE_STRUCT;
+
     for ( size_t i = 0; i < DSTRUCT(decl)->num_fields; i++ ) {
         Struct_Field *field = DSTRUCT(decl)->fields[i];
 
@@ -1447,7 +1511,6 @@ type_complete_struct(Type_Struct *type) {
     }
 
     scope_leave();
-    type->kind = TYPE_STRUCT;
 
     uint32_t offset = 0;
     uint32_t align = 0;
@@ -1477,17 +1540,21 @@ type_complete_enum(Type_Enum *type) {
     for ( size_t i = 0; i < DENUM(decl)->num_fields; i++ ) {
         Enum_Field *field = DENUM(decl)->fields[i];
 
-        Operand *operand = NULL;
+        Operand *op = NULL;
         if ( field->value ) {
-            operand = resolve_expr(field->value, type_s32);
+            op = resolve_expr(field->value, type_s32);
         }
 
-        operand_cast(type_s32, operand);
-        if ( type_s32 != operand->type ) {
+        if ( op ) {
+            if ( !type_isnum(op->type) ) {
+                report_error(field->value, "datentyp eines enumeration-feldes muß numerisch sein, stattdessen ist es %s", to_str(op->type));
+            }
+        } else {
+            op = operand(type_s32);
         }
 
         field->type = type_s32;
-        field->operand = operand;
+        field->operand = op;
 
         sym_push_var(field, field->name, type_s32);
     }
@@ -1671,27 +1738,42 @@ resolve(Parsed_File *parsed_file, bool check_entry_point) {
 }
 
 void
+resolver_load_sys_modules() {
+    char *ext = ".sss";
+    char *sss_dir = Urq::Os::os_env("SSS_DIR");
+    if ( !sss_dir ) {
+        report_error(&loc_none, "SSS_DIR umgebungsvariable setzen");
+    }
+
+    char *content = "";
+    Urq::Os::os_file_read(path_concat(sss_dir, "typeinfo", ext), &content);
+
+    auto tokens   = tokenize("typeinfo", content);
+    auto parsed   = parse(&tokens);
+    auto resolved = resolve(parsed, false);
+}
+
+void
 resolver_init() {
     sys_scope    = scope_new("sys");
     global_scope = scope_new("global", sys_scope);
     curr_scope   = global_scope;
 
-    type_void   = type_new(0, TYPE_VOID);
-    type_u8     = type_new(1, TYPE_U8);
-    type_u16    = type_new(2, TYPE_U16);
-    type_u32    = type_new(4, TYPE_U32);
-    type_u64    = type_new(8, TYPE_U64);
-    type_s8     = type_new(1, TYPE_S8);
-    type_s16    = type_new(2, TYPE_S16);
-    type_s32    = type_new(4, TYPE_S32);
-    type_s64    = type_new(8, TYPE_S64);
-    type_f32    = type_new(4, TYPE_F32);
-    type_f64    = type_new(8, TYPE_F64);
-    type_bool   = type_new(1, TYPE_BOOL);
-    type_typeid = type_new(4, TYPE_TYPEID);
-    type_string = type_string_new();
+    type_void     = type_new(0, TYPE_VOID);
+    type_u8       = type_new(1, TYPE_U8);
+    type_u16      = type_new(2, TYPE_U16);
+    type_u32      = type_new(4, TYPE_U32);
+    type_u64      = type_new(8, TYPE_U64);
+    type_s8       = type_new(1, TYPE_S8);
+    type_s16      = type_new(2, TYPE_S16);
+    type_s32      = type_new(4, TYPE_S32);
+    type_s64      = type_new(8, TYPE_S64);
+    type_f32      = type_new(4, TYPE_F32);
+    type_f64      = type_new(8, TYPE_F64);
+    type_bool     = type_new(1, TYPE_BOOL);
+    type_string   = type_string_new();
 
-    type_vararg = type_new(0, TYPE_VARARG);
+    type_variadic = type_new(0, TYPE_VARIADIC);
 
     sym_push_sys("void",   type_void);
     sym_push_sys("u8",     type_u8);
@@ -1706,5 +1788,6 @@ resolver_init() {
     sym_push_sys("f64",    type_f64);
     sym_push_sys("bool",   type_bool);
     sym_push_sys("string", type_string);
-    sym_push_sys("typeid", type_typeid);
+
+    resolver_load_sys_modules();
 }

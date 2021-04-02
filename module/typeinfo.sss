@@ -1,0 +1,39 @@
+Datentyp_Art :: enum {
+    U8;
+    U16;
+    U32;
+    U64;
+
+    S8;
+    S16;
+    S32;
+    S64;
+
+    F32;
+    F64;
+
+    Proc;
+    Struktur;
+    Enum;
+    Zeiger;
+}
+
+typid :: typedef u32;
+
+Datentyp_Feld :: struktur {
+    id     : typid;
+    art    : Datentyp_Art;
+    name   : string;
+}
+
+Datentyp :: struktur {
+    id             : typid;
+    art            : Datentyp_Art;
+    name           : string;
+    größe          : u32;
+    versatz        : u32;
+    basis          : typid;
+    felder         : [] Datentyp_Feld;
+    parameter      : [] Datentyp_Feld;
+    rückgabewerte  : [] Datentyp_Feld;
+}

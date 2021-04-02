@@ -1,4 +1,4 @@
-namespace Bytecode {
+namespace Vm {
 
 uint32_t entry_point_index;
 
@@ -15,6 +15,11 @@ struct Vm;
 
 typedef Value *  Values;
 typedef Instr ** Instrs;
+
+struct Basic_Block {
+    int32_t id;
+    Instrs   instrs;
+};
 
 #define VALUES      \
     X(VAL_NONE)     \
@@ -52,7 +57,9 @@ struct Value : Loc {
     X(OBJ_ENUM)         \
     X(OBJ_COMPOUND)     \
     X(OBJ_PTR)          \
-    X(OBJ_STRUCT_FIELD)
+    X(OBJ_STRUCT_FIELD) \
+    X(OBJ_TYPE)         \
+    X(OBJ_TYPE_FIELD)
 
 enum Obj_Kind {
 #define X(Elem) Elem,
@@ -142,6 +149,32 @@ struct Obj_Array : Obj {
     uint32_t num_elems;
 };
 
+struct Obj_Type : Obj {
+    uint32_t   id;
+    char     * name;
+    uint32_t   size;
+    uint32_t   offset;
+
+    Obj_Type * base;
+
+    char     * field_name;
+    Values     fields;
+    uint32_t   num_fields;
+
+    Values     params;
+    uint32_t   num_params;
+
+    Values     rets;
+    uint32_t   num_rets;
+};
+
+struct Obj_Type_Field : Obj {
+    uint32_t   id;
+    char     * name;
+};
+
+Obj_Type **obj_types;
+
 enum Bytecode_Flags {
     BYTECODEFLAG_NONE,
     BYTECODEFLAG_ASSIGNABLE,
@@ -156,8 +189,11 @@ void               bytecode_stmt(Bytecode *bc, Stmt *stmt);
 void               bytecode_init(Bytecode *bc);
 void               bytecode_typespec(Bytecode *bc, Typespec *typespec);
 Value              val_none();
-Value              val_str(char *ptr, uint32_t size);
+Value              val_array(Values elems, uint32_t num_elems);
+Value              val_int(int64_t val, uint32_t size = 4);
+Value              val_str(char *ptr);
 Value              val_bool(bool val);
+Value              val_obj(Obj *val);
 void               val_print(Value val);
 Call_Frame       * vm_curr_frame(Vm *vm);
 Obj_Proc         * obj_proc();
@@ -227,8 +263,11 @@ struct Bytecode {
     X(BYTECODEOP_JMP)               \
     X(BYTECODEOP_JMP_FALSE)         \
     X(BYTECODEOP_LOAD_STRUCT_FIELD) \
+    X(BYTECODEOP_LOAD_STRUCT_FIELD_ASSIGNABLE) \
     X(BYTECODEOP_LOAD_SYM)          \
     X(BYTECODEOP_LOAD_SYMREF)       \
+    X(BYTECODEOP_LOAD_TYPEINFO)     \
+    X(BYTECODEOP_LOAD_TYPEOF)     \
     X(BYTECODEOP_MATCH_CASE)        \
     X(BYTECODEOP_MUL)               \
     X(BYTECODEOP_NAMED_COMPOUND)    \
@@ -280,6 +319,16 @@ struct Vm {
 
 Table strings;
 
+Basic_Block *
+basic_block(int32_t id, Instrs instrs) {
+    Basic_Block *result = urq_allocs(Basic_Block);
+
+    result->id     = id;
+    result->instrs = instrs;
+
+    return result;
+}
+
 Instr *
 instr_new(Loc *loc, Instr_Opcode opcode, int32_t op1) {
     Instr *result = urq_allocs(Instr);
@@ -317,6 +366,11 @@ instr_push(Loc *loc, Bytecode *bc, Instr_Opcode opcode) {
 void
 instr_patch(Bytecode *bc, int32_t index, int32_t val) {
     bc->instructions[index]->op1 = val;
+}
+
+void
+instr_patch2(Bytecode *bc, int32_t index, int32_t val) {
+    bc->instructions[index]->op2 = val;
 }
 
 Instr *
@@ -484,18 +538,29 @@ table_add_all(Table* from, Table* to) {
     }
 }
 
-bool
-table_get(Table *table, Obj_String *key, Value *val) {
+Value *
+table_get_ref(Table *table, Obj_String *key) {
     if (table->size == 0) {
-        return false;
+        return NULL;
     }
 
     Table_Entry *entry = table_find(table->entries, table->cap, key);
     if (entry->key == NULL) {
+        return NULL;
+    }
+
+    return &entry->val;
+}
+
+bool
+table_get(Table *table, Obj_String *key, Value *val) {
+    Value *source_val = table_get_ref(table, key);
+
+    if ( !source_val ) {
         return false;
     }
 
-    *val = entry->val;
+    *val = *source_val;
 
     return true;
 }
@@ -626,7 +691,8 @@ value_set(Value_Array *array, int32_t index, Value val) {
 }
 
 Obj_String *
-obj_string(char *ptr, int32_t size) {
+obj_string(char *ptr) {
+    int32_t size = utf8_str_size(ptr);
     int32_t hash = hash_string(ptr, size);
     Obj_String *interned = table_find_string(&strings, ptr, size, hash);
 
@@ -701,7 +767,7 @@ obj_namespace(char *name, char *scope_name) {
     Obj_Namespace *result = urq_allocs(Obj_Namespace);
 
     result->kind       = OBJ_NAMESPACE;
-    result->name       = obj_string(name, utf8_str_size(name));
+    result->name       = obj_string(name);
     result->scope_name = scope_name;
     result->proc       = obj_proc();
     result->scope      = bytecode_scope_new(scope_name, &sys_scope);
@@ -787,6 +853,94 @@ obj_array(Values elems, uint32_t num_elems) {
     result->elems     = elems;
     result->num_elems = num_elems;
     result->scope     = bytecode_scope_new("array");
+
+    return result;
+}
+
+Obj_Type *
+obj_type(uint32_t id, char *name, uint32_t size) {
+    Obj_Type *result = urq_allocs(Obj_Type);
+
+    result->kind       = OBJ_TYPE;
+    result->scope     = bytecode_scope_new("datentyp");
+
+    result->id         = id;
+    result->name       = name;
+    result->size       = size;
+    result->offset     = 0;
+
+    result->base       = NULL;
+
+    result->fields     = NULL;
+    result->num_fields = 0;
+
+    result->params     = NULL;
+    result->num_params = 0;
+
+    result->rets       = NULL;
+    result->num_rets   = 0;
+
+    table_set(&result->scope->syms, obj_string("id"), val_int(result->id));
+    table_set(&result->scope->syms, obj_string("name"), val_str(result->name));
+    table_set(&result->scope->syms, obj_string("größe"), val_int(result->size));
+    table_set(&result->scope->syms, obj_string("versatz"), val_int(0));
+    table_set(&result->scope->syms, obj_string("basis"), val_int(0));
+    table_set(&result->scope->syms, obj_string("felder"), val_array(NULL, 0));
+    table_set(&result->scope->syms, obj_string("parameter"), val_array(NULL, 0));
+    table_set(&result->scope->syms, obj_string("rückgabewerte"), val_array(NULL, 0));
+
+    return result;
+}
+
+Obj_Type *
+obj_type(uint32_t id, char *name, uint32_t size, Obj_Type *base) {
+    Obj_Type *result = obj_type(id, name, size);
+
+    result->base = base;
+
+    table_set(&result->scope->syms, obj_string("basis"), val_obj(base));
+
+    return result;
+}
+
+Obj_Type *
+obj_type(uint32_t id, char *name, uint32_t size, Values fields, uint32_t num_fields) {
+    Obj_Type *result = obj_type(id, name, size);
+
+    result->fields     = fields;
+    result->num_fields = num_fields;
+
+    table_set(&result->scope->syms, obj_string("felder"), val_array(fields, num_fields));
+
+    return result;
+}
+
+Obj_Type *
+obj_type(uint32_t id, char *name, uint32_t size, Values params, uint32_t num_params, Values rets, uint32_t num_rets) {
+    Obj_Type *result = obj_type(id, name, size);
+
+    result->params     = params;
+    result->num_params = num_params;
+    result->rets       = rets;
+    result->num_rets   = num_rets;
+
+    table_set(&result->scope->syms, obj_string("parameter"), val_array(params, num_params));
+    table_set(&result->scope->syms, obj_string("rückgabewerte"), val_array(rets, num_rets));
+
+    return result;
+}
+
+Obj_Type_Field *
+obj_type_field(uint32_t id, char *name) {
+    Obj_Type_Field *result = urq_allocs(Obj_Type_Field);
+
+    result->id   = id;
+    result->name = name;
+
+    result->scope     = bytecode_scope_new("datentyp");
+
+    table_set(&result->scope->syms, obj_string("id"), val_int(result->id));
+    table_set(&result->scope->syms, obj_string("name"), val_str(result->name));
 
     return result;
 }
@@ -882,7 +1036,7 @@ val_none() {
 }
 
 Value
-val_int(int64_t val, uint32_t size = 4) {
+val_int(int64_t val, uint32_t size) {
     Value result = {};
 
     result.kind    = VAL_INT;
@@ -930,10 +1084,10 @@ val_ptr(void *ptr) {
 }
 
 Value
-val_str(char *ptr, uint32_t size) {
-    Value result = val_obj(obj_string(ptr, size));
+val_str(char *ptr) {
+    Value result = val_obj(obj_string(ptr));
 
-    table_set(&result.obj_val->scope->syms, obj_string("size", 4), val_int(size));
+    table_set(&result.obj_val->scope->syms, obj_string("größe"), val_int(VSTR(result)->size));
 
     return result;
 }
@@ -942,7 +1096,7 @@ Value
 val_compound(Values elems, uint32_t num_elems) {
     Value result = val_obj(obj_compound(elems, num_elems));
 
-    table_set(&result.obj_val->scope->syms, obj_string("size", 4), val_int(num_elems));
+    table_set(&result.obj_val->scope->syms, obj_string("größe"), val_int(num_elems));
 
     return result;
 }
@@ -955,7 +1109,7 @@ val_range(Value left, Value right) {
 }
 
 Value
-val_proc(char *ptr, uint32_t size, bool sys_call, char *lib) {
+val_proc(char *ptr, bool sys_call, char *lib) {
     Value result = val_obj(obj_proc(sys_call, lib));
 
     return result;
@@ -976,22 +1130,29 @@ val_iter_array(Obj_Array *array, Value iter) {
 }
 
 Value
-val_struct(char *name, uint32_t len) {
-    Value result = val_obj(obj_struct(obj_string(name, len)));
+val_struct(char *name) {
+    Value result = val_obj(obj_struct(obj_string(name)));
 
     return result;
 }
 
 Value
-val_enum(char *name, uint32_t len) {
-    Value result = val_obj(obj_enum(obj_string(name, len)));
+val_struct(Obj_String *name) {
+    Value result = val_obj(obj_struct(name));
 
     return result;
 }
 
 Value
-val_struct_field(char *name, uint32_t len) {
-    Value result = val_obj(obj_struct_field(obj_string(name, len)));
+val_enum(char *name) {
+    Value result = val_obj(obj_enum(obj_string(name)));
+
+    return result;
+}
+
+Value
+val_struct_field(char *name) {
+    Value result = val_obj(obj_struct_field(obj_string(name)));
 
     return result;
 }
@@ -1007,7 +1168,21 @@ Value
 val_array(Values elems, uint32_t num_elems) {
     Value result = val_obj(obj_array(elems, num_elems));
 
-    table_set(&result.obj_val->scope->syms, obj_string("size", 4), val_int(num_elems));
+    table_set(&result.obj_val->scope->syms, obj_string("größe"), val_int(num_elems));
+
+    return result;
+}
+
+Value
+val_type(Obj_Type *type) {
+    Value result = val_obj(type);
+
+    return result;
+}
+
+Value
+val_type_field(uint32_t id, char *name) {
+    Value result = val_obj(obj_type_field(id, name));
 
     return result;
 }
@@ -1771,7 +1946,7 @@ bytecode_expr(Bytecode *bc, Expr *expr, uint32_t flags = BYTECODEFLAG_NONE) {
         } break;
 
         case EXPR_STR: {
-            bytecode_emit_const(expr, bc, val_str(ESTR(expr)->val, ESTR(expr)->len));
+            bytecode_emit_const(expr, bc, val_str(ESTR(expr)->val));
         } break;
 
         case EXPR_BOOL: {
@@ -1779,16 +1954,16 @@ bytecode_expr(Bytecode *bc, Expr *expr, uint32_t flags = BYTECODEFLAG_NONE) {
         } break;
 
         case EXPR_COMPOUND: {
-            if ( ECMPND(expr)->elems[0]->name == NULL ) {
+            if ( ECMPND(expr)->is_named ) {
+                report_error(expr, "benamtes compound implementieren");
+                instr_push(expr, bc, BYTECODEOP_NAMED_COMPOUND);
+            } else {
                 /* @AUFGABE: alle elemente des ausdrucks durchgehen und auf den stack holen */
                 for ( int i = (int32_t)ECMPND(expr)->num_elems; i > 0; --i ) {
                     bytecode_expr(bc, ECMPND(expr)->elems[i-1]->value);
                 }
 
                 instr_push(expr, bc, BYTECODEOP_COMPOUND, (int32_t)ECMPND(expr)->num_elems);
-            } else {
-                report_error(expr, "benamtes compound implementieren");
-                instr_push(expr, bc, BYTECODEOP_NAMED_COMPOUND);
             }
         } break;
 
@@ -1799,8 +1974,13 @@ bytecode_expr(Bytecode *bc, Expr *expr, uint32_t flags = BYTECODEFLAG_NONE) {
 
         case EXPR_FIELD: {
             bytecode_expr(bc, EFIELD(expr)->base);
-            int32_t index = bytecode_push_constant(bc, val_str(EFIELD(expr)->field, EFIELD(expr)->len));
-            instr_push(expr, bc, BYTECODEOP_LOAD_STRUCT_FIELD, index);
+            int32_t index = bytecode_push_constant(bc, val_str(EFIELD(expr)->field));
+
+            if ( flags & BYTECODEFLAG_ASSIGNABLE ) {
+                instr_push(expr, bc, BYTECODEOP_LOAD_STRUCT_FIELD_ASSIGNABLE, index);
+            } else {
+                instr_push(expr, bc, BYTECODEOP_LOAD_STRUCT_FIELD, index);
+            }
         } break;
 
         case EXPR_RANGE: {
@@ -1815,7 +1995,7 @@ bytecode_expr(Bytecode *bc, Expr *expr, uint32_t flags = BYTECODEFLAG_NONE) {
         } break;
 
         case EXPR_IDENT: {
-            int32_t index = bytecode_push_constant(bc, val_str(EIDENT(expr)->val, EIDENT(expr)->len));
+            int32_t index = bytecode_push_constant(bc, val_str(EIDENT(expr)->val));
 
             if ( flags & BYTECODEFLAG_ASSIGNABLE ) {
                 instr_push(expr, bc, BYTECODEOP_LOAD_SYMREF, index);
@@ -1828,6 +2008,20 @@ bytecode_expr(Bytecode *bc, Expr *expr, uint32_t flags = BYTECODEFLAG_NONE) {
             bytecode_typespec(bc, ECAST(expr)->typespec);
             bytecode_expr(bc, ECAST(expr)->expr);
             instr_push(expr, bc, BYTECODEOP_CAST);
+        } break;
+
+        case EXPR_SIZEOF: {
+            int32_t index = bytecode_push_constant(bc, val_int(ESIZEOF(expr)->typespec->type->size));
+            instr_push(expr, bc, BYTECODEOP_CONST, index);
+        } break;
+
+        case EXPR_TYPEINFO: {
+            bytecode_expr(bc, ETYPEINFO(expr)->expr);
+            instr_push(expr, bc, BYTECODEOP_LOAD_TYPEINFO);
+        } break;
+
+        case EXPR_TYPEOF: {
+            instr_push(expr, bc, BYTECODEOP_LOAD_TYPEOF, ETYPEOF(expr)->expr->type->id);
         } break;
 
         case EXPR_CALL: {
@@ -1890,7 +2084,7 @@ bytecode_typespec(Bytecode *bc, Typespec *typespec) {
 
     switch ( typespec->kind ) {
         case TYPESPEC_NAME: {
-            int32_t index = bytecode_push_constant(bc, val_str(TSNAME(typespec)->name, TSNAME(typespec)->len));
+            int32_t index = bytecode_push_constant(bc, val_str(TSNAME(typespec)->name));
             instr_push(typespec, bc, BYTECODEOP_PUSH_TYPEVAL, index);
         } break;
 
@@ -1925,7 +2119,7 @@ bytecode_decl(Bytecode *bc, Decl *decl) {
                 instr_push(decl, bc, BYTECODEOP_NONE);
             }
 
-            int32_t index = bytecode_push_constant(bc, val_str(decl->name, decl->len));
+            int32_t index = bytecode_push_constant(bc, val_str(decl->name));
 
             if ( DVAR(decl)->typespec ) {
                 bytecode_typespec(bc, DVAR(decl)->typespec);
@@ -1943,7 +2137,7 @@ bytecode_decl(Bytecode *bc, Decl *decl) {
                 instr_push(decl, bc, BYTECODEOP_NONE);
             }
 
-            int32_t index = bytecode_push_constant(bc, val_str(decl->name, decl->len));
+            int32_t index = bytecode_push_constant(bc, val_str(decl->name));
 
             if ( DCONST(decl)->typespec ) {
                 bytecode_typespec(bc, DCONST(decl)->typespec);
@@ -1955,7 +2149,7 @@ bytecode_decl(Bytecode *bc, Decl *decl) {
         } break;
 
         case DECL_PROC: {
-            Value val = val_proc(decl->name, decl->len, DPROC(decl)->sign->sys_call, DPROC(decl)->sign->sys_lib);
+            Value val = val_proc(decl->name, DPROC(decl)->sign->sys_call, DPROC(decl)->sign->sys_lib);
 
             int32_t index = bytecode_push_constant(bc, val);
             instr_push(decl, bc, BYTECODEOP_CONST, index);
@@ -1964,11 +2158,11 @@ bytecode_decl(Bytecode *bc, Decl *decl) {
                 entry_point_index = index;
             }
 
-            index = bytecode_push_constant(bc, val_str(decl->name, decl->len));
+            index = bytecode_push_constant(bc, val_str(decl->name));
             instr_push(decl, bc, BYTECODEOP_PUSH_SYM, index);
 
             Obj_Proc *proc = as_proc(val);
-            proc->name = obj_string(decl->name, decl->len);
+            proc->name = obj_string(decl->name);
             proc->sign = DPROC(decl)->sign;
             proc->scope->name = decl->name;
             proc->num_params = (uint32_t)DPROC(decl)->sign->num_params;
@@ -1976,7 +2170,7 @@ bytecode_decl(Bytecode *bc, Decl *decl) {
             for ( int32_t i = DPROC(decl)->sign->num_params-1; i >= 0; --i ) {
                 Proc_Param *param = DPROC(decl)->sign->params[i];
 
-                index = bytecode_push_constant(proc->bc, val_str(param->name, param->len));
+                index = bytecode_push_constant(proc->bc, val_str(param->name));
 
                 instr_push(param, proc->bc, BYTECODEOP_PUSH_SYM, index);
             }
@@ -1991,10 +2185,10 @@ bytecode_decl(Bytecode *bc, Decl *decl) {
         } break;
 
         case DECL_ENUM: {
-            Value val = val_enum(decl->name, decl->len);
+            Value val = val_enum(decl->name);
 
             int32_t index      = bytecode_emit_const(decl, bc, val);
-            int32_t name_index = bytecode_push_constant(bc, val_str(decl->name, decl->len));
+            int32_t name_index = bytecode_push_constant(bc, val_str(decl->name));
 
             instr_push(decl, bc, BYTECODEOP_PUSH_SYM, name_index);
             instr_push(decl, bc, BYTECODEOP_PUSH, index);
@@ -2003,12 +2197,12 @@ bytecode_decl(Bytecode *bc, Decl *decl) {
                 Enum_Field *field = DENUM(decl)->fields[i];
 
                 // feldnamen generieren {
-                    Value field_val = val_struct_field(field->name, (uint32_t)utf8_str_size(field->name));
+                    Value field_val = val_struct_field(field->name);
                     int32_t field_index = bytecode_push_constant(bc, field_val);
                     instr_push(field, bc, BYTECODEOP_PUSH, field_index);
                 // }
 
-                int32_t type_index = bytecode_push_constant(bc, val_str("s32", 3));
+                int32_t type_index = bytecode_push_constant(bc, val_str("s32"));
                 instr_push(field, bc, BYTECODEOP_PUSH_TYPEVAL, type_index);
 
                 // feldwert generieren {
@@ -2026,10 +2220,10 @@ bytecode_decl(Bytecode *bc, Decl *decl) {
         } break;
 
         case DECL_STRUCT: {
-            Value val = val_struct(decl->name, decl->len);
+            Value val = val_struct(decl->name);
 
             int32_t index      = bytecode_emit_const(decl, bc, val);
-            int32_t name_index = bytecode_push_constant(bc, val_str(decl->name, decl->len));
+            int32_t name_index = bytecode_push_constant(bc, val_str(decl->name));
 
             instr_push(decl, bc, BYTECODEOP_PUSH_SYM, name_index);
             instr_push(decl, bc, BYTECODEOP_PUSH, index);
@@ -2038,7 +2232,7 @@ bytecode_decl(Bytecode *bc, Decl *decl) {
                 Struct_Field *field = DSTRUCT(decl)->fields[i];
 
                 // feldnamen generieren {
-                    Value field_val = val_struct_field(field->name, field->len);
+                    Value field_val = val_struct_field(field->name);
                     int32_t field_index = bytecode_push_constant(bc, field_val);
                     instr_push(field, bc, BYTECODEOP_PUSH, field_index);
                 // }
@@ -2095,17 +2289,16 @@ bytecode_stmt(Bytecode *bc, Stmt *stmt) {
             bytecode_expr(bc, SFOR(stmt)->cond);
 
             char *it = NULL;
-            uint32_t it_len = 0;
             if ( SFOR(stmt)->it ) {
                 it = EIDENT(SFOR(stmt)->it)->val;
-                it_len = EIDENT(SFOR(stmt)->it)->len;
             } else {
                 it = "it";
-                it_len = 2;
             }
 
+            uint32_t it_len = utf8_str_size(it);
+
             /* @INFO: platziert den namen der laufvariable */
-            int32_t index = bytecode_push_constant(bc, val_str(it, it_len));
+            int32_t index = bytecode_push_constant(bc, val_str(it));
 
             instr_push(stmt, bc, BYTECODEOP_SCOPE_ENTER);
 
@@ -2136,6 +2329,9 @@ bytecode_stmt(Bytecode *bc, Stmt *stmt) {
                 bytecode_stmt(bc, SFOR(stmt)->stmt_else);
                 instr_push(SFOR(stmt)->stmt_else, bc, BYTECODEOP_SCOPE_LEAVE);
                 exit_addr = bc->curr;
+            } else {
+                /* @INFO: nur zur sicherheit patchen wir auch op2 zu ausstiegsadresse */
+                instr->op2 = exit_addr;
             }
 
             instr_patch(bc, exit_instr, exit_addr);
@@ -2461,6 +2657,24 @@ bytecode_sym_get(Obj_String *key, Value *val) {
     return false;
 }
 
+Value *
+bytecode_sym_get_ref(Obj_String *key) {
+    Scope *it = curr_scope;
+    Value *result = NULL;
+
+    while ( it ) {
+        result = table_get_ref(&it->syms, key);
+
+        if ( result ) {
+            return result;
+        }
+
+        it = it->parent;
+    }
+
+    return result;
+}
+
 bool
 bytecode_sym_set(Obj_String *key, Value val, Scope *scope, uint32_t flags = BYTECODEFLAG_NONE) {
     if ( flags & BYTECODEFLAG_SET_EXISTING ) {
@@ -2510,10 +2724,10 @@ bytecode_directive(Bytecode *bc, Directive *dir) {
             for ( int i = 0; i < DIREXPORT(dir)->num_syms; ++i ) {
                 Module_Sym *sym = DIREXPORT(dir)->syms[i];
 
-                bytecode_emit_const(dir, bc, val_str(sym->name, (uint32_t)utf8_str_size(sym->name)));
+                bytecode_emit_const(dir, bc, val_str(sym->name));
 
                 if ( sym->alias ) {
-                    bytecode_emit_const(dir, bc, val_str(sym->alias, (uint32_t)utf8_str_size(sym->alias)));
+                    bytecode_emit_const(dir, bc, val_str(sym->alias));
                 } else {
                     instr_push(dir, bc, BYTECODEOP_NONE);
                 }
@@ -2739,7 +2953,19 @@ step(Vm *vm) {
 
             if ( IS_VCMPND(expr_val) ) {
                 if ( IS_VSTRUCT(type_val) ) {
-                    assert(!"compound für struct umsetzen");
+                    Value structure = val_struct(VSTRUCT(type_val)->name);
+
+                    int32_t num_elems = buf_len(VSTRUCT(type_val)->fieldnames_ordered);
+
+                    for ( int i = 0; i < num_elems; ++i ) {
+                        Obj_String *field_name = VSTRUCT(type_val)->fieldnames_ordered[i];
+                        Value field_val = VCMPND(expr_val)->elems[i];
+
+                        table_set(VSTRUCT(structure)->fields, field_name, field_val);
+                        buf_push(VSTRUCT(structure)->fieldnames_ordered, field_name);
+                    }
+
+                    val = structure;
                 } else if ( IS_VARRAY(type_val) ) {
                     val = val_array(VCMPND(val)->elems, VCMPND(val)->num_elems);
                 }
@@ -2822,8 +3048,29 @@ step(Vm *vm) {
         } break;
 
         case BYTECODEOP_LOAD_SYMREF: {
-            Value val = value_get(&frame->proc->bc->constants, instr->op1);
-            stack_push(vm, val);
+            Value name = value_get(&frame->proc->bc->constants, instr->op1);
+            stack_push(vm, val_ptr(bytecode_sym_get_ref(VSTR(name))));
+        } break;
+
+        case BYTECODEOP_LOAD_TYPEINFO: {
+            Value val = stack_pop(vm);
+            stack_push(vm, val_type(obj_types[val.int_val]));
+        } break;
+
+        case BYTECODEOP_LOAD_TYPEOF: {
+            stack_push(vm, val_int(instr->op1));
+        } break;
+
+        case BYTECODEOP_LOAD_STRUCT_FIELD_ASSIGNABLE: {
+            Value field = value_get(&frame->proc->bc->constants, instr->op1);
+            Value val = stack_pop(vm);
+
+            assert( IS_VSTRUCT(val) );
+
+            Obj_Struct *structure = ((Obj_Struct *)val.obj_val);
+            Value *field_val = table_get_ref(structure->fields, VSTR(field));
+
+            stack_push(vm, val_ptr(field_val));
         } break;
 
         case BYTECODEOP_LOAD_STRUCT_FIELD: {
@@ -2861,10 +3108,19 @@ step(Vm *vm) {
         } break;
 
         case BYTECODEOP_SET_SYM: {
+#if 0
             Obj_String *name = VSTR(stack_pop(vm));
             Value val = stack_pop(vm);
 
             bytecode_sym_set(name, val, BYTECODEFLAG_SET_EXISTING);
+#else
+            Value var = stack_pop(vm);
+            Value val = stack_pop(vm);
+
+            assert(IS_VPTR(var));
+
+            *((Value *)VPTR(var)->ptr) = val;
+#endif
         } break;
 
         case BYTECODEOP_CALL: {
@@ -3078,7 +3334,7 @@ step(Vm *vm) {
 
                 assert(type_val.obj_val->kind == OBJ_STRUCT);
                 Obj_Struct   * structure = (Obj_Struct *)type_val.obj_val;
-                               new_val   = val_struct(((Obj_String *)structure->name)->ptr, ((Obj_String *)structure->name)->size);
+                               new_val   = val_struct(((Obj_String *)structure->name)->ptr);
 
                 for ( int i = 0; i < compound->num_elems; ++i ) {
                     Value compound_val = compound->elems[i];
@@ -3098,6 +3354,193 @@ step(Vm *vm) {
     return true;
 }
 
+Obj_Type *
+obj_type_from_type(Type *type) {
+    Obj_Type *result = NULL;
+
+    switch ( type->kind ) {
+        case TYPE_VOID: {
+            result = obj_type(type->id, "void", type->size);
+        } break;
+
+        case TYPE_U8: {
+            result = obj_type(type->id, "u8", type->size);
+        } break;
+
+        case TYPE_U16: {
+            result = obj_type(type->id, "u16", type->size);
+        } break;
+
+        case TYPE_U32: {
+            result = obj_type(type->id, "u32", type->size);
+        } break;
+
+        case TYPE_U64: {
+            result = obj_type(type->id, "u64", type->size);
+        } break;
+
+        case TYPE_S8: {
+            result = obj_type(type->id, "s8", type->size);
+        } break;
+
+        case TYPE_S16: {
+            result = obj_type(type->id, "s16", type->size);
+        } break;
+
+        case TYPE_S32: {
+            result = obj_type(type->id, "s32", type->size);
+        } break;
+
+        case TYPE_S64: {
+            result = obj_type(type->id, "s64", type->size);
+        } break;
+
+        case TYPE_F32: {
+            result = obj_type(type->id, "f32", type->size);
+        } break;
+
+        case TYPE_F64: {
+            result = obj_type(type->id, "f64", type->size);
+        } break;
+
+        case TYPE_STRING: {
+            result = obj_type(type->id, "string", type->size);
+        } break;
+
+        case TYPE_BOOL: {
+            result = obj_type(type->id, "bool", type->size);
+        } break;
+
+        case TYPE_PTR: {
+            result = obj_type(type->id, NULL, type->size);
+
+            result->base = obj_type_from_type(TPTR(type)->base);
+        } break;
+
+        case TYPE_STRUCT: {
+            uint32_t num_fields = (uint32_t)TSTRUCT(type)->num_fields;
+            Values fields = (Values)urq_alloc(sizeof(Value)*num_fields);
+
+            for ( uint32_t i = 0; i < num_fields; ++i ) {
+                Struct_Field *field = TSTRUCT(type)->fields[i];
+
+                fields[i] = val_type_field(field->type->id, field->name);
+            }
+
+            result = obj_type(type->id, TSTRUCT(type)->sym->name, type->size, fields, num_fields);
+        } break;
+
+        case TYPE_ENUM: {
+            uint32_t num_fields = (uint32_t)TENUM(type)->num_fields;
+            Values fields = (Values)urq_alloc(sizeof(Value)*num_fields);
+
+            for ( uint32_t i = 0; i < num_fields; ++i ) {
+                Enum_Field *field = TENUM(type)->fields[i];
+
+                fields[i] = val_type_field(field->type->id, field->name);
+            }
+
+            result = obj_type(type->id, TENUM(type)->sym->name, type->size, fields, num_fields);
+        } break;
+
+        case TYPE_PROC: {
+            uint32_t num_params = (uint32_t)TPROC(type)->num_params;
+            Values params = (Values)urq_alloc(sizeof(Value)*num_params);
+
+            for ( uint32_t i = 0; i < num_params; ++i ) {
+                Proc_Param *param = TPROC(type)->params[i];
+
+                params[i] = val_type_field(param->type->id, param->name);
+            }
+
+            uint32_t num_rets = (uint32_t)TPROC(type)->num_rets;
+            Values rets = (Values)urq_alloc(sizeof(Value)*num_rets);
+
+            for ( uint32_t i = 0; i < num_rets; ++i ) {
+                Proc_Param *ret = TPROC(type)->rets[i];
+
+                rets[i] = val_type_field(ret->type->id, ret->name);
+            }
+
+            result = obj_type(type->id, TPROC(type)->sym->name, type->size, params, num_params, rets, num_rets);
+        } break;
+
+        case TYPE_ARRAY: {
+            result = obj_type(type->id, NULL, type->size);
+
+            result->base = obj_type_from_type(TARRAY(type)->base);
+        } break;
+
+        case TYPE_NAMESPACE: {
+            result = obj_type(type->id, type->name, type->size);
+        } break;
+
+        case TYPE_COMPOUND: {
+            result = obj_type(type->id, NULL, type->size);
+
+            result->num_fields = (uint32_t)TCMPND(type)->num_elems;
+            result->fields = (Values)urq_alloc(sizeof(Value)*result->num_fields);
+            for ( uint32_t i = 0; i < result->num_fields; ++i ) {
+                result->params[i] = val_type(obj_type_from_type(TCMPND(type)->elems[i]->type));
+            }
+        } break;
+
+        case TYPE_VARIADIC: {
+            result = obj_type(type->id, NULL, type->size);
+
+            result->num_fields = (uint32_t)TVARIADIC(type)->num_types;
+            result->fields = (Values)urq_alloc(sizeof(Value)*result->num_fields);
+            for ( uint32_t i = 0; i < result->num_fields; ++i ) {
+                result->params[i] = val_type(obj_type_from_type(TVARIADIC(type)->types[i]));
+            }
+        } break;
+    }
+
+    return result;
+}
+
+void
+bytecode_gen_typeinfo() {
+    int32_t num_types = buf_len(types);
+    obj_types = (Obj_Type **)urq_alloc(sizeof(Obj_Type)*num_types);
+
+    for ( int i = 0; i < num_types; ++i ) {
+        obj_types[types[i]->id] = obj_type_from_type(types[i]);
+    }
+}
+
+void
+bytecode_init(Bytecode *bc) {
+#define REGISTER_TYPE(Val, Name)                                       \
+    do {                                                                     \
+            Scope *prev_scope = curr_scope;                                  \
+            curr_scope = &sys_scope;                                         \
+            int32_t index = bytecode_push_constant(bc, val_str(Name)); \
+            Obj_String *name = VSTR(value_get(&bc->constants, index));     \
+            if ( !bytecode_sym_set(name, Val) ) {                            \
+                assert(!"symbol konnte nicht gesetzt werden");               \
+            }                                                                \
+            curr_scope = prev_scope;                                         \
+    } while(0)
+
+    REGISTER_TYPE(val_none(),      "void");
+    REGISTER_TYPE(val_int(0),      "u8");
+    REGISTER_TYPE(val_int(0),      "u16");
+    REGISTER_TYPE(val_int(0),      "u32");
+    REGISTER_TYPE(val_int(0),      "u64");
+    REGISTER_TYPE(val_int(0),      "s8");
+    REGISTER_TYPE(val_int(0),      "s16");
+    REGISTER_TYPE(val_int(0),      "s32");
+    REGISTER_TYPE(val_int(0),      "s64");
+    REGISTER_TYPE(val_float(0.0f), "f32");
+    REGISTER_TYPE(val_float(0.0f), "f64");
+    REGISTER_TYPE(val_bool(false), "bool");
+    REGISTER_TYPE(val_str(""),     "string");
+
+    bytecode_gen_typeinfo();
+#undef REGISTER_TYPE
+}
+
 void eval(Bytecode *bc) {
     Vm *vm = vm_new(bc);
 
@@ -3112,55 +3555,6 @@ void eval(Bytecode *bc) {
             break;
         }
     }
-}
-
-void
-bytecode_init(Bytecode *bc) {
-#define REGISTER_TYPE(Val, Name, Size)                                       \
-    do {                                                                     \
-            Scope *prev_scope = curr_scope;                                  \
-            curr_scope = &sys_scope;                                         \
-            int32_t index = bytecode_push_constant(bc, val_str(Name, Size)); \
-            Obj_String *name = VSTR(value_get(&bc->constants, index));     \
-            if ( !bytecode_sym_set(name, Val) ) {                            \
-                assert(!"symbol konnte nicht gesetzt werden");               \
-            }                                                                \
-            curr_scope = prev_scope;                                         \
-    } while(0)
-
-    REGISTER_TYPE(val_none(),      "void",   4);
-    REGISTER_TYPE(val_int(0),      "u8",     2);
-    REGISTER_TYPE(val_int(0),      "u16",    3);
-    REGISTER_TYPE(val_int(0),      "u32",    3);
-    REGISTER_TYPE(val_int(0),      "u64",    3);
-    REGISTER_TYPE(val_int(0),      "s8",     2);
-    REGISTER_TYPE(val_int(0),      "s16",    3);
-    REGISTER_TYPE(val_int(0),      "s32",    3);
-    REGISTER_TYPE(val_int(0),      "s64",    3);
-    REGISTER_TYPE(val_float(0.0f), "f32",    3);
-    REGISTER_TYPE(val_float(0.0f), "f64",    3);
-    REGISTER_TYPE(val_bool(false), "bool",   4);
-    REGISTER_TYPE(val_str("", 0),  "string", 6);
-
-#if 0
-    sym_push_sys("typeid", type_typeid);
-#endif
-#undef REGISTER_TYPE
-}
-
-struct Basic_Block {
-    int32_t id;
-    Instrs   instrs;
-};
-
-Basic_Block *
-basic_block(int32_t id, Instrs instrs) {
-    Basic_Block *result = urq_allocs(Basic_Block);
-
-    result->id     = id;
-    result->instrs = instrs;
-
-    return result;
 }
 
 Bytecode *
