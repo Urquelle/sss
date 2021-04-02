@@ -339,7 +339,6 @@ struct Struct_Field : Ast_Elem {
 struct Stmt_Ret : Stmt {
     Exprs       exprs;
     uint32_t    num_exprs;
-    Proc_Sign * sign;
 };
 
 struct Stmt_While : Stmt {
@@ -1808,13 +1807,7 @@ parse_stmt_block(Token_List *tokens, Proc_Sign *sign) {
     token_expect(tokens, T_LBRACE);
     if ( !token_is(tokens, T_RBRACE) ) {
         do {
-            Stmt *stmt = parse_stmt(tokens);
-
-            if ( stmt->kind == STMT_RET ) {
-                SRET(stmt)->sign = sign;
-            }
-
-            buf_push(stmts, stmt);
+            buf_push(stmts, parse_stmt(tokens));
         } while ( !token_is(tokens, T_RBRACE) );
     }
     token_expect(tokens, T_RBRACE);
@@ -2219,7 +2212,7 @@ parse(Token_List *tokens) {
     KEYWORD_K(sonst, else);
     KEYWORD(export);
     KEYWORD_K(falsch, false);
-    KEYWORD_K(jedes, for);
+    KEYWORD_K(iter, for);
     KEYWORD(free);
     KEYWORD(from);
     KEYWORD_K(falls, if);

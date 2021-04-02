@@ -1,5 +1,3 @@
-Resolved_Stmts resolve_file(Parsed_File *parsed_file);
-
 Types types;
 
 enum Sym_Kind {
@@ -647,7 +645,8 @@ Sym *
 sym_push_var(Loc *loc, char *name, Decl *decl) {
     Sym *result = sym_push(loc, name, NULL);
 
-    result->kind = SYM_VAR;
+    result->kind  = SYM_VAR;
+    result->state = SYMSTATE_RESOLVED;
 
     return result;
 }
@@ -656,8 +655,9 @@ Sym *
 sym_push_var(Loc *loc, char *name, Type *type) {
     Sym *result = sym_push(loc, name, NULL);
 
-    result->kind = SYM_VAR;
-    result->type = type;
+    result->kind  = SYM_VAR;
+    result->state = SYMSTATE_RESOLVED;
+    result->type  = type;
 
     return result;
 }
@@ -740,6 +740,8 @@ sym_resolve(Sym *sym) {
 Sym *
 resolve_name(char *name) {
     Sym *sym = sym_get(name);
+
+    sym_resolve(sym);
 
     return sym;
 }
@@ -903,6 +905,7 @@ resolve_expr(Expr *expr, Type *given_type = NULL) {
 
         case EXPR_CALL: {
             Operand *op = resolve_expr(ECALL(expr)->base);
+            type_complete(op->type);
             assert(op->type && op->type->kind == TYPE_PROC);
 
             Type_Proc *op_type = TPROC(op->type);
@@ -1189,9 +1192,9 @@ resolve_decl(Decl *decl) {
     return result;
 }
 
-Resolved_Stmts
-resolve_stmt(Stmt *stmt) {
-    Resolved_Stmts result = NULL;
+bool
+resolve_stmt(Stmt *stmt, Types rets, uint32_t num_rets) {
+    bool result = false;
 
     switch ( stmt->kind ) {
         case STMT_ASSIGN: {
@@ -1206,13 +1209,11 @@ resolve_stmt(Stmt *stmt) {
             if ( lhs->type != rhs->type ) {
                 report_error(stmt, "datentyp erwartet %s, bekommen %s", lhs->type->name, rhs->type->name);
             }
-
-            buf_push(result, resolved_stmt(stmt, NULL, rhs->type, rhs));
         } break;
 
         case STMT_BLOCK: {
             for ( int i = 0; i < SBLOCK(stmt)->num_stmts; ++i ) {
-                result = resolve_stmt(SBLOCK(stmt)->stmts[i]);
+                result = result || resolve_stmt(SBLOCK(stmt)->stmts[i], rets, num_rets);
             }
         } break;
 
@@ -1224,8 +1225,6 @@ resolve_stmt(Stmt *stmt) {
                     Type *type = resolve_decl_var(decl);
                     type_complete(type);
                     Sym *sym = sym_push_var(decl, decl->name, type);
-
-                    buf_push(result, resolved_stmt(stmt, sym, type, NULL));
                 } break;
 
                 default: {
@@ -1236,12 +1235,11 @@ resolve_stmt(Stmt *stmt) {
 
         case STMT_EXPR: {
             Operand *operand = resolve_expr(SEXPR(stmt)->expr);
-
-            buf_push(result, resolved_stmt(stmt, NULL, operand->type, operand));
         } break;
 
         case STMT_FOR: {
             char *it = NULL;
+
             if ( SFOR(stmt)->it ) {
                 assert(SFOR(stmt)->it->kind == EXPR_IDENT);
                 it = EIDENT(SFOR(stmt)->it)->val;
@@ -1266,8 +1264,6 @@ resolve_stmt(Stmt *stmt) {
                 resolve_stmt(SFOR(stmt)->stmt_else);
                 scope_leave();
             }
-
-            buf_push(result, resolved_stmt(stmt, NULL, NULL, NULL));
         } break;
 
         case STMT_IF: {
@@ -1284,16 +1280,12 @@ resolve_stmt(Stmt *stmt) {
             if ( SIF(stmt)->stmt_else ) {
                 resolve_stmt(SIF(stmt)->stmt_else);
             }
-
-            buf_push(result, resolved_stmt(stmt, NULL, NULL, NULL));
         } break;
 
         case STMT_WHILE: {
             Operand *cond = resolve_expr(SWHILE(stmt)->cond);
             assert(cond->type->kind == TYPE_BOOL);
             resolve_stmt(SWHILE(stmt)->block);
-
-            buf_push(result, resolved_stmt(stmt, NULL, NULL, NULL));
         } break;
 
         case STMT_MATCH: {
@@ -1312,8 +1304,6 @@ resolve_stmt(Stmt *stmt) {
 
                 resolve_stmt(line->stmt);
             }
-
-            buf_push(result, resolved_stmt(stmt, NULL, NULL, NULL));
         } break;
 
         case STMT_RET: {
@@ -1321,25 +1311,23 @@ resolve_stmt(Stmt *stmt) {
                 report_error(stmt, "return an dieser stelle nicht erlaubt.");
             }
 
-            if ( SRET(stmt)->num_exprs < SRET(stmt)->sign->num_rets ) {
+            if ( SRET(stmt)->num_exprs < num_rets ) {
                 report_error(stmt, "rückgabewerte erwartet %d, übergeben bekommen %d",
-                        SRET(stmt)->sign->num_rets, SRET(stmt)->num_exprs);
+                        num_rets, SRET(stmt)->num_exprs);
             }
 
             if ( SRET(stmt)->num_exprs > 0 ) {
-                for ( uint32_t i = 0; i < SRET(stmt)->sign->num_rets; ++i ) {
+                for ( uint32_t i = 0; i < num_rets; ++i ) {
                     Operand *operand = resolve_expr(SRET(stmt)->exprs[i]);
 
-                    operand_cast(SRET(stmt)->sign->rets[i]->type, operand);
-                    if ( SRET(stmt)->sign->rets[i]->type != operand->type ) {
-                        report_error(SRET(stmt)->exprs[i], "rückgabewert vom datentyp erwartet %s, bekommen %s", SRET(stmt)->sign->rets[i]->type->name, operand->type->name);
+                    operand_cast(rets[i], operand);
+                    if ( rets[i] != operand->type ) {
+                        report_error(SRET(stmt)->exprs[i], "rückgabewert vom datentyp erwartet %s, bekommen %s", rets[i]->name, operand->type->name);
                     }
-
-                    buf_push(result, resolved_stmt(stmt, NULL, operand->type, operand));
                 }
-            } else {
-                buf_push(result, resolved_stmt(stmt, NULL, type_void, operand(type_void)));
             }
+
+            result = true;
         } break;
 
         case STMT_USING: {
@@ -1360,20 +1348,14 @@ resolve_stmt(Stmt *stmt) {
     return result;
 }
 
-Resolved_Stmts
+void
 resolve_directive(Directive *dir) {
-    Resolved_Stmts result = NULL;
-
     switch ( dir->kind ) {
         case DIRECTIVE_IMPORT: {
             Scope *scope = scope_new("import", sys_scope);
             Scope *prev_scope = scope_set(scope);
-            Resolved_Stmts stmts = resolve_file(DIRIMPORT(dir)->parsed_file);
+            resolve_file(DIRIMPORT(dir)->parsed_file);
             scope_set(prev_scope);
-
-            for ( int i = 0; i < buf_len(stmts); ++i ) {
-                buf_push(result, stmts[i]);
-            }
 
             Scope *push_scope = curr_scope;
             if ( DIRIMPORT(dir)->scope_name ) {
@@ -1440,31 +1422,21 @@ resolve_directive(Directive *dir) {
         } break;
 
         case DIRECTIVE_LOAD: {
-            result = resolve_file(DIRLOAD(dir)->parsed_file);
+            resolve_file(DIRLOAD(dir)->parsed_file);
         } break;
 
         default: {
             report_error(dir, "unbekannte direktive");
         } break;
     }
-
-    return result;
 }
 
-Resolved_Stmts
+void
 resolve_directives(Directive **directives) {
-    Resolved_Stmts result = NULL;
-
     for ( int i = 0; i < buf_len(directives); ++i ) {
         Directive *dir = directives[i];
-        Resolved_Stmts ret = resolve_directive(dir);
-
-        for ( int j = 0; j < buf_len(ret); ++j ) {
-            buf_push(result, ret[j]);
-        }
+        resolve_directive(dir);
     }
-
-    return result;
 }
 
 void
@@ -1603,13 +1575,15 @@ resolve_proc(Sym *sym) {
         sym_push_var(param, param->name, resolve_typespec(param->typespec));
     }
 
+    Types ret_types = NULL;
     for ( uint32_t i = 0; i < sign->num_rets; ++i ) {
         sign->rets[i]->type = resolve_typespec(sign->rets[i]->typespec);
+        buf_push(ret_types, sign->rets[i]->type);
     }
 
     bool returns = false;
     if ( !sign->sys_call ) {
-        returns = resolve_stmt(decl->block);
+        returns = resolve_stmt(decl->block, ret_types, buf_len(ret_types));
     }
 
     scope_leave();
@@ -1680,9 +1654,9 @@ sym_finalize(Sym *sym) {
     }
 }
 
-Resolved_Stmts
+void
 resolve_file(Parsed_File *parsed_file) {
-    Resolved_Stmts result = resolve_directives(parsed_file->directives);
+    resolve_directives(parsed_file->directives);
     register_global_syms(parsed_file->stmts);
 
     for ( int i = 0; i < buf_len(parsed_file->stmts); ++i ) {
@@ -1695,23 +1669,15 @@ resolve_file(Parsed_File *parsed_file) {
             if ( sym->decl ) {
                 sym_finalize(sym);
             }
-
-            buf_push(result, resolved_stmt(stmt, sym, sym->type, NULL));
         } else {
-            Resolved_Stmts stmts = resolve_stmt(stmt);
-
-            for ( int j = 0; j < buf_len(stmts); ++j ) {
-                buf_push(result, stmts[j]);
-            }
+            resolve_stmt(stmt);
         }
     }
-
-    return result;
 }
 
-Resolved_Stmts
+void
 resolve(Parsed_File *parsed_file, bool check_entry_point) {
-    Resolved_Stmts result = resolve_file(parsed_file);
+    resolve_file(parsed_file);
 
     if ( check_entry_point ) {
         Sym *entry_point_sym = sym_get(global_scope, intern_str(entry_point));
@@ -1733,8 +1699,6 @@ resolve(Parsed_File *parsed_file, bool check_entry_point) {
             report_error(&loc_none, "%s muss ein [] string sein", param->name);
         }
     }
-
-    return result;
 }
 
 void
@@ -1750,14 +1714,14 @@ resolver_load_sys_modules() {
 
     auto tokens   = tokenize("typeinfo", content);
     auto parsed   = parse(&tokens);
-    auto resolved = resolve(parsed, false);
+                    resolve(parsed, false);
 }
 
 void
 resolver_init() {
-    sys_scope    = scope_new("sys");
-    global_scope = scope_new("global", sys_scope);
-    curr_scope   = global_scope;
+    sys_scope     = scope_new("sys");
+    global_scope  = scope_new("global", sys_scope);
+    curr_scope    = global_scope;
 
     type_void     = type_new(0, TYPE_VOID);
     type_u8       = type_new(1, TYPE_U8);

@@ -1,11 +1,17 @@
 #import Win32 = (*) from win32;
 
 #export {
-    ausgabe
+    ausgabe,
+    ausgabe_zeile,
 }
 
 Optional :: struktur {
     value : *void;
+}
+
+ausgabe_zeile :: proc(fmt: string) {
+    ausgabe(fmt);
+    ausgabe("\n");
 }
 
 ausgabe :: proc(fmt: string) {

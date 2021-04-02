@@ -62,13 +62,14 @@ Stmt_If        * parse_stmt_if(Token_List *tokens);
 Stmt_For       * parse_stmt_for(Token_List *tokens);
 Stmt_Match     * parse_stmt_match(Token_List *tokens);
 Typespec       * parse_typespec(Token_List *tokens);
-Resolved_Stmts   resolve(Parsed_File *parsed_file, bool check_entry_point = true);
+void             resolve(Parsed_File *parsed_file, bool check_entry_point = true);
+void             resolve_file(Parsed_File *parsed_file);
 Type           * resolve_decl(Decl *d);
 Type           * resolve_decl_const(Decl *decl);
 Type_Proc      * resolve_decl_proc(Decl *decl);
 Type           * resolve_decl_type(Decl *decl);
 Type           * resolve_decl_var(Decl *decl);
-Resolved_Stmts   resolve_stmt(Stmt *stmt);
+bool             resolve_stmt(Stmt *stmt, Types rets = NULL, uint32_t num_rets = 0);
 Type           * resolve_typespec(Typespec *t);
 Scope          * scope_new(char *name, Scope *parent = NULL);
 Sym            * sym_push_scope(Loc *loc, Scope *scope, char *name, Type *type);
@@ -170,9 +171,9 @@ void sss_repl() {
         gets_s(buf, sizeof(buf));
 
         auto tokens   = tokenize("<repl>", buf);
-        auto parsed   = parse(&tokens);
-        auto resolved = resolve(parsed, false);
-        auto code     = Vm::build(parsed);
+        auto ast      = parse(&tokens);
+                        resolve(ast, false);
+        auto code     = Vm::build(ast);
         Vm::eval(code);
     }
 }

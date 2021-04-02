@@ -3,13 +3,13 @@
 #load "W:/sss/data/zeugs.sss";
 
 master :: proc(args: [] string) {
-    jedes 0..args.größe {
+    iter 0..args.größe {
         Sys.ausgabe(args[it]);
     }
 
     falls wahr Sys.ausgabe("wahrhaftig");
 
-    jedes args Sys.ausgabe(it);
+    iter args Sys.ausgabe(it);
 }
 
 master({ "hallo✨\n", "was✨\n", "machst✨\n", "du\n" });

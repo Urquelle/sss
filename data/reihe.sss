@@ -1,0 +1,15 @@
+a :: proc() -> u32 {
+    res b(5);
+}
+
+b :: proc(x: u32) -> u32 {
+    falls x < X {
+        res X;
+    }
+    res x;
+}
+
+master :: proc(args: [] string) {
+}
+
+X :: const 56;

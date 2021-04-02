@@ -71,9 +71,9 @@ int main(int argc, char* argv[]) {
         os_file_read(file_name, &content);
 
         auto tokens   = tokenize(file_name, content);
-        auto parsed   = parse(&tokens);
-        auto resolved = resolve(parsed);
-        auto code     = build(parsed);
+        auto ast      = parse(&tokens);
+                        resolve(ast);
+        auto code     = build(ast);
              code     = optimize(code);
                         eval(code);
     }
