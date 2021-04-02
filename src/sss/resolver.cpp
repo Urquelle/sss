@@ -583,15 +583,22 @@ scope_push_global(Sym *sym) {
 }
 
 Sym *
-sym_new(Loc *loc, char *name) {
+sym_new(Loc *loc, Sym_Kind kind, char *name) {
     Sym *result = urq_allocs(Sym);
 
     loc_copy(loc, result);
 
-    result->kind = SYM_NONE;
+    result->kind = kind;
     result->name = intern_str(name);
     result->decl = NULL;
     result->type = NULL;
+
+    return result;
+}
+
+Sym *
+sym_new(Loc *loc, char *name) {
+    Sym *result = sym_new(loc, SYM_NONE, name);
 
     return result;
 }
@@ -1379,10 +1386,11 @@ resolve_directive(Directive *dir) {
 
                     if ( export_sym ) {
                         char *export_name = (module_sym->alias) ? module_sym->alias : module_sym->name;
-                        Sym *push_sym = sym_new(module_sym, export_name);
+                        Sym *push_sym = sym_new(module_sym, export_sym->kind, export_name);
 
-                        push_sym->decl = export_sym->decl;
-                        push_sym->type = export_sym->type;
+                        push_sym->state = export_sym->state;
+                        push_sym->decl  = export_sym->decl;
+                        push_sym->type  = export_sym->type;
 
                         scope_push(push_scope, push_sym);
                     }
@@ -1609,6 +1617,7 @@ register_global_syms(Stmts stmts) {
 
         Decl *decl = stmt->decl;
         Sym *sym = sym_push(decl, decl->name, decl);
+        decl->sym = sym;
 
         switch ( decl->kind ) {
             case DECL_TYPE:
