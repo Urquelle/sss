@@ -23,7 +23,6 @@ struct Parsed_File;
 struct Proc_Param;
 struct Proc_Sign;
 struct Proc_Sign;
-struct Resolved_Stmt;
 struct Scope;
 struct Stmt;
 struct Stmt_Block;
@@ -38,42 +37,41 @@ struct Type_Proc;
 struct Type_Struct;
 struct Typespec;
 
-typedef Compound_Elem**  Compound_Elems;
-typedef Decl**           Decls;
-typedef Directive**      Directives;
-typedef Enum_Field**     Enum_Fields;
-typedef Expr**           Exprs;
-typedef Match_Line**     Match_Lines;
-typedef Module_Sym**     Module_Syms;
-typedef Note**           Notes;
-typedef Proc_Param**     Proc_Params;
-typedef Struct_Field**   Struct_Fields;
-typedef Stmt**           Stmts;
+typedef Compound_Elem ** Compound_Elems;
+typedef Decl          ** Decls;
+typedef Directive     ** Directives;
+typedef Enum_Field    ** Enum_Fields;
+typedef Expr          ** Exprs;
+typedef Match_Line    ** Match_Lines;
+typedef Module_Sym    ** Module_Syms;
+typedef Note          ** Notes;
+typedef Proc_Param    ** Proc_Params;
+typedef Struct_Field  ** Struct_Fields;
+typedef Stmt          ** Stmts;
 typedef Operand       ** Operands;
-typedef Resolved_Stmt ** Resolved_Stmts;
 typedef Sym           ** Syms;
 typedef Type          ** Types;
 
-Parsed_File    * parse(Token_List *tokens);
-Expr           * parse_expr(Token_List *tokens, bool with_stmt = false);
-Stmt           * parse_stmt(Token_List *tokens);
-Stmt_Block     * parse_stmt_block(Token_List *tokens, Proc_Sign *sign = NULL);
-Stmt_If        * parse_stmt_if(Token_List *tokens);
-Stmt_For       * parse_stmt_for(Token_List *tokens);
-Stmt_Match     * parse_stmt_match(Token_List *tokens);
-Typespec       * parse_typespec(Token_List *tokens);
-void             resolve(Parsed_File *parsed_file, bool check_entry_point = true);
-void             resolve_file(Parsed_File *parsed_file);
-Type           * resolve_decl(Decl *d);
-Type           * resolve_decl_const(Decl *decl);
-Type_Proc      * resolve_decl_proc(Decl *decl);
-Type           * resolve_decl_type(Decl *decl);
-Type           * resolve_decl_var(Decl *decl);
-bool             resolve_stmt(Stmt *stmt, Types rets = NULL, uint32_t num_rets = 0);
-Type           * resolve_typespec(Typespec *t);
-Scope          * scope_new(char *name, Scope *parent = NULL);
-Sym            * sym_push_scope(Loc *loc, Scope *scope, char *name, Type *type);
-void             type_complete(Type *type);
+Parsed_File            * parse(Token_List *tokens);
+Expr                   * parse_expr(Token_List *tokens, bool with_stmt = false);
+Stmt                   * parse_stmt(Token_List *tokens);
+Stmt_Block             * parse_stmt_block(Token_List *tokens, Proc_Sign *sign = NULL);
+Stmt_If                * parse_stmt_if(Token_List *tokens);
+Stmt_For               * parse_stmt_for(Token_List *tokens);
+Stmt_Match             * parse_stmt_match(Token_List *tokens);
+Typespec               * parse_typespec(Token_List *tokens);
+void                     resolve(Parsed_File *parsed_file, bool check_entry_point = true);
+void                     resolve_file(Parsed_File *parsed_file);
+Type                   * resolve_decl(Decl *d);
+Type                   * resolve_decl_const(Decl *decl);
+Type_Proc              * resolve_decl_proc(Decl *decl);
+Type                   * resolve_decl_type(Decl *decl);
+Type                   * resolve_decl_var(Decl *decl);
+bool                     resolve_stmt(Stmt *stmt, Types rets = NULL, uint32_t num_rets = 0);
+Type                   * resolve_typespec(Typespec *t);
+Scope                  * scope_new(char *name, Scope *parent = NULL);
+Sym                    * sym_push_scope(Loc *loc, Scope *scope, char *name, Type *type);
+void                     type_complete(Type *type);
 
 #define EINT(Expr)            ((Expr_Int *)(Expr))
 #define EFLOAT(Expr)          ((Expr_Float *)(Expr))
@@ -174,13 +172,11 @@ void sss_repl() {
         auto ast      = parse(&tokens);
                         resolve(ast, false);
         auto code     = Vm::build(ast);
-        Vm::eval(code);
+                        Vm::eval(code);
     }
 }
 
 namespace api {
-    using Urq::Sss::Vm::Bytecode;
-
     using Urq::Sss::Vm::build;
     using Urq::Sss::Vm::optimize;
 

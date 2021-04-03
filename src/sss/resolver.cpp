@@ -32,6 +32,7 @@ struct Scope {
 };
 
 Scope *sys_scope;
+Scope *module_scope;
 Scope *global_scope;
 Scope *curr_scope;
 
@@ -143,13 +144,6 @@ struct Type_Variadic : Type {
     uint32_t num_types;
 };
 
-struct Resolved_Stmt {
-    Stmt    * stmt;
-    Sym     * sym;
-    Type    * type;
-    Operand * operand;
-};
-
 enum { PTR_SIZE = 8 };
 uint32_t type_id   = 1;
 
@@ -240,18 +234,6 @@ val_bool(bool val) {
 
     result.kind = VAL_BOOL;
     result.b    = val;
-
-    return result;
-}
-
-Resolved_Stmt *
-resolved_stmt(Stmt *stmt, Sym *sym, Type *type, Operand *operand) {
-    Resolved_Stmt *result = urq_allocs(Resolved_Stmt);
-
-    result->stmt    = stmt;
-    result->sym     = sym;
-    result->type    = type;
-    result->operand = operand;
 
     return result;
 }
@@ -1359,7 +1341,7 @@ void
 resolve_directive(Directive *dir) {
     switch ( dir->kind ) {
         case DIRECTIVE_IMPORT: {
-            Scope *scope = scope_new("import", sys_scope);
+            Scope *scope = scope_new("import", module_scope);
             Scope *prev_scope = scope_set(scope);
             resolve_file(DIRIMPORT(dir)->parsed_file);
             scope_set(prev_scope);
@@ -1378,21 +1360,37 @@ resolve_directive(Directive *dir) {
             }
 
             /* @INFO: überprüfen ob export_syms im scope gesetzt wurden */
-            if ( scope->export_syms ) {
+            if ( scope->num_export_syms ) {
                 for ( int i = 0; i < scope->num_export_syms; ++i ) {
                     Module_Sym *module_sym = scope->export_syms[i];
 
                     Sym *export_sym = sym_get(scope, module_sym->name);
 
                     if ( export_sym ) {
-                        char *export_name = (module_sym->alias) ? module_sym->alias : module_sym->name;
-                        Sym *push_sym = sym_new(module_sym, export_sym->kind, export_name);
+                        bool actually_import = false;
+                        if ( DIRIMPORT(dir)->wildcard ) {
+                            actually_import = true;
+                        } else {
+                            for ( int j = 0; j < DIRIMPORT(dir)->num_syms; ++j ) {
+                                Module_Sym *dir_sym = DIRIMPORT(dir)->syms[j];
 
-                        push_sym->state = export_sym->state;
-                        push_sym->decl  = export_sym->decl;
-                        push_sym->type  = export_sym->type;
+                                if ( dir_sym->name == export_sym->name ) {
+                                    actually_import = true;
+                                    break;
+                                }
+                            }
+                        }
 
-                        scope_push(push_scope, push_sym);
+                        if ( actually_import ) {
+                            char *export_name = (module_sym->alias) ? module_sym->alias : module_sym->name;
+                            Sym *push_sym = sym_new(module_sym, export_sym->kind, export_name);
+
+                            push_sym->state = export_sym->state;
+                            push_sym->decl  = export_sym->decl;
+                            push_sym->type  = export_sym->type;
+
+                            scope_push(push_scope, push_sym);
+                        }
                     }
                 }
 
@@ -1723,13 +1721,18 @@ resolver_load_sys_modules() {
 
     auto tokens   = tokenize("typeinfo", content);
     auto parsed   = parse(&tokens);
-                    resolve(parsed, false);
+
+    Scope *curr_scope_prev = curr_scope;
+    curr_scope = module_scope;
+    resolve(parsed, false);
+    curr_scope = curr_scope_prev;
 }
 
 void
 resolver_init() {
     sys_scope     = scope_new("sys");
-    global_scope  = scope_new("global", sys_scope);
+    module_scope  = scope_new("module", sys_scope);
+    global_scope  = scope_new("global", module_scope);
     curr_scope    = global_scope;
 
     type_void     = type_new(0, TYPE_VOID);

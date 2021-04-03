@@ -20,6 +20,15 @@ Datentyp_Art :: enum {
 
 typid :: typedef u32;
 
+Any :: struktur {
+    id  : typid;
+    val : *void;
+}
+
+Optional :: struktur {
+    value : Any;
+}
+
 Datentyp_Feld :: struktur {
     id     : typid;
     art    : Datentyp_Art;

@@ -2746,82 +2746,6 @@ bytecode_directive(Bytecode *bc, Directive *dir) {
     }
 }
 
-void
-bytecode_build_import_directives(Bytecode *bc, Directives dirs) {
-    for ( int i = 0; i < buf_len(dirs); ++i ) {
-        Directive *dir = dirs[i];
-
-        if ( dir->kind == DIRECTIVE_IMPORT ) {
-            bytecode_directive(bc, dir);
-        }
-    }
-}
-
-void
-bytecode_build_export_directives(Bytecode *bc, Directives dirs) {
-    for ( int i = 0; i < buf_len(dirs); ++i ) {
-        Directive *dir = dirs[i];
-
-        if ( dir->kind == DIRECTIVE_EXPORT ) {
-            bytecode_directive(bc, dir);
-        }
-    }
-}
-
-void
-bytecode_build_load_directives(Bytecode *bc, Directives dirs) {
-    for ( int i = 0; i < buf_len(dirs); ++i ) {
-        Directive *dir = dirs[i];
-
-        if ( dir->kind == DIRECTIVE_LOAD ) {
-            bytecode_directive(bc, dir);
-        }
-    }
-}
-
-void
-bytecode_build_stmts(Bytecode *bc, Stmts stmts) {
-    for ( int i = 0; i < buf_len(stmts); ++i ) {
-        bytecode_stmt(bc, stmts[i]);
-    }
-}
-
-void
-bytecode_register_globals(Bytecode *bc, Parsed_File *file) {
-    /* global registrieren PUSH_SYM_GLOBAL */
-#if 0
-    for ( int i = 0; i < buf_len(file->stmts); ++i ) {
-        Stmt *stmt = file->stmts[i];
-
-        if ( stmt->kind != STMT_DECL ) {
-            continue;
-        }
-
-        bytecode_global_decl(bc, stmt);
-    }
-    assert(!"implementieren");
-#endif
-}
-
-void
-bytecode_build_file(Bytecode *bc, Parsed_File *file) {
-    bytecode_register_globals(bc, file);
-    bytecode_build_import_directives(bc, file->directives);
-    bytecode_build_load_directives(bc, file->directives);
-    bytecode_build_stmts(bc, file->stmts);
-    bytecode_build_export_directives(bc, file->directives);
-}
-
-Bytecode *
-build(Parsed_File *file) {
-    Bytecode *bc = bytecode_new();
-
-    bytecode_init(bc);
-    bytecode_build_file(bc, file);
-
-    return bc;
-}
-
 bool
 step(Vm *vm) {
     Call_Frame *frame = vm_curr_frame(vm);
@@ -3591,6 +3515,64 @@ optimize(Bytecode *bc) {
             buf_push(instrs, instr);
         }
     }
+
+    return bc;
+}
+
+void
+bytecode_build_import_directives(Bytecode *bc, Directives dirs) {
+    for ( int i = 0; i < buf_len(dirs); ++i ) {
+        Directive *dir = dirs[i];
+
+        if ( dir->kind == DIRECTIVE_IMPORT ) {
+            bytecode_directive(bc, dir);
+        }
+    }
+}
+
+void
+bytecode_build_export_directives(Bytecode *bc, Directives dirs) {
+    for ( int i = 0; i < buf_len(dirs); ++i ) {
+        Directive *dir = dirs[i];
+
+        if ( dir->kind == DIRECTIVE_EXPORT ) {
+            bytecode_directive(bc, dir);
+        }
+    }
+}
+
+void
+bytecode_build_load_directives(Bytecode *bc, Directives dirs) {
+    for ( int i = 0; i < buf_len(dirs); ++i ) {
+        Directive *dir = dirs[i];
+
+        if ( dir->kind == DIRECTIVE_LOAD ) {
+            bytecode_directive(bc, dir);
+        }
+    }
+}
+
+void
+bytecode_build_stmts(Bytecode *bc, Stmts stmts) {
+    for ( int i = 0; i < buf_len(stmts); ++i ) {
+        bytecode_stmt(bc, stmts[i]);
+    }
+}
+
+void
+bytecode_build_file(Bytecode *bc, Parsed_File *file) {
+    bytecode_build_import_directives(bc, file->directives);
+    bytecode_build_load_directives(bc, file->directives);
+    bytecode_build_stmts(bc, file->stmts);
+    bytecode_build_export_directives(bc, file->directives);
+}
+
+Bytecode *
+build(Parsed_File *file) {
+    Bytecode *bc = bytecode_new();
+
+    bytecode_init(bc);
+    bytecode_build_file(bc, file);
 
     return bc;
 }

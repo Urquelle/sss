@@ -1,3 +1,5 @@
+#import Sys = (*) from sys;
+
 a :: proc() -> u32 {
     res b(5);
 }
@@ -13,3 +15,7 @@ master :: proc(args: [] string) {
 }
 
 X :: const 56;
+
+c := a();
+
+falls c == 56 Sys.ausgabe("x ist 56");

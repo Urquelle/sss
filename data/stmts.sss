@@ -1,4 +1,4 @@
-#import Sys = (*) from sys;
+#import Sys = (ausgabe) from sys;
 
 Vec3 :: struktur {
     x, y, z : s32;
@@ -49,5 +49,6 @@ i := typeinfo(typeof(h));
 
 iter feld: i.felder {
     Sys.ausgabe(feld.name);
+    Sys.ausgabe(" ");
 }
 

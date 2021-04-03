@@ -2,6 +2,9 @@
     Device_Type,
     WriteConsoleA as write_console,
     GetStdHandle as get_std_handle,
+
+    Security_Attributes,
+    CreateFileA as write_file,
 }
 
 ##(
@@ -16,10 +19,24 @@ Device_Type :: enum {
     STD_ERROR_HANDLE  :: -12;
 }
 
+Security_Attributes :: struktur {
+    nLength              : u32;
+    lpSecurityDescriptor : *void;
+    bInheritHandle       : bool;
+}
+
 GetStdHandle  :: proc(device_type            : u32) -> *void #sys_call "kernel32.dll";
 WriteConsoleA :: proc(hConsoleOutput         : *void,
                       lpBuffer               : *void,
                       nNumberOfCharsToWrite  : u32,
                       lpNumberOfCharsWritten : *u32,
                       lpReserved             : *void) #sys_call "kernel32.dll";
+
+CreateFileA :: proc(lpFileName: *void,
+                    dwDesiredAccess: u32,
+                    dwShareMode: u32,
+                    lpSecurityAttributes: *Security_Attributes,
+                    dwCreationDisposition: u32,
+                    dwFlagsAndAttributes: u32,
+                    hTemplateFile: *void) -> *void #sys_call "kernel32.dll";
 
