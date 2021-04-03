@@ -63,6 +63,7 @@ enum Token_Kind {
     T_LSHIFT,
     T_RSHIFT,
 
+    T_CHAR,
     T_INT,
     T_FLOAT,
     T_STR,
@@ -246,6 +247,25 @@ recurse:
         } else if ( AT(0) == ',' ) {
             NEXT();
             token_push(&result, token_str(T_COMMA, ",", 1, file, line, col));
+        } else if ( AT(0) == '\'' ) {
+            NEXT();
+
+            char *start = c;
+            if ( AT(0) == '\\' ) {
+                NEXT();
+            }
+
+            NEXT();
+            if ( AT(0) != '\'' ) {
+                Loc loc = loc_new(file, line, col);
+                report_error(&loc, "abschließendes ' erwartet");
+            }
+            NEXT();
+
+            uint32_t len = 1;
+            char *val = token_val(start, len);
+
+            token_push(&result, token_str(T_CHAR, val, 1, file, line, col));
         } else if ( AT(0) == ':' ) {
             NEXT();
             token_push(&result, token_str(T_COLON, ":", 1, file, line, col));

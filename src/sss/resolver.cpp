@@ -38,6 +38,7 @@ Scope *curr_scope;
 
 enum Value_Kind {
     VAL_NONE,
+    VAL_CHAR,
     VAL_INT,
     VAL_STR,
     VAL_FLOAT,
@@ -47,6 +48,7 @@ struct Value {
     Value_Kind kind;
 
     union {
+        char    chr;
         int32_t i32;
         float   f32;
         char *  str;
@@ -67,6 +69,7 @@ enum Type_Kind {
     TYPE_COMPLETING,
 
     TYPE_VOID,
+    TYPE_CHAR,
 
     TYPE_U8,
     TYPE_U16,
@@ -148,6 +151,7 @@ enum { PTR_SIZE = 8 };
 uint32_t type_id   = 1;
 
 Type *type_void;
+Type *type_char;
 Type *type_u8;
 Type *type_u16;
 Type *type_u32;
@@ -190,10 +194,24 @@ to_str(Type *type) {
             buf_printf(result, "[] %s", to_str(TARRAY(type)->base));
         } break;
 
+        case TYPE_STRING: {
+            buf_printf(result, "string");
+        } break;
+
         default: {
             buf_printf(result, "%s", type->name);
         } break;
     }
+
+    return result;
+}
+
+Value
+val_char(char val) {
+    Value result = {};
+
+    result.kind = VAL_CHAR;
+    result.chr  = val;
 
     return result;
 }
@@ -355,6 +373,13 @@ type_isptr(Type *type) {
 bool
 type_issigned(Type *type) {
     bool result = type->kind >= TYPE_S8 && type->kind <= TYPE_S64;
+
+    return result;
+}
+
+bool
+type_isindexable(Type *type) {
+    bool result = type->kind == TYPE_ARRAY || type->kind == TYPE_STRING;
 
     return result;
 }
@@ -744,6 +769,10 @@ resolve_expr(Expr *expr, Type *given_type = NULL) {
     }
 
     switch ( expr->kind ) {
+        case EXPR_CHAR: {
+            result = operand_const(type_char, val_char(ECHR(expr)->val));
+        } break;
+
         case EXPR_STR: {
             result = operand_const(type_string, val_str(ESTR(expr)->val));
         } break;
@@ -878,14 +907,19 @@ resolve_expr(Expr *expr, Type *given_type = NULL) {
 
         case EXPR_INDEX: {
             Operand *base = resolve_expr(EINDEX(expr)->base);
-            assert(base->type && base->type->kind == TYPE_ARRAY);
+            assert(base->type && type_isindexable(base->type));
             Operand *index = resolve_expr(EINDEX(expr)->index);
 
             if ( !type_isint(index->type) ) {
                 report_error(EINDEX(expr)->index, "index muß vom datentyp int sein, bekommen %s", to_str(index->type));
             }
 
-            result = operand(TARRAY(base->type)->base);
+            if ( IS_TARRAY(base->type) ) {
+                result = operand(TARRAY(base->type)->base);
+            } else {
+                assert(IS_TSTR(base->type));
+                result = operand(type_char);
+            }
         } break;
 
         case EXPR_PAREN: {
@@ -1736,6 +1770,7 @@ resolver_init() {
     curr_scope    = global_scope;
 
     type_void     = type_new(0, TYPE_VOID);
+    type_char     = type_new(1, TYPE_CHAR);
     type_u8       = type_new(1, TYPE_U8);
     type_u16      = type_new(2, TYPE_U16);
     type_u32      = type_new(4, TYPE_U32);
@@ -1752,6 +1787,7 @@ resolver_init() {
     type_variadic = type_new(0, TYPE_VARIADIC);
 
     sym_push_sys("void",   type_void);
+    sym_push_sys("char",   type_char);
     sym_push_sys("u8",     type_u8);
     sym_push_sys("u16",    type_u16);
     sym_push_sys("u32",    type_u32);

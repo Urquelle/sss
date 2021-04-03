@@ -64,6 +64,7 @@ enum Expr_Kind {
 
     EXPR_AT,
     EXPR_STR,
+    EXPR_CHAR,
     EXPR_INT,
     EXPR_FLOAT,
     EXPR_BOOL,
@@ -97,6 +98,10 @@ struct Expr_At : Expr {
 
 struct Expr_Int : Expr {
     int64_t val;
+};
+
+struct Expr_Char : Expr {
+    char val;
 };
 
 struct Expr_Float : Expr {
@@ -693,6 +698,15 @@ expr_int(Ast_Elem *loc, int64_t val) {
     return result;
 }
 
+Expr_Char *
+expr_char(Loc *loc, char val) {
+    STRUCTK(Expr_Char, EXPR_CHAR);
+
+    result->val = val;
+
+    return result;
+}
+
 Expr_Float *
 expr_float(Ast_Elem *loc, float val) {
     STRUCTK(Expr_Float, EXPR_FLOAT);
@@ -982,6 +996,9 @@ parse_expr_base(Token_List *tokens) {
     if ( token_is(tokens, T_INT) ) {
         Token *t = token_read(tokens);
         result = expr_int(curr, t->val_int);
+    } else if ( token_is(tokens, T_CHAR) ) {
+        Token *t = token_read(tokens);
+        result = expr_char(curr, t->val_str[0]);
     } else if ( token_is(tokens, T_STR) ) {
         Token *t = token_read(tokens);
         result = expr_str(curr, t->val_str);

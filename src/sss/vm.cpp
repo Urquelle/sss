@@ -23,6 +23,7 @@ struct Basic_Block {
 
 #define VALUES      \
     X(VAL_NONE)     \
+    X(VAL_CHAR)     \
     X(VAL_INT)      \
     X(VAL_FLOAT)    \
     X(VAL_BOOL)     \
@@ -39,6 +40,7 @@ struct Value : Loc {
     int32_t    size;
 
     union {
+        char      chr_val;
         int64_t   int_val;
         float     flt_val;
         bool      bool_val;
@@ -190,6 +192,7 @@ void               bytecode_init(Bytecode *bc);
 void               bytecode_typespec(Bytecode *bc, Typespec *typespec);
 Value              val_none();
 Value              val_array(Values elems, uint32_t num_elems);
+Value              val_char(char val);
 Value              val_int(int64_t val, uint32_t size = 4);
 Value              val_str(char *ptr);
 Value              val_bool(bool val);
@@ -1031,6 +1034,16 @@ val_none() {
 
     result.kind    = VAL_NONE;
     result.int_val = 0;
+
+    return result;
+}
+
+Value
+val_char(char val) {
+    Value result = {};
+
+    result.kind    = VAL_CHAR;
+    result.chr_val = val;
 
     return result;
 }
@@ -1936,6 +1949,10 @@ bytecode_op(Loc *loc, Bytecode *bc, uint32_t unary_op) {
 void
 bytecode_expr(Bytecode *bc, Expr *expr, uint32_t flags = BYTECODEFLAG_NONE) {
     switch ( expr->kind ) {
+        case EXPR_CHAR: {
+            bytecode_emit_const(expr, bc, val_char(ECHR(expr)->val));
+        } break;
+
         case EXPR_INT: {
             assert(EINT(expr)->type);
             bytecode_emit_const(expr, bc, val_int(EINT(expr)->val, EINT(expr)->type->size));
@@ -2786,14 +2803,25 @@ step(Vm *vm) {
                 base = val_array(VCMPND(base)->elems, VCMPND(base)->num_elems);
             }
 
-            assert(IS_VARRAY(base));
-            Obj_Array *arr = (Obj_Array *)base.obj_val;
+            if ( IS_VARRAY(base) ) {
+                Obj_Array *arr = VARRAY(base);
 
-            if ( index.int_val >= arr->num_elems ) {
-                report_error(instr, "index liegt außerhalb der array grenzen");
+                if ( index.int_val >= arr->num_elems ) {
+                    report_error(instr, "index liegt außerhalb der array grenzen");
+                }
+
+                stack_push(vm, arr->elems[index.int_val]);
+            } else {
+                assert(IS_VSTR(base));
+
+                Obj_String *str = VSTR(base);
+
+                if ( index.int_val >= str->size ) {
+                    report_error(instr, "index liegt außerhalb der string grenzen");
+                }
+
+                stack_push(vm, val_char(str->ptr[index.int_val]));
             }
-
-            stack_push(vm, arr->elems[index.int_val]);
         } break;
 
         case BYTECODEOP_MUL: {
@@ -3287,6 +3315,10 @@ obj_type_from_type(Type *type) {
             result = obj_type(type->id, "void", type->size);
         } break;
 
+        case TYPE_CHAR: {
+            result = obj_type(type->id, "char", type->size);
+        } break;
+
         case TYPE_U8: {
             result = obj_type(type->id, "u8", type->size);
         } break;
@@ -3448,6 +3480,7 @@ bytecode_init(Bytecode *bc) {
     } while(0)
 
     REGISTER_TYPE(val_none(),      "void");
+    REGISTER_TYPE(val_char(0),     "char");
     REGISTER_TYPE(val_int(0),      "u8");
     REGISTER_TYPE(val_int(0),      "u16");
     REGISTER_TYPE(val_int(0),      "u32");

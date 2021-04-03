@@ -169,6 +169,17 @@ struct Loc {
 
 Loc loc_none = { "<unbekannt>", 0, 0 };
 
+Loc
+loc_new(char *file, size_t line, size_t col) {
+    Loc result = {};
+
+    result.file = file;
+    result.line = line;
+    result.col  = col;
+
+    return result;
+}
+
 void
 loc_copy(Loc *from, Loc *to) {
     to->file = from->file;

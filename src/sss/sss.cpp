@@ -73,6 +73,7 @@ Scope                  * scope_new(char *name, Scope *parent = NULL);
 Sym                    * sym_push_scope(Loc *loc, Scope *scope, char *name, Type *type);
 void                     type_complete(Type *type);
 
+#define ECHR(Expr)            ((Expr_Char *)(Expr))
 #define EINT(Expr)            ((Expr_Int *)(Expr))
 #define EFLOAT(Expr)          ((Expr_Float *)(Expr))
 #define ESTR(Expr)            ((Expr_Str *)(Expr))
@@ -126,6 +127,9 @@ void                     type_complete(Type *type);
 #define TPTR(T)               ((Type_Ptr *)(T))
 #define TCMPND(T)             ((Type_Compound *)(T))
 #define TVARIADIC(T)          ((Type_Variadic *)(T))
+
+#define IS_TARRAY(T)          ((T)->kind == TYPE_ARRAY)
+#define IS_TSTR(T)            ((T)->kind == TYPE_STRING)
 
 #define IS_VOBJ(Val)          ((Val).kind == VAL_OBJ)
 #define IS_VARRAY(Val)        (IS_VOBJ(Val) && (Val).obj_val->kind == OBJ_ARRAY)
