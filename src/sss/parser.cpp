@@ -29,6 +29,7 @@ char *keyword_type;
 char *keyword_typeof;
 char *keyword_typeinfo;
 char *keyword_using;
+char *keyword_union;
 char *keyword_while;
 
 #define STRUCT(Struct) \
@@ -323,20 +324,12 @@ struct Stmt_Match : Stmt {
     size_t num_lines;
 };
 
-struct Enum_Field : Ast_Elem {
-    char      * name;
-    Sym       * sym;
-    Type      * type;
-    Operand   * operand;
-    Expr      * value;
-};
-
-struct Struct_Field : Ast_Elem {
+struct Aggr_Field : Ast_Elem {
     char     * name;
     Sym      * sym;
     Type     * type;
     Typespec * typespec;
-    Expr     * default_value;
+    Expr     * value;
     Operand  * operand;
     int32_t    offset;
 };
@@ -362,6 +355,7 @@ enum Decl_Kind {
     DECL_TYPE,
     DECL_ENUM,
     DECL_STRUCT,
+    DECL_UNION,
     DECL_PROC,
     DECL_API,
     DECL_IMPL,
@@ -387,12 +381,17 @@ struct Decl_Const : Decl {
 };
 
 struct Decl_Enum : Decl {
-    Enum_Fields fields;
-    size_t num_fields;
+    Aggr_Fields fields;
+    size_t      num_fields;
 };
 
 struct Decl_Struct : Decl {
-    Struct_Fields fields;
+    Aggr_Fields fields;
+    size_t num_fields;
+};
+
+struct Decl_Union : Decl {
+    Aggr_Fields fields;
     size_t num_fields;
 };
 
@@ -420,6 +419,7 @@ enum Typespec_Kind {
     TYPESPEC_NAME,
     TYPESPEC_PROC,
     TYPESPEC_VARARG,
+    TYPESPEC_UNION,
 };
 struct Typespec : Ast_Elem {
     Typespec_Kind   kind;
@@ -445,6 +445,11 @@ struct Typespec_Proc : Typespec {
     uint32_t     num_params;
     Proc_Params  rets;
     uint32_t     num_rets;
+};
+
+struct Typespec_Union : Typespec {
+    Aggr_Fields fields;
+    uint32_t    num_fields;
 };
 
 struct Proc_Param : Loc {
@@ -1239,26 +1244,16 @@ match_line(Ast_Elem *loc, Expr *resolution, Stmt *stmt) {
     return result;
 }
 
-Enum_Field *
-enum_field(Ast_Elem *loc, char *name, Expr *value) {
-    STRUCT(Enum_Field);
+Aggr_Field *
+aggr_field(Loc *loc, char *name, Typespec *typespec, Expr *value) {
+    STRUCT(Aggr_Field);
 
-    result->name  = name;
-    result->value = value;
-
-    return result;
-}
-
-Struct_Field *
-struct_field(Ast_Elem *loc, char *name, Typespec *typespec, Expr *default_value) {
-    STRUCT(Struct_Field);
-
-    result->name          = name;
-    result->typespec      = typespec;
-    result->default_value = default_value;
-    result->type          = NULL;
-    result->operand       = NULL;
-    result->offset        = 0;
+    result->name      = name;
+    result->typespec  = typespec;
+    result->value     = value;
+    result->type      = NULL;
+    result->operand   = NULL;
+    result->offset    = 0;
 
     return result;
 }
@@ -1296,22 +1291,22 @@ decl_const(Ast_Elem *loc, char *name, Typespec *typespec, Expr *expr) {
 }
 
 Decl_Enum *
-decl_enum(Ast_Elem *loc, char *name, Enum_Fields fields, size_t num_fields) {
+decl_enum(Ast_Elem *loc, char *name, Aggr_Fields fields, size_t num_fields) {
     STRUCTK(Decl_Enum, DECL_ENUM);
 
     result->name       = name;
-    result->fields     = (Enum_Fields)MEMDUP(fields);
+    result->fields     = (Aggr_Fields)MEMDUP(fields);
     result->num_fields = num_fields;
 
     return result;
 }
 
 Decl_Struct *
-decl_struct(Ast_Elem *loc, char *name, Struct_Fields fields, size_t num_fields) {
+decl_struct(Loc *loc, char *name, Aggr_Fields fields, size_t num_fields) {
     STRUCTK(Decl_Struct, DECL_STRUCT);
 
     result->name       = name;
-    result->fields     = (Struct_Fields)MEMDUP(fields);
+    result->fields     = (Aggr_Fields)MEMDUP(fields);
     result->num_fields = num_fields;
 
     return result;
@@ -1594,6 +1589,16 @@ typespec_proc(Ast_Elem *loc, Proc_Params params, uint32_t num_params, Proc_Param
     return result;
 }
 
+Typespec_Union *
+typespec_union(Loc *loc, Aggr_Fields fields, uint32_t num_fields) {
+    STRUCTK(Typespec_Union, TYPESPEC_UNION);
+
+    result->fields     = (Aggr_Fields)MEMDUP(fields);
+    result->num_fields = num_fields;
+
+    return result;
+}
+
 Typespec *
 parse_typespec(Token_List *tokens) {
     Typespec *result = NULL;
@@ -1603,45 +1608,51 @@ parse_typespec(Token_List *tokens) {
         return result;
     }
 
-    if ( curr->kind == T_ASTERISK ) {
-        token_eat(tokens);
-        result = typespec_ptr(curr, parse_typespec(tokens));
-    } else if ( token_match(tokens, T_ELLIPSIS) ) {
-        result = typespec_vararg(curr);
-    } else if ( curr->kind == T_LBRACKET ) {
-        token_eat(tokens);
-        Expr *num_elems = NULL;
+    if ( keyword_matches(tokens, keyword_union) ) {
+        Aggr_Fields fields = parse_aggr_block(tokens);
 
-        if ( !token_is(tokens, T_RBRACKET) ) {
-            num_elems = parse_expr(tokens);
+        result = typespec_union(curr, fields, buf_len(fields));
+    } else {
+        if ( curr->kind == T_ASTERISK ) {
+            token_eat(tokens);
+            result = typespec_ptr(curr, parse_typespec(tokens));
+        } else if ( token_match(tokens, T_ELLIPSIS) ) {
+            result = typespec_vararg(curr);
+        } else if ( curr->kind == T_LBRACKET ) {
+            token_eat(tokens);
+            Expr *num_elems = NULL;
+
+            if ( !token_is(tokens, T_RBRACKET) ) {
+                num_elems = parse_expr(tokens);
+            }
+            token_expect(tokens, T_RBRACKET);
+
+            result = typespec_array(curr, parse_typespec(tokens), num_elems);
+        } else if ( keyword_matches(tokens, keyword_proc) ) {
+            token_expect(tokens, T_LPAREN);
+            Proc_Params params = NULL;
+
+            if ( !token_is(tokens, T_RPAREN) ) {
+                do {
+                    buf_push(params, parse_proc_param(tokens));
+                } while ( token_match(tokens, T_COMMA) );
+            }
+
+            token_expect(tokens, T_RPAREN);
+
+            Proc_Params rets = NULL;
+            if ( token_match(tokens, T_ARROW) ) {
+                do {
+                    buf_push(rets, parse_proc_param(tokens));
+                    token_match(tokens, T_COMMA);
+                } while ( !token_is(tokens, T_SEMICOLON) && !token_is(tokens, T_COLON) );
+            }
+
+            result = typespec_proc(curr, params, (uint32_t)buf_len(params), rets, (uint32_t)buf_len(rets));
+        } else if ( curr->kind == T_IDENT ) {
+            Token *ident = token_read(tokens);
+            result = typespec_name(curr, ident->val_str);
         }
-        token_expect(tokens, T_RBRACKET);
-
-        result = typespec_array(curr, parse_typespec(tokens), num_elems);
-    } else if ( keyword_matches(tokens, keyword_proc) ) {
-        token_expect(tokens, T_LPAREN);
-        Proc_Params params = NULL;
-
-        if ( !token_is(tokens, T_RPAREN) ) {
-            do {
-                buf_push(params, parse_proc_param(tokens));
-            } while ( token_match(tokens, T_COMMA) );
-        }
-
-        token_expect(tokens, T_RPAREN);
-
-        Proc_Params rets = NULL;
-        if ( token_match(tokens, T_ARROW) ) {
-            do {
-                buf_push(rets, parse_proc_param(tokens));
-                token_match(tokens, T_COMMA);
-            } while ( !token_is(tokens, T_SEMICOLON) && !token_is(tokens, T_COLON) );
-        }
-
-        result = typespec_proc(curr, params, (uint32_t)buf_len(params), rets, (uint32_t)buf_len(rets));
-    } else if ( curr->kind == T_IDENT ) {
-        Token *ident = token_read(tokens);
-        result = typespec_name(curr, ident->val_str);
     }
 
     return result;
@@ -1661,41 +1672,11 @@ parse_decl_const(Token_List *tokens, char *name, Typespec *typespec) {
     return decl_const(expr, name, typespec, expr);
 }
 
-Decl_Enum *
-parse_decl_enum(Token_List *tokens, char *name) {
-    Token *curr = token_get(tokens);
+Aggr_Fields
+parse_aggr_block(Token_List *tokens) {
     token_expect(tokens, T_LBRACE);
 
-    Enum_Fields fields = NULL;
-
-    if ( !token_is(tokens, T_RBRACE) ) {
-        do {
-            Token *field_name = token_get(tokens);
-            token_expect(tokens, T_IDENT);
-
-            Expr *value = NULL;
-            if ( token_match(tokens, T_COLON) ) {
-                token_expect(tokens, T_COLON);
-                value = parse_expr(tokens);
-            }
-
-            buf_push(fields, enum_field(field_name, field_name->val_str, value));
-
-            token_expect(tokens, T_SEMICOLON);
-        } while ( !token_is(tokens, T_RBRACE) );
-    }
-
-    token_expect(tokens, T_RBRACE);
-
-    return decl_enum(curr, name, fields, buf_len(fields));
-}
-
-Decl_Struct *
-parse_decl_struct(Token_List *tokens, char *name) {
-    Token *curr = token_get(tokens);
-    token_expect(tokens, T_LBRACE);
-
-    Struct_Fields fields = NULL;
+    Aggr_Fields fields = NULL;
     if ( !token_is(tokens, T_RBRACE) ) {
         do {
             Token **field_names = NULL;
@@ -1717,13 +1698,51 @@ parse_decl_struct(Token_List *tokens, char *name) {
 
             for ( int field_name_index = 0; field_name_index < buf_len(field_names); ++field_name_index ) {
                 Token *field_name = field_names[field_name_index];
-                buf_push(fields, struct_field(field_name, field_name->val_str, typespec, value));
+                buf_push(fields, aggr_field(field_name, field_name->val_str, typespec, value));
             }
 
             token_expect(tokens, T_SEMICOLON);
         } while ( !token_is(tokens, T_RBRACE) );
     }
+
     token_expect(tokens, T_RBRACE);
+
+    return fields;
+}
+
+Decl_Enum *
+parse_decl_enum(Token_List *tokens, char *name) {
+    Token *curr = token_get(tokens);
+    token_expect(tokens, T_LBRACE);
+
+    Aggr_Fields fields = NULL;
+    if ( !token_is(tokens, T_RBRACE) ) {
+        do {
+            Token *field_name = token_get(tokens);
+            token_expect(tokens, T_IDENT);
+
+            Expr *value = NULL;
+            if ( token_match(tokens, T_COLON) ) {
+                token_expect(tokens, T_COLON);
+                value = parse_expr(tokens);
+            }
+
+            buf_push(fields, aggr_field(field_name, field_name->val_str, typespec_name(field_name, intern_str("u32")), value));
+
+            token_expect(tokens, T_SEMICOLON);
+        } while ( !token_is(tokens, T_RBRACE) );
+    }
+
+    token_expect(tokens, T_RBRACE);
+
+    return decl_enum(curr, name, fields, buf_len(fields));
+}
+
+Decl_Struct *
+parse_decl_struct(Token_List *tokens, char *name) {
+    Token *curr = token_get(tokens);
+
+    Aggr_Fields fields = parse_aggr_block(tokens);
 
     return decl_struct(curr, name, fields, buf_len(fields));
 }
@@ -2248,6 +2267,7 @@ parse(Token_List *tokens) {
     KEYWORD_K(typeof, typeof);
     KEYWORD(typeinfo);
     KEYWORD_K(mit, using);
+    KEYWORD(union);
     KEYWORD_K(sizeof, sizeof);
     KEYWORD_K(solange, while);
 #undef KEYWORD

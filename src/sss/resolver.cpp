@@ -94,6 +94,7 @@ enum Type_Kind {
     TYPE_NAMESPACE,
     TYPE_COMPOUND,
     TYPE_VARIADIC,
+    TYPE_UNION,
 };
 
 struct Type {
@@ -123,16 +124,21 @@ struct Type_Compound : Type {
 };
 
 struct Type_Struct : Type {
-    Struct_Fields fields;
-    size_t        num_fields;
+    Aggr_Fields fields;
+    size_t      num_fields;
 };
 
 struct Type_String : Type {
 };
 
 struct Type_Enum : Type {
-    Enum_Fields fields;
-    size_t num_fields;
+    Aggr_Fields fields;
+    size_t      num_fields;
+};
+
+struct Type_Union : Type {
+    Aggr_Fields fields;
+    size_t      num_fields;
 };
 
 struct Type_Proc : Type {
@@ -320,6 +326,37 @@ type_incomplete_enum(Sym *sym) {
     return result;
 }
 
+Type_Union *
+type_incomplete_union(Sym *sym) {
+    Type_Union *result = urq_allocs(Type_Union);
+
+    result->kind  = TYPE_INCOMPLETE;
+    result->sym   = sym;
+    result->size  = 0;
+    result->align = 0;
+    result->id    = type_id++;
+    result->scope = scope_new(sym->name);
+
+    buf_push(types, result);
+
+    return result;
+}
+
+Type_Union *
+type_union() {
+    Type_Union *result = urq_allocs(Type_Union);
+
+    result->kind  = TYPE_UNION;
+    result->size  = 0;
+    result->align = 0;
+    result->id    = type_id++;
+    result->scope = scope_new("union");
+
+    buf_push(types, result);
+
+    return result;
+}
+
 Type *
 type_namespace(char *name) {
     Type *result = type_new(0, TYPE_NAMESPACE);
@@ -414,7 +451,7 @@ type_iscastable(Type *left, Type *right) {
         }
 
         for ( int i = 0; i < TSTRUCT(left)->num_fields; ++i ) {
-            Struct_Field *field = TSTRUCT(left)->fields[i];
+            Aggr_Field *field = TSTRUCT(left)->fields[i];
             Compound_Elem *elem = TCMPND(right)->elems[i];
 
             if ( !type_iscastable(field->type, elem->type) ) {
@@ -949,7 +986,7 @@ resolve_expr(Expr *expr, Type *given_type = NULL) {
                 operand_cast(param->type, arg);
                 /* @AUFGABE: array und zeiger datentypen auf kompatibilität überprüfen */
                 if ( !type_are_compatible(param->type, arg->type) ) {
-                    report_error(expr, "datentyp erwartet %s, bekommen %s", to_str(param->type), to_str(arg->type));
+                    report_error(expr, "datentyp %s für %s (%d) erwartet, bekommen %s", to_str(param->type), param->name, i+1, to_str(arg->type));
                 }
             }
 
@@ -1006,7 +1043,7 @@ resolve_expr(Expr *expr, Type *given_type = NULL) {
                 } else {
                     Compound_Elems args = NULL;
                     for ( int i = 0; i < TSTRUCT(given_type)->num_fields; ++i ) {
-                        Struct_Field  * struct_field = TSTRUCT(given_type)->fields[i];
+                        Aggr_Field    * struct_field = TSTRUCT(given_type)->fields[i];
                         Compound_Elem * arg          = ECMPND(expr)->elems[i];
 
                         if ( arg->name ) {
@@ -1093,6 +1130,34 @@ resolve_typespec(Typespec *typespec) {
         } break;
 
         case TYPESPEC_PROC: {
+        } break;
+
+        case TYPESPEC_UNION: {
+            Type *type = type_union();
+
+            if ( !TSUNION(typespec)->num_fields ) {
+                report_error(typespec, "union muss mindestens ein feld enthalten");
+            }
+
+            type->scope->parent = curr_scope;
+            Scope *prev_scope = scope_set(type->scope);
+            resolve_aggr_fields(TSUNION(typespec)->fields, (uint32_t)TSUNION(typespec)->num_fields);
+            scope_set(prev_scope);
+            type->scope->parent = NULL;
+
+            for ( uint32_t i = 0; i < TSUNION(typespec)->num_fields; ++i ) {
+                uint32_t size = TSUNION(typespec)->fields[i]->type->size;
+                if ( size > type->size ) {
+                    type->size = size;
+                }
+
+                type->align = MAX(size, TSUNION(typespec)->fields[i]->type->align);
+            }
+
+            (TUNION(type))->fields     = TSUNION(typespec)->fields;
+            (TUNION(type))->num_fields = TSUNION(typespec)->num_fields;
+
+            result = type;
         } break;
 
         default: {
@@ -1402,13 +1467,15 @@ resolve_directive(Directive *dir) {
 
                     if ( export_sym ) {
                         bool actually_import = false;
+                        char *export_name = (module_sym->alias) ? module_sym->alias : module_sym->name;
+
                         if ( DIRIMPORT(dir)->wildcard ) {
                             actually_import = true;
                         } else {
                             for ( int j = 0; j < DIRIMPORT(dir)->num_syms; ++j ) {
                                 Module_Sym *dir_sym = DIRIMPORT(dir)->syms[j];
 
-                                if ( dir_sym->name == export_sym->name ) {
+                                if ( dir_sym->name == export_name ) {
                                     actually_import = true;
                                     break;
                                 }
@@ -1416,7 +1483,6 @@ resolve_directive(Directive *dir) {
                         }
 
                         if ( actually_import ) {
-                            char *export_name = (module_sym->alias) ? module_sym->alias : module_sym->name;
                             Sym *push_sym = sym_new(module_sym, export_sym->kind, export_name);
 
                             push_sym->state = export_sym->state;
@@ -1480,20 +1546,9 @@ resolve_directives(Directive **directives) {
 }
 
 void
-type_complete_struct(Type_Struct *type) {
-    Decl *decl = type->sym->decl;
-
-    assert(decl->kind == DECL_STRUCT);
-    type->scope = scope_enter(decl->name);
-
-    if ( !DSTRUCT(decl)->num_fields ) {
-        report_error(decl, "datenstruktur %s muss mindestens ein feld enthalten", decl->name);
-    }
-
-    type->kind = TYPE_STRUCT;
-
-    for ( size_t i = 0; i < DSTRUCT(decl)->num_fields; i++ ) {
-        Struct_Field *field = DSTRUCT(decl)->fields[i];
+resolve_aggr_fields(Aggr_Fields fields, uint32_t num_fields) {
+    for ( size_t i = 0; i < num_fields; i++ ) {
+        Aggr_Field *field = fields[i];
 
         Type *field_type = 0;
         if ( field->typespec ) {
@@ -1501,8 +1556,8 @@ type_complete_struct(Type_Struct *type) {
         }
 
         Operand *operand = NULL;
-        if ( field->default_value ) {
-            operand = resolve_expr(field->default_value, field_type);
+        if ( field->value ) {
+            operand = resolve_expr(field->value, field_type);
         }
 
         if ( !field_type ) {
@@ -1521,7 +1576,21 @@ type_complete_struct(Type_Struct *type) {
 
         sym_push_var(field, field->name, field_type);
     }
+}
 
+void
+type_complete_struct(Type_Struct *type) {
+    Decl *decl = type->sym->decl;
+
+    assert(decl->kind == DECL_STRUCT);
+    type->kind = TYPE_STRUCT;
+
+    if ( !DSTRUCT(decl)->num_fields ) {
+        report_error(decl, "datenstruktur %s muss mindestens ein feld enthalten", decl->name);
+    }
+
+    type->scope = scope_enter(decl->name);
+    resolve_aggr_fields(DSTRUCT(decl)->fields, (uint32_t)DSTRUCT(decl)->num_fields);
     scope_leave();
 
     uint32_t offset = 0;
@@ -1550,7 +1619,7 @@ type_complete_enum(Type_Enum *type) {
     }
 
     for ( size_t i = 0; i < DENUM(decl)->num_fields; i++ ) {
-        Enum_Field *field = DENUM(decl)->fields[i];
+        Aggr_Field *field = DENUM(decl)->fields[i];
 
         Operand *op = NULL;
         if ( field->value ) {
@@ -1586,6 +1655,34 @@ type_complete_enum(Type_Enum *type) {
 }
 
 void
+type_complete_union(Type_Union *type) {
+    Decl *decl = type->sym->decl;
+
+    assert(IS_DUNION(decl));
+    type->kind = TYPE_UNION;
+
+    if ( !DUNION(decl)->num_fields ) {
+        report_error(decl, "union %s muss mindestens ein feld enthalten", decl->name);
+    }
+
+    type->scope = scope_enter(decl->name);
+    resolve_aggr_fields(DUNION(decl)->fields, (uint32_t)DUNION(decl)->num_fields);
+    scope_leave();
+
+    for ( uint32_t i = 0; i < DUNION(decl)->num_fields; ++i ) {
+        uint32_t size = DUNION(decl)->fields[i]->type->size;
+        if ( size > type->size ) {
+            type->size = size;
+        }
+
+        type->align = MAX(size, DUNION(decl)->fields[i]->type->align);
+    }
+
+    (TUNION(type))->fields     = DUNION(decl)->fields;
+    (TUNION(type))->num_fields = DUNION(decl)->num_fields;
+}
+
+void
 type_complete(Type *type) {
     if ( type->kind == TYPE_COMPLETING ) {
         assert(!"zirkuläre abhängigkeit festgestellt!");
@@ -1596,10 +1693,13 @@ type_complete(Type *type) {
     type->kind = TYPE_COMPLETING;
     Decl *decl = type->sym->decl;
 
-    if ( decl->kind == DECL_STRUCT ) {
-        type_complete_struct((Type_Struct *)type);
+    if ( IS_DSTRUCT(decl) ) {
+        type_complete_struct(TSTRUCT(type));
+    } else if ( IS_DENUM(decl) ) {
+        type_complete_enum(TENUM(type));
     } else {
-        type_complete_enum((Type_Enum *)type);
+        assert(IS_DUNION(decl));
+        type_complete_union(TUNION(type));
     }
 }
 
@@ -1671,14 +1771,16 @@ register_global_syms(Stmts stmts) {
             } break;
         }
 
-        if ( decl->kind == DECL_STRUCT || decl->kind == DECL_ENUM) {
+        if ( IS_DAGGR(decl) ) {
             sym->state = SYMSTATE_RESOLVED;
 
-            if ( decl->kind == DECL_STRUCT ) {
+            if ( IS_DSTRUCT(decl) ) {
                 sym->type = type_incomplete_struct(sym);
-            } else {
-                assert(decl->kind == DECL_ENUM);
+            } else if ( IS_DENUM(decl) ) {
                 sym->type = type_incomplete_enum(sym);
+            } else {
+                assert(IS_DUNION(decl));
+                sym->type = type_incomplete_union(sym);
             }
         }
     }

@@ -57,9 +57,10 @@ struct Value : Loc {
     X(OBJ_NAMESPACE)    \
     X(OBJ_STRUCT)       \
     X(OBJ_ENUM)         \
+    X(OBJ_UNION)        \
     X(OBJ_COMPOUND)     \
     X(OBJ_PTR)          \
-    X(OBJ_STRUCT_FIELD) \
+    X(OBJ_AGGR_FIELD)   \
     X(OBJ_TYPE)         \
     X(OBJ_TYPE_FIELD)
 
@@ -131,7 +132,13 @@ struct Obj_Struct : Obj {
     Obj_String ** fieldnames_ordered;
 };
 
-struct Obj_Struct_Field : Obj {
+struct Obj_Union : Obj {
+    Obj_String *  name;
+    Table      *  fields;
+    Obj_String ** fieldnames_ordered;
+};
+
+struct Obj_Aggr_Field : Obj {
     Obj_String * name;
     Value        default_value;
 };
@@ -202,7 +209,7 @@ Call_Frame       * vm_curr_frame(Vm *vm);
 Obj_Proc         * obj_proc();
 Obj_Proc         * as_proc(Value val);
 Obj_Struct       * as_struct(Value val);
-Obj_Struct_Field * as_struct_field(Value val);
+Obj_Aggr_Field * as_struct_field(Value val);
 
 #define AS_NAMESPACE(Val) ((Obj_Namespace *)(Val).obj_val)
 
@@ -246,6 +253,7 @@ struct Bytecode {
 
 #define BYTECODES                   \
     X(BYTECODEOP_HLT)               \
+    X(BYTECODEOP_AGGR_FIELD)        \
     X(BYTECODEOP_ALLOC)             \
     X(BYTECODEOP_ADDR)              \
     X(BYTECODEOP_NEG)               \
@@ -258,6 +266,7 @@ struct Bytecode {
     X(BYTECODEOP_COMPOUND)          \
     X(BYTECODEOP_CONST)             \
     X(BYTECODEOP_DIV)               \
+    X(BYTECODEOP_ENUM)              \
     X(BYTECODEOP_EXPORT_SYM)        \
     X(BYTECODEOP_INC)               \
     X(BYTECODEOP_INC_LOOP)          \
@@ -270,7 +279,7 @@ struct Bytecode {
     X(BYTECODEOP_LOAD_SYM)          \
     X(BYTECODEOP_LOAD_SYMREF)       \
     X(BYTECODEOP_LOAD_TYPEINFO)     \
-    X(BYTECODEOP_LOAD_TYPEOF)     \
+    X(BYTECODEOP_LOAD_TYPEOF)       \
     X(BYTECODEOP_MATCH_CASE)        \
     X(BYTECODEOP_MUL)               \
     X(BYTECODEOP_NAMED_COMPOUND)    \
@@ -289,10 +298,10 @@ struct Bytecode {
     X(BYTECODEOP_SCOPE_LEAVE)       \
     X(BYTECODEOP_SET_SYM)           \
     X(BYTECODEOP_STRUCT)            \
-    X(BYTECODEOP_STRUCT_FIELD)      \
     X(BYTECODEOP_SUB)               \
     X(BYTECODEOP_SUBSCRIPT)         \
-    X(BYTECODEOP_ENUM)              \
+    X(BYTECODEOP_TYPEDEF)           \
+    X(BYTECODEOP_UNION)             \
 
 enum Instr_Opcode {
 #define X(Elem) Elem,
@@ -816,11 +825,11 @@ obj_struct(Obj_String *name) {
     return result;
 }
 
-Obj_Struct_Field *
-obj_struct_field(Obj_String *name) {
-    Obj_Struct_Field *result = urq_allocs(Obj_Struct_Field);
+Obj_Aggr_Field *
+obj_aggr_field(Obj_String *name) {
+    Obj_Aggr_Field *result = urq_allocs(Obj_Aggr_Field);
 
-    result->kind = OBJ_STRUCT_FIELD;
+    result->kind = OBJ_AGGR_FIELD;
     result->name = name;
 
     return result;
@@ -1007,9 +1016,9 @@ obj_print(Obj *obj) {
             printf(")");
         } break;
 
-        case OBJ_STRUCT_FIELD: {
-            printf("struct_field: ");
-            obj_print(((Obj_Struct_Field *)obj)->name);
+        case OBJ_AGGR_FIELD: {
+            printf("aggr_field: ");
+            obj_print(((Obj_Aggr_Field *)obj)->name);
         } break;
 
         case OBJ_NAMESPACE: {
@@ -1164,8 +1173,8 @@ val_enum(char *name) {
 }
 
 Value
-val_struct_field(char *name) {
-    Value result = val_obj(obj_struct_field(obj_string(name)));
+val_aggr_field(char *name) {
+    Value result = val_obj(obj_aggr_field(obj_string(name)));
 
     return result;
 }
@@ -1855,11 +1864,11 @@ bytecode_debug(Vm *vm, Instr *instr) {
             printf("scope leave\n");
         } break;
 
-        case BYTECODEOP_STRUCT_FIELD: {
+        case BYTECODEOP_AGGR_FIELD: {
             Value val   = vm->stack[frame->sp-1];
             Value field = vm->stack[frame->sp-2];
 
-            printf("BYTECODEOP_STRUCT_FIELD [name: ");
+            printf("BYTECODEOP_AGGR_FIELD [name: ");
             val_print(field);
             printf("[value: ");
             val_print(val);
@@ -2096,6 +2105,35 @@ bytecode_expr(Bytecode *bc, Expr *expr, uint32_t flags = BYTECODEFLAG_NONE) {
 }
 
 void
+bytecode_aggr(Bytecode *bc, Aggr_Fields fields, uint32_t num_fields) {
+    for ( uint32_t i = 0; i < num_fields; ++i ) {
+        Aggr_Field *field = fields[i];
+
+        // feldnamen generieren {
+            Value field_val = val_aggr_field(field->name);
+            int32_t field_index = bytecode_push_constant(bc, field_val);
+            instr_push(field, bc, BYTECODEOP_PUSH, field_index);
+        // }
+
+        if ( field->typespec ) {
+            bytecode_typespec(bc, field->typespec);
+        } else {
+            instr_push(field, bc, BYTECODEOP_NONE);
+        }
+
+        // feldwert generieren {
+            if ( field->value ) {
+                bytecode_expr(bc, field->value);
+            } else {
+                instr_push(field, bc, BYTECODEOP_NONE);
+            }
+        // }
+
+        instr_push(field, bc, BYTECODEOP_AGGR_FIELD);
+    }
+}
+
+void
 bytecode_typespec(Bytecode *bc, Typespec *typespec) {
     assert(typespec);
 
@@ -2113,6 +2151,11 @@ bytecode_typespec(Bytecode *bc, Typespec *typespec) {
         case TYPESPEC_ARRAY: {
             int32_t index = bytecode_push_constant(bc, val_array(NULL, 0));
             instr_push(typespec, bc, BYTECODEOP_CONST, index);
+        } break;
+
+        case TYPESPEC_UNION: {
+            bytecode_aggr(bc, TSUNION(typespec)->fields, TSUNION(typespec)->num_fields);
+            instr_push(typespec, bc, BYTECODEOP_UNION);
         } break;
 
         default: {
@@ -2210,29 +2253,7 @@ bytecode_decl(Bytecode *bc, Decl *decl) {
             instr_push(decl, bc, BYTECODEOP_PUSH_SYM, name_index);
             instr_push(decl, bc, BYTECODEOP_PUSH, index);
 
-            for ( int i = 0; i < DENUM(decl)->num_fields; ++i ) {
-                Enum_Field *field = DENUM(decl)->fields[i];
-
-                // feldnamen generieren {
-                    Value field_val = val_struct_field(field->name);
-                    int32_t field_index = bytecode_push_constant(bc, field_val);
-                    instr_push(field, bc, BYTECODEOP_PUSH, field_index);
-                // }
-
-                int32_t type_index = bytecode_push_constant(bc, val_str("s32"));
-                instr_push(field, bc, BYTECODEOP_PUSH_TYPEVAL, type_index);
-
-                // feldwert generieren {
-                    if ( field->value ) {
-                        bytecode_expr(bc, field->value);
-                    } else {
-                        instr_push(field, bc, BYTECODEOP_NONE);
-                    }
-                // }
-
-                instr_push(field, bc, BYTECODEOP_STRUCT_FIELD);
-            }
-
+            bytecode_aggr(bc, DENUM(decl)->fields, (uint32_t)DENUM(decl)->num_fields);
             instr_push(decl, bc, BYTECODEOP_ENUM, (int32_t)DENUM(decl)->num_fields);
         } break;
 
@@ -2245,33 +2266,14 @@ bytecode_decl(Bytecode *bc, Decl *decl) {
             instr_push(decl, bc, BYTECODEOP_PUSH_SYM, name_index);
             instr_push(decl, bc, BYTECODEOP_PUSH, index);
 
-            for ( int i = 0; i < DSTRUCT(decl)->num_fields; ++i ) {
-                Struct_Field *field = DSTRUCT(decl)->fields[i];
-
-                // feldnamen generieren {
-                    Value field_val = val_struct_field(field->name);
-                    int32_t field_index = bytecode_push_constant(bc, field_val);
-                    instr_push(field, bc, BYTECODEOP_PUSH, field_index);
-                // }
-
-                if ( field->typespec ) {
-                    bytecode_typespec(bc, field->typespec);
-                } else {
-                    instr_push(field, bc, BYTECODEOP_NONE);
-                }
-
-                // feldwert generieren {
-                    if ( field->default_value ) {
-                        bytecode_expr(bc, field->default_value);
-                    } else {
-                        instr_push(field, bc, BYTECODEOP_NONE);
-                    }
-                // }
-
-                instr_push(field, bc, BYTECODEOP_STRUCT_FIELD);
-            }
-
+            bytecode_aggr(bc, DSTRUCT(decl)->fields, (uint32_t)DSTRUCT(decl)->num_fields);
             instr_push(decl, bc, BYTECODEOP_STRUCT, (int32_t)DSTRUCT(decl)->num_fields);
+        } break;
+
+        case DECL_TYPE: {
+            int32_t index = bytecode_push_constant(bc, val_str(DTYPE(decl)->name));
+            bytecode_typespec(bc, DTYPE(decl)->typespec);
+            instr_push(decl, bc, BYTECODEOP_TYPEDEF, index);
         } break;
 
         default: {
@@ -3205,9 +3207,35 @@ step(Vm *vm) {
             Value structure = stack_pop(vm);
 
             for ( int i = 0; i < num_fields; ++i ) {
-                Obj_Struct_Field *field = ((Obj_Struct_Field *)elems[i].obj_val);
+                Obj_Aggr_Field *field = ((Obj_Aggr_Field *)elems[i].obj_val);
                 table_set(((Obj_Struct *)structure.obj_val)->fields, field->name, field->default_value);
                 buf_push(((Obj_Struct *)structure.obj_val)->fieldnames_ordered, field->name);
+            }
+        } break;
+
+        case BYTECODEOP_UNION: {
+            int32_t num_fields = instr->op1;
+
+            Values elems = NULL;
+            for ( int i = 0; i < num_fields; ++i ) {
+                buf_push(elems, stack_pop(vm));
+            }
+
+            Value un = stack_pop(vm);
+
+            for ( int i = 0; i < num_fields; ++i ) {
+                Obj_Aggr_Field *field = ((Obj_Aggr_Field *)elems[i].obj_val);
+                table_set(((Obj_Union *)un.obj_val)->fields, field->name, field->default_value);
+                buf_push(((Obj_Union *)un.obj_val)->fieldnames_ordered, field->name);
+            }
+        } break;
+
+        case BYTECODEOP_TYPEDEF: {
+            Value val = stack_pop(vm);
+            Value name = value_get(&frame->proc->bc->constants, instr->op1);
+
+            if ( !bytecode_sym_set(VSTR(name), val) ) {
+                report_error(instr, "registrierung des typnamen %s gescheitert", VSTR(name)->ptr);
             }
         } break;
 
@@ -3222,7 +3250,7 @@ step(Vm *vm) {
             Value enumeration = stack_pop(vm);
 
             for ( int i = 0; i < num_fields; ++i ) {
-                Obj_Struct_Field *field = ((Obj_Struct_Field *)elems[i].obj_val);
+                Obj_Aggr_Field *field = ((Obj_Aggr_Field *)elems[i].obj_val);
                 table_set(((Obj_Enum *)enumeration.obj_val)->fields, field->name, field->default_value);
                 buf_push(((Obj_Enum *)enumeration.obj_val)->fieldnames_ordered, field->name);
             }
@@ -3273,7 +3301,7 @@ step(Vm *vm) {
             }
         } break;
 
-        case BYTECODEOP_STRUCT_FIELD: {
+        case BYTECODEOP_AGGR_FIELD: {
             Value default_val = stack_pop(vm);
             Value type_val = stack_pop(vm);
             Value field = stack_pop(vm);
@@ -3294,7 +3322,7 @@ step(Vm *vm) {
                 }
             }
 
-            ((Obj_Struct_Field *)field.obj_val)->default_value = new_val;
+            VAGGRFIELD(field)->default_value = new_val;
             stack_push(vm, field);
         } break;
 
@@ -3378,7 +3406,7 @@ obj_type_from_type(Type *type) {
             Values fields = (Values)urq_alloc(sizeof(Value)*num_fields);
 
             for ( uint32_t i = 0; i < num_fields; ++i ) {
-                Struct_Field *field = TSTRUCT(type)->fields[i];
+                Aggr_Field *field = TSTRUCT(type)->fields[i];
 
                 fields[i] = val_type_field(field->type->id, field->name);
             }
@@ -3391,7 +3419,7 @@ obj_type_from_type(Type *type) {
             Values fields = (Values)urq_alloc(sizeof(Value)*num_fields);
 
             for ( uint32_t i = 0; i < num_fields; ++i ) {
-                Enum_Field *field = TENUM(type)->fields[i];
+                Aggr_Field *field = TENUM(type)->fields[i];
 
                 fields[i] = val_type_field(field->type->id, field->name);
             }

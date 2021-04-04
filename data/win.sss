@@ -1,0 +1,15 @@
+#import Win = ( open_file, write_file, Sharing_Mode, Creation_Disposition, Access ) from win32;
+
+master :: proc(args : [] string) {
+    mit Win;
+
+    file := open_file(
+        "W:/sss/data/test.txt",
+        als(u32)Access.GENERIC_WRITE,
+        als(u32)Sharing_Mode.FILE_SHARE_READ,
+        0,
+        als(u32)Creation_Disposition.CREATE_ALWAYS,
+        32, 0);
+}
+
+master({});

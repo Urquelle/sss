@@ -29,7 +29,7 @@ struct Stmt_Block;
 struct Stmt_For;
 struct Stmt_If;
 struct Stmt_Match;
-struct Struct_Field;
+struct Aggr_Field;
 struct Sym;
 struct Token_List;
 struct Type;
@@ -46,13 +46,14 @@ typedef Match_Line    ** Match_Lines;
 typedef Module_Sym    ** Module_Syms;
 typedef Note          ** Notes;
 typedef Proc_Param    ** Proc_Params;
-typedef Struct_Field  ** Struct_Fields;
+typedef Aggr_Field    ** Aggr_Fields;
 typedef Stmt          ** Stmts;
 typedef Operand       ** Operands;
 typedef Sym           ** Syms;
 typedef Type          ** Types;
 
 Parsed_File            * parse(Token_List *tokens);
+Aggr_Fields              parse_aggr_block(Token_List *tokens);
 Expr                   * parse_expr(Token_List *tokens, bool with_stmt = false);
 Stmt                   * parse_stmt(Token_List *tokens);
 Stmt_Block             * parse_stmt_block(Token_List *tokens, Proc_Sign *sign = NULL);
@@ -69,6 +70,7 @@ Type                   * resolve_decl_type(Decl *decl);
 Type                   * resolve_decl_var(Decl *decl);
 bool                     resolve_stmt(Stmt *stmt, Types rets = NULL, uint32_t num_rets = 0);
 Type                   * resolve_typespec(Typespec *t);
+void                     resolve_aggr_fields(Aggr_Fields fields, uint32_t num_fields);
 Scope                  * scope_new(char *name, Scope *parent = NULL);
 Sym                    * sym_push_scope(Loc *loc, Scope *scope, char *name, Type *type);
 void                     type_complete(Type *type);
@@ -97,6 +99,7 @@ void                     type_complete(Type *type);
 #define TSNAME(Ts)            ((Typespec_Name *)(Ts))
 #define TSPTR(Ts)             ((Typespec_Ptr *)(Ts))
 #define TSARRAY(Ts)           ((Typespec_Array *)(Ts))
+#define TSUNION(Ts)           ((Typespec_Union *)(Ts))
 
 #define SDECL(Stmt)           ((Stmt_Decl *)(Stmt))
 #define SASSIGN(Stmt)         ((Stmt_Assign *)(Stmt))
@@ -112,9 +115,15 @@ void                     type_complete(Type *type);
 #define DVAR(Decl)            ((Decl_Var *)(Decl))
 #define DCONST(Decl)          ((Decl_Const *)(Decl))
 #define DENUM(Decl)           ((Decl_Enum *)(Decl))
+#define DUNION(Decl)          ((Decl_Union *)(Decl))
 #define DPROC(Decl)           ((Decl_Proc *)(Decl))
 #define DSTRUCT(Decl)         ((Decl_Struct *)(Decl))
 #define DTYPE(Decl)           ((Decl_Type *)(Decl))
+
+#define IS_DSTRUCT(Decl)      ((Decl)->kind == DECL_STRUCT)
+#define IS_DENUM(Decl)        ((Decl)->kind == DECL_ENUM)
+#define IS_DUNION(Decl)       ((Decl)->kind == DECL_UNION)
+#define IS_DAGGR(Decl)        ((Decl)->kind == DECL_STRUCT || (Decl)->kind == DECL_ENUM || (Decl)->kind == DECL_UNION)
 
 #define DIRIMPORT(Dir)        ((Directive_Import *)(Dir))
 #define DIREXPORT(Dir)        ((Directive_Export *)(Dir))
@@ -122,6 +131,7 @@ void                     type_complete(Type *type);
 
 #define TSTRUCT(T)            ((Type_Struct *)(T))
 #define TENUM(T)              ((Type_Enum *)(T))
+#define TUNION(T)             ((Type_Union *)(T))
 #define TPROC(T)              ((Type_Proc *)(T))
 #define TARRAY(T)             ((Type_Array *)(T))
 #define TPTR(T)               ((Type_Ptr *)(T))
@@ -151,6 +161,7 @@ void                     type_complete(Type *type);
 #define VPROC(Val)            ((Obj_Proc *)(Val).obj_val)
 #define VTYPE(Val)            ((Obj_Type *)(Val).obj_val)
 #define VPTR(Val)             ((Obj_Ptr *)(Val).obj_val)
+#define VAGGRFIELD(Val)       ((Obj_Aggr_Field *)(Val).obj_val)
 
 #define OITER(Obj)            ((Obj_Iter *)(Obj))
 #define OITERRNG(Obj)         ((Obj_Iter_Range *)(Obj))
