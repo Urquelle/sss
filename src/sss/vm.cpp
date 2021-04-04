@@ -342,14 +342,14 @@ basic_block(int32_t id, Instrs instrs) {
 }
 
 Instr *
-instr_new(Loc *loc, Instr_Opcode opcode, int32_t op1) {
+instr_new(Loc *loc, Instr_Opcode opcode, int32_t op1, int32_t op2) {
     Instr *result = urq_allocs(Instr);
 
     loc_copy(loc, result);
 
     result->opcode = opcode;
     result->op1    = op1;
-    result->op2    = 0;
+    result->op2    = op2;
 
     return result;
 }
@@ -359,8 +359,8 @@ instr_print(Instr *instr) {
 }
 
 Instr *
-instr_push(Loc *loc, Bytecode *bc, Instr_Opcode opcode, int32_t op1) {
-    Instr *result = instr_new(loc, opcode, op1);
+instr_push(Loc *loc, Bytecode *bc, Instr_Opcode opcode, int32_t op1, int32_t op2) {
+    Instr *result = instr_new(loc, opcode, op1, op2);
 
     buf_push(bc->instructions, result);
 
@@ -371,8 +371,15 @@ instr_push(Loc *loc, Bytecode *bc, Instr_Opcode opcode, int32_t op1) {
 }
 
 Instr *
+instr_push(Loc *loc, Bytecode *bc, Instr_Opcode opcode, int32_t op1) {
+    Instr *result = instr_push(loc, bc, opcode, op1, -1);
+
+    return result;
+}
+
+Instr *
 instr_push(Loc *loc, Bytecode *bc, Instr_Opcode opcode) {
-    return instr_push(loc, bc, opcode, 0);
+    return instr_push(loc, bc, opcode, -1, -1);
 }
 
 void

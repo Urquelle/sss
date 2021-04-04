@@ -9,13 +9,13 @@
     WriteConsoleA as write_console,
     GetStdHandle  as get_std_handle,
     CreateFileA   as open_file,
-    WriteFileA    as write_file,
+    WriteFile     as write_file,
 }
 
 PVOID  :: typedef *void;
 HANDLE :: typedef PVOID;
 DWORD  :: typedef u32;
-PDWORD :: typedef *u32;
+PDWORD :: typedef *DWORD;
 
 Sharing_Mode :: enum {
     NONE              :: 16b0000_0000;
@@ -46,11 +46,11 @@ Overlapped :: struktur {
     InternalHigh   : PDWORD;
 
     Structure      : union {
-        Versatz : Win32_Offset;
-        Pointer: *void;
+        Versatz    : Win32_Offset;
+        Pointer    : PVOID;
     };
 
-    hEvent         : *void;
+    hEvent         : PVOID;
 }
 
 Device_Type :: enum {
@@ -60,30 +60,30 @@ Device_Type :: enum {
 }
 
 Security_Attributes :: struktur {
-    nLength              : u32;
-    lpSecurityDescriptor : *void;
+    nLength              : DWORD;
+    lpSecurityDescriptor : PVOID;
     bInheritHandle       : bool;
 }
 
-GetStdHandle  :: proc(device_type            : u32) -> HANDLE #sys_call "kernel32.dll";
+GetStdHandle  :: proc(device_type            : DWORD) -> HANDLE #sys_call "kernel32.dll";
 
 WriteConsoleA :: proc(hConsoleOutput         : PVOID,
                       lpBuffer               : PVOID,
-                      nNumberOfCharsToWrite  : u32,
-                      lpNumberOfCharsWritten : *u32,
-                      lpReserved             : *void) #sys_call "kernel32.dll";
+                      nNumberOfCharsToWrite  : DWORD,
+                      lpNumberOfCharsWritten : PDWORD,
+                      lpReserved             : PVOID) #sys_call "kernel32.dll";
 
-CreateFileA   :: proc(lpFileName             : *void,
-                      dwDesiredAccess        : u32,
-                      dwShareMode            : u32,
+CreateFileA   :: proc(lpFileName             : PVOID,
+                      dwDesiredAccess        : DWORD,
+                      dwShareMode            : DWORD,
                       lpSecurityAttributes   : *Security_Attributes,
-                      dwCreationDisposition  : u32,
-                      dwFlagsAndAttributes   : u32,
-                      hTemplateFile          : *void) -> *void #sys_call "kernel32.dll";
+                      dwCreationDisposition  : DWORD,
+                      dwFlagsAndAttributes   : DWORD,
+                      hTemplateFile          : PVOID) -> HANDLE #sys_call "kernel32.dll";
 
-WriteFileA    :: proc(hFile                  : *void,
-                      lpBuffer               : *void,
-                      nNumberOfBytesToWrite  : u32,
-                      lpNumberOfBytesWritten : *u32,
+WriteFile     :: proc(hFile                  : HANDLE,
+                      lpBuffer               : string,
+                      nNumberOfBytesToWrite  : DWORD,
+                      lpNumberOfBytesWritten : PDWORD,
                       lpOverlapped           : *Overlapped) -> bool #sys_call "kernel32.dll";
 

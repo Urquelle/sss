@@ -10,6 +10,9 @@ master :: proc(args : [] string) {
         0,
         als(u32)Creation_Disposition.CREATE_ALWAYS,
         32, 0);
+
+    inhalt := "hallo, wie geht's";
+    write_file(file, inhalt, als(u32)inhalt.größe, 0, 0);
 }
 
 master({});

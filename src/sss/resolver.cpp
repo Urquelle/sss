@@ -986,7 +986,7 @@ resolve_expr(Expr *expr, Type *given_type = NULL) {
                 operand_cast(param->type, arg);
                 /* @AUFGABE: array und zeiger datentypen auf kompatibilität überprüfen */
                 if ( !type_are_compatible(param->type, arg->type) ) {
-                    report_error(expr, "datentyp %s für %s (%d) erwartet, bekommen %s", to_str(param->type), param->name, i+1, to_str(arg->type));
+                    report_error(expr, "datentyp %s für %s (argument nummer %d) erwartet, bekommen %s", to_str(param->type), param->name, i+1, to_str(arg->type));
                 }
             }
 
