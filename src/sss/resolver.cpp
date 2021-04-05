@@ -1428,6 +1428,14 @@ resolve_stmt(Stmt *stmt, Types rets, uint32_t num_rets) {
             }
         } break;
 
+        case STMT_DEFER: {
+            if ( curr_scope == global_scope ) {
+                report_error(stmt, "defer kann nicht im globalen bereich verwendet werden");
+            }
+
+            resolve_stmt(SDEFER(stmt)->stmt);
+        } break;
+
         default: {
             report_error(stmt, "unbekannte anweisung");
         } break;

@@ -2305,8 +2305,19 @@ bytecode_stmt(Bytecode *bc, Stmt *stmt) {
         } break;
 
         case STMT_BLOCK: {
+            Stmt_Defer **defer_stmts = NULL;
             for ( int i = 0; i < SBLOCK(stmt)->num_stmts; ++i ) {
-                bytecode_stmt(bc, SBLOCK(stmt)->stmts[i]);
+                Stmt *s = SBLOCK(stmt)->stmts[i];
+
+                if ( s->kind != STMT_DEFER ) {
+                    bytecode_stmt(bc, SBLOCK(stmt)->stmts[i]);
+                } else {
+                    buf_push(defer_stmts, SDEFER(s));
+                }
+            }
+
+            for ( int i = buf_len(defer_stmts); i > 0; --i ) {
+                bytecode_stmt(bc, defer_stmts[i-1]);
             }
         } break;
 
@@ -2454,6 +2465,10 @@ bytecode_stmt(Bytecode *bc, Stmt *stmt) {
         case STMT_USING: {
             bytecode_expr(bc, SUSING(stmt)->expr);
             instr_push(stmt, bc, BYTECODEOP_IMPORT_SYMS);
+        } break;
+
+        case STMT_DEFER: {
+            bytecode_stmt(bc, SDEFER(stmt)->stmt);
         } break;
 
         default: {

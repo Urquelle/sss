@@ -111,6 +111,7 @@ void                     type_complete(Type *type);
 #define SRET(Stmt)            ((Stmt_Ret *)(Stmt))
 #define SEXPR(Stmt)           ((Stmt_Expr *)(Stmt))
 #define SUSING(Stmt)          ((Stmt_Using *)(Stmt))
+#define SDEFER(Stmt)          ((Stmt_Defer *)(Stmt))
 
 #define DVAR(Decl)            ((Decl_Var *)(Decl))
 #define DCONST(Decl)          ((Decl_Const *)(Decl))
