@@ -774,7 +774,9 @@ Sym *
 resolve_name(char *name) {
     Sym *sym = sym_get(name);
 
-    sym_resolve(sym);
+    if ( sym ) {
+        sym_resolve(sym);
+    }
 
     return sym;
 }
