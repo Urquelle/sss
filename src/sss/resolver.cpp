@@ -174,24 +174,6 @@ Type *type_string;
 Type *type_variadic;
 
 char *
-to_str(Expr *expr) {
-    switch ( expr->kind ) {
-        case EXPR_INT: {
-            return "1";
-        } break;
-
-        case EXPR_IDENT: {
-            return EIDENT(expr)->val;
-        } break;
-
-        default: {
-            assert(!"unbekannt");
-            return "unbekannt";
-        } break;
-    }
-}
-
-char *
 to_str(Type *type) {
     char *result = NULL;
 

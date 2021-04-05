@@ -40,15 +40,16 @@ struct Value : Loc {
     int32_t    size;
 
     union {
-        char      chr_val;
-        int64_t   int_val;
-        float     flt_val;
-        bool      bool_val;
-        Obj     * obj_val;
+        char      c;
+        int64_t   i64;
+        float     f32;
+        bool      b;
+        Obj     * o;
     };
 };
 
 #define OBJECTS         \
+    X(OBJ_NONE)         \
     X(OBJ_STRING)       \
     X(OBJ_ARRAY)        \
     X(OBJ_RANGE)        \
@@ -211,7 +212,8 @@ Obj_Proc         * as_proc(Value val);
 Obj_Struct       * as_struct(Value val);
 Obj_Aggr_Field * as_struct_field(Value val);
 
-#define AS_NAMESPACE(Val) ((Obj_Namespace *)(Val).obj_val)
+
+#define AS_NAMESPACE(Val) ((Obj_Namespace *)(Val).o)
 
 struct Value_Array {
     int32_t   size;
@@ -1048,8 +1050,8 @@ Value
 val_none() {
     Value result = {};
 
-    result.kind    = VAL_NONE;
-    result.int_val = 0;
+    result.kind  = VAL_NONE;
+    result.i64   = 0;
 
     return result;
 }
@@ -1058,8 +1060,8 @@ Value
 val_char(char val) {
     Value result = {};
 
-    result.kind    = VAL_CHAR;
-    result.chr_val = val;
+    result.kind = VAL_CHAR;
+    result.c    = val;
 
     return result;
 }
@@ -1068,9 +1070,9 @@ Value
 val_int(int64_t val, uint32_t size) {
     Value result = {};
 
-    result.kind    = VAL_INT;
-    result.size    = size;
-    result.int_val = val;
+    result.kind = VAL_INT;
+    result.size = size;
+    result.i64  = val;
 
     return result;
 }
@@ -1079,8 +1081,8 @@ Value
 val_float(float val) {
     Value result = {};
 
-    result.kind    = VAL_FLOAT;
-    result.flt_val = val;
+    result.kind = VAL_FLOAT;
+    result.f32  = val;
 
     return result;
 }
@@ -1089,8 +1091,8 @@ Value
 val_bool(bool val) {
     Value result = {};
 
-    result.kind     = VAL_BOOL;
-    result.bool_val = val;
+    result.kind = VAL_BOOL;
+    result.b    = val;
 
     return result;
 }
@@ -1099,8 +1101,8 @@ Value
 val_obj(Obj *val) {
     Value result = {};
 
-    result.kind    = VAL_OBJ;
-    result.obj_val = val;
+    result.kind = VAL_OBJ;
+    result.o    = val;
 
     return result;
 }
@@ -1116,7 +1118,7 @@ Value
 val_str(char *ptr) {
     Value result = val_obj(obj_string(ptr));
 
-    table_set(&result.obj_val->scope->syms, obj_string("größe"), val_int(VSTR(result)->size));
+    table_set(&result.o->scope->syms, obj_string("größe"), val_int(VSTR(result)->size));
 
     return result;
 }
@@ -1125,7 +1127,7 @@ Value
 val_compound(Values elems, uint32_t num_elems) {
     Value result = val_obj(obj_compound(elems, num_elems));
 
-    table_set(&result.obj_val->scope->syms, obj_string("größe"), val_int(num_elems));
+    table_set(&result.o->scope->syms, obj_string("größe"), val_int(num_elems));
 
     return result;
 }
@@ -1197,7 +1199,7 @@ Value
 val_array(Values elems, uint32_t num_elems) {
     Value result = val_obj(obj_array(elems, num_elems));
 
-    table_set(&result.obj_val->scope->syms, obj_string("größe"), val_int(num_elems));
+    table_set(&result.o->scope->syms, obj_string("größe"), val_int(num_elems));
 
     return result;
 }
@@ -1220,15 +1222,15 @@ void
 val_print(Value val) {
     switch ( val.kind ) {
         case VAL_INT: {
-            printf("(int: %lld)", val.int_val);
+            printf("(int: %lld)", val.i64);
         } break;
 
         case VAL_FLOAT: {
-            printf("(float: %f)", val.flt_val);
+            printf("(float: %f)", val.f32);
         } break;
 
         case VAL_BOOL: {
-            printf("(bool: %s)", (val.bool_val == true) ? "true" : "false");
+            printf("(bool: %s)", (val.b == true) ? "true" : "false");
         } break;
 
         case VAL_NONE: {
@@ -1236,7 +1238,7 @@ val_print(Value val) {
         } break;
 
         case VAL_OBJ: {
-            obj_print(val.obj_val);
+            obj_print(val.o);
         } break;
 
         default: {
@@ -1251,19 +1253,19 @@ val_to_ptr(Value val) {
 
     switch ( val.kind ) {
         case VAL_INT: {
-            result = val_ptr(&val.int_val);
+            result = val_ptr(&val.i64);
         } break;
 
         case VAL_FLOAT: {
-            result = val_ptr(&val.flt_val);
+            result = val_ptr(&val.f32);
         } break;
 
         case VAL_BOOL: {
-            result = val_ptr(&val.bool_val);
+            result = val_ptr(&val.b);
         } break;
 
         case VAL_OBJ: {
-            result = val_ptr(val.obj_val);
+            result = val_ptr(val.o);
         } break;
 
         default: {
@@ -1278,11 +1280,11 @@ Value
 operator-(Value val) {
     switch ( val.kind ) {
         case VAL_INT: {
-            return val_int(-val.int_val);
+            return val_int(-val.i64);
         } break;
 
         case VAL_FLOAT: {
-            return val_float(-val.flt_val);
+            return val_float(-val.f32);
         } break;
 
         default: {
@@ -1384,12 +1386,12 @@ operator*(Value left, Value right) {
     switch ( left.kind ) {
         case VAL_INT: {
             assert(right.kind == VAL_INT);
-            return val_int(left.int_val * right.int_val);
+            return val_int(left.i64 * right.i64);
         } break;
 
         case VAL_FLOAT: {
             assert(right.kind == VAL_FLOAT);
-            return val_float(left.flt_val * right.flt_val);
+            return val_float(left.f32 * right.f32);
         } break;
 
         default: {
@@ -1406,12 +1408,12 @@ operator/(Value left, Value right) {
     switch ( left.kind ) {
         case VAL_INT: {
             assert(right.kind == VAL_INT);
-            return val_int(left.int_val / right.int_val);
+            return val_int(left.i64 / right.i64);
         } break;
 
         case VAL_FLOAT: {
             assert(right.kind == VAL_FLOAT);
-            return val_float(left.flt_val / right.flt_val);
+            return val_float(left.f32 / right.f32);
         } break;
 
         default: {
@@ -1428,12 +1430,12 @@ operator<(Value left, Value right) {
     switch ( left.kind ) {
         case VAL_INT: {
             assert(right.kind == VAL_INT);
-            return left.int_val < right.int_val;
+            return left.i64 < right.i64;
         } break;
 
         case VAL_FLOAT: {
             assert(right.kind == VAL_FLOAT);
-            return left.flt_val < right.flt_val;
+            return left.f32 < right.f32;
         } break;
 
         default: {
@@ -1449,56 +1451,56 @@ bool
 operator>=(float left, Value right) {
     assert(right.kind == VAL_FLOAT);
 
-    return left >= right.flt_val;
+    return left >= right.f32;
 }
 
 bool
 operator>=(Value left, float right) {
     assert(left.kind == VAL_FLOAT);
 
-    return left.flt_val >= right;
+    return left.f32 >= right;
 }
 
 bool
 operator>=(int64_t left, Value right) {
     assert(right.kind == VAL_INT);
 
-    return left >= right.int_val;
+    return left >= right.i64;
 }
 
 bool
 operator>=(Value left, int64_t right) {
     assert(left.kind == VAL_INT);
 
-    return left.int_val >= right;
+    return left.i64 >= right;
 }
 
 bool
 operator<=(int64_t left, Value right) {
     assert(right.kind == VAL_INT);
 
-    return left <= right.int_val;
+    return left <= right.i64;
 }
 
 bool
 operator<=(Value left, int64_t right) {
     assert(left.kind == VAL_INT);
 
-    return left.int_val <= right;
+    return left.i64 <= right;
 }
 
 bool
 operator<=(float left, Value right) {
     assert(right.kind == VAL_FLOAT);
 
-    return left <= right.flt_val;
+    return left <= right.f32;
 }
 
 bool
 operator<=(Value left, float right) {
     assert(left.kind == VAL_FLOAT);
 
-    return left.flt_val <= right;
+    return left.f32 <= right;
 }
 
 bool
@@ -1507,7 +1509,7 @@ operator>=(Value left, Value right) {
         case VAL_INT: {
             assert(right.kind == VAL_INT);
 
-            return left.int_val >= right.int_val;
+            return left.i64 >= right.i64;
         } break;
 
         default: {
@@ -1525,7 +1527,7 @@ operator<=(Value left, Value right) {
         case VAL_INT: {
             assert(right.kind == VAL_INT);
 
-            return left.int_val <= right.int_val;
+            return left.i64 <= right.i64;
         } break;
 
         default: {
@@ -1543,18 +1545,18 @@ operator!=(Value left, Value right) {
         case VAL_INT: {
             switch ( right.kind ) {
                 case VAL_INT: {
-                    return left.int_val != right.int_val;
+                    return left.i64 != right.i64;
                 } break;
 
                 case VAL_FLOAT: {
-                    return left.int_val != right.flt_val;
+                    return left.i64 != right.f32;
                 } break;
 
                 case VAL_OBJ: {
-                    assert(right.obj_val->kind == OBJ_RANGE);
+                    assert(right.o->kind == OBJ_RANGE);
 
-                    bool gt = !(left.int_val >= ((Obj_Range *)right.obj_val)->left);
-                    bool lt = !(left.int_val <= ((Obj_Range *)right.obj_val)->right);
+                    bool gt = !(left.i64 >= ((Obj_Range *)right.o)->left);
+                    bool lt = !(left.i64 <= ((Obj_Range *)right.o)->right);
                     bool result = gt || lt;
 
                     return result;
@@ -1565,40 +1567,40 @@ operator!=(Value left, Value right) {
         case VAL_FLOAT: {
             switch ( right.kind ) {
                 case VAL_INT: {
-                    return left.flt_val != right.int_val;
+                    return left.f32 != right.i64;
                 } break;
 
                 case VAL_FLOAT: {
-                    return left.flt_val != right.flt_val;
+                    return left.f32 != right.f32;
                 } break;
 
                 case VAL_OBJ: {
-                    assert(right.obj_val->kind == OBJ_RANGE);
+                    assert(right.o->kind == OBJ_RANGE);
 
-                    return left.flt_val >= ((Obj_Range *)right.obj_val)->left &&
-                           left.flt_val <= ((Obj_Range *)right.obj_val)->right;
+                    return left.f32 >= ((Obj_Range *)right.o)->left &&
+                           left.f32 <= ((Obj_Range *)right.o)->right;
                 } break;
             }
         } break;
 
         case VAL_OBJ: {
-            assert(left.obj_val->kind == OBJ_RANGE);
-            Obj_Range *range = (Obj_Range *)left.obj_val;
+            assert(left.o->kind == OBJ_RANGE);
+            Obj_Range *range = (Obj_Range *)left.o;
 
             switch ( right.kind ) {
                 case VAL_INT: {
-                    return range->left >= right.int_val && range->right <= right.int_val;
+                    return range->left >= right.i64 && range->right <= right.i64;
                 } break;
 
                 case VAL_FLOAT: {
-                    return range->left >= right.flt_val &&
-                           range->right <= right.flt_val;
+                    return range->left >= right.f32 &&
+                           range->right <= right.f32;
                 } break;
 
                 case VAL_OBJ: {
-                    assert(left.obj_val->kind == OBJ_RANGE);
+                    assert(left.o->kind == OBJ_RANGE);
 
-                    Obj_Range *left_range = (Obj_Range *)left.obj_val;
+                    Obj_Range *left_range = (Obj_Range *)left.o;
                     return range->left != left_range->left && range->right != left_range->right;
                 } break;
             }
@@ -1798,8 +1800,8 @@ bytecode_debug(Vm *vm, Instr *instr) {
             printf("][val: ");
             Value val = vm->stack[frame->sp-1];
 
-            if ( IS_OITERRNG(val.obj_val) ) {
-                val_print(VRANGE(val)->left);
+            if ( IS_OITERRNG(val.o) ) {
+                //val_print(VRANGE(val)->left);
             } else {
                 val_print(VARRAY(val)->elems[0]);
             }
@@ -2484,21 +2486,21 @@ to_str(Obj_String *str) {
 
 Obj_Proc *
 as_proc(Value val) {
-    Obj_Proc *result = (Obj_Proc *)val.obj_val;
+    Obj_Proc *result = (Obj_Proc *)val.o;
 
     return result;
 }
 
 Obj_Iter *
 as_iter(Value val) {
-    Obj_Iter *result = (Obj_Iter *)val.obj_val;
+    Obj_Iter *result = (Obj_Iter *)val.o;
 
     return result;
 }
 
 Obj_Struct *
 as_struct(Value val) {
-    Obj_Struct *result = (Obj_Struct *)val.obj_val;
+    Obj_Struct *result = (Obj_Struct *)val.o;
 
     return result;
 }
@@ -2507,14 +2509,14 @@ Obj *
 as_obj(Value val) {
     assert(val.kind == VAL_OBJ);
 
-    Obj *result = val.obj_val;
+    Obj *result = val.o;
 
     return result;
 }
 
 int32_t
 as_int(Value val) {
-    int32_t result = (int32_t)val.int_val;
+    int32_t result = (int32_t)val.i64;
 
     return result;
 }
@@ -2541,25 +2543,25 @@ call_sys_proc(Vm *vm, Value val, uint32_t num_args) {
 
         switch ( arg.kind ) {
             case VAL_INT: {
-                dcArgLong(call_vm, (DClong)arg.int_val);
+                dcArgLong(call_vm, (DClong)arg.i64);
             } break;
 
             case VAL_FLOAT: {
-                dcArgFloat(call_vm, arg.flt_val);
+                dcArgFloat(call_vm, arg.f32);
             } break;
 
             case VAL_BOOL: {
-                dcArgBool(call_vm, arg.bool_val);
+                dcArgBool(call_vm, arg.b);
             } break;
 
             case VAL_OBJ: {
-                switch ( arg.obj_val->kind ) {
+                switch ( arg.o->kind ) {
                     case OBJ_STRING: {
-                        dcArgPointer(call_vm, ((Obj_String *)arg.obj_val)->ptr);
+                        dcArgPointer(call_vm, ((Obj_String *)arg.o)->ptr);
                     } break;
 
                     case OBJ_PTR: {
-                        dcArgPointer(call_vm, ((Obj_Ptr *)arg.obj_val)->ptr);
+                        dcArgPointer(call_vm, ((Obj_Ptr *)arg.o)->ptr);
                     } break;
 
                     default: {
@@ -2830,21 +2832,21 @@ step(Vm *vm) {
             if ( IS_VARRAY(base) ) {
                 Obj_Array *arr = VARRAY(base);
 
-                if ( index.int_val >= arr->num_elems ) {
+                if ( index.i64 >= arr->num_elems ) {
                     report_error(instr, "index liegt außerhalb der array grenzen");
                 }
 
-                stack_push(vm, arr->elems[index.int_val]);
+                stack_push(vm, arr->elems[index.i64]);
             } else {
                 assert(IS_VSTR(base));
 
                 Obj_String *str = VSTR(base);
 
-                if ( index.int_val >= str->size ) {
+                if ( index.i64 >= str->size ) {
                     report_error(instr, "index liegt außerhalb der string grenzen");
                 }
 
-                stack_push(vm, val_char(str->ptr[index.int_val]));
+                stack_push(vm, val_char(str->ptr[index.i64]));
             }
         } break;
 
@@ -3016,8 +3018,8 @@ step(Vm *vm) {
                 assert(!"symbol nicht gefunden");
             }
 
-            if ( IS_VOBJ(val) && IS_OITER(val.obj_val)) {
-                stack_push(vm, OITER(val.obj_val)->iter);
+            if ( IS_VOBJ(val) && IS_OITER(val.o)) {
+                stack_push(vm, OITER(val.o)->iter);
             } else {
                 stack_push(vm, val);
             }
@@ -3030,7 +3032,7 @@ step(Vm *vm) {
 
         case BYTECODEOP_LOAD_TYPEINFO: {
             Value val = stack_pop(vm);
-            stack_push(vm, val_type(obj_types[val.int_val]));
+            stack_push(vm, val_type(obj_types[val.i64]));
         } break;
 
         case BYTECODEOP_LOAD_TYPEOF: {
@@ -3043,7 +3045,7 @@ step(Vm *vm) {
 
             assert( IS_VSTRUCT(val) );
 
-            Obj_Struct *structure = ((Obj_Struct *)val.obj_val);
+            Obj_Struct *structure = ((Obj_Struct *)val.o);
             Value *field_val = table_get_ref(structure->fields, VSTR(field));
 
             stack_push(vm, val_ptr(field_val));
@@ -3054,7 +3056,7 @@ step(Vm *vm) {
             Value val = stack_pop(vm);
 
             if ( IS_VSTRUCT(val) ) {
-                Obj_Struct *structure = ((Obj_Struct *)val.obj_val);
+                Obj_Struct *structure = ((Obj_Struct *)val.o);
 
                 Value field_val;
                 if ( !table_get(structure->fields, VSTR(field), &field_val) ) {
@@ -3063,7 +3065,7 @@ step(Vm *vm) {
 
                 stack_push(vm, field_val);
             } else if ( IS_VENUM(val) ) {
-                Obj_Enum *enumeration = ((Obj_Enum *)val.obj_val);
+                Obj_Enum *enumeration = ((Obj_Enum *)val.o);
 
                 Value field_val;
                 if ( !table_get(enumeration->fields, VSTR(field), &field_val) ) {
@@ -3072,7 +3074,7 @@ step(Vm *vm) {
 
                 stack_push(vm, field_val);
             } else if ( IS_VOBJ(val) ) {
-                Obj *obj = val.obj_val;
+                Obj *obj = val.o;
 
                 Value field_val;
                 if ( !table_get(&obj->scope->syms, VSTR(field), &field_val) ) {
@@ -3084,19 +3086,12 @@ step(Vm *vm) {
         } break;
 
         case BYTECODEOP_SET_SYM: {
-#if 0
-            Obj_String *name = VSTR(stack_pop(vm));
-            Value val = stack_pop(vm);
-
-            bytecode_sym_set(name, val, BYTECODEFLAG_SET_EXISTING);
-#else
             Value var = stack_pop(vm);
             Value val = stack_pop(vm);
 
             assert(IS_VPTR(var));
 
             *((Value *)VPTR(var)->ptr) = val;
-#endif
         } break;
 
         case BYTECODEOP_CALL: {
@@ -3119,7 +3114,7 @@ step(Vm *vm) {
             Value val = stack_pop(vm);
             int32_t addr = instr->op1;
 
-            if ( val.bool_val == false ) {
+            if ( val.b == false ) {
                 frame->pc = addr;
             }
         } break;
@@ -3229,9 +3224,9 @@ step(Vm *vm) {
             Value structure = stack_pop(vm);
 
             for ( int i = 0; i < num_fields; ++i ) {
-                Obj_Aggr_Field *field = ((Obj_Aggr_Field *)elems[i].obj_val);
-                table_set(((Obj_Struct *)structure.obj_val)->fields, field->name, field->default_value);
-                buf_push(((Obj_Struct *)structure.obj_val)->fieldnames_ordered, field->name);
+                Obj_Aggr_Field *field = ((Obj_Aggr_Field *)elems[i].o);
+                table_set(((Obj_Struct *)structure.o)->fields, field->name, field->default_value);
+                buf_push(((Obj_Struct *)structure.o)->fieldnames_ordered, field->name);
             }
         } break;
 
@@ -3246,9 +3241,9 @@ step(Vm *vm) {
             Value un = stack_pop(vm);
 
             for ( int i = 0; i < num_fields; ++i ) {
-                Obj_Aggr_Field *field = ((Obj_Aggr_Field *)elems[i].obj_val);
-                table_set(((Obj_Union *)un.obj_val)->fields, field->name, field->default_value);
-                buf_push(((Obj_Union *)un.obj_val)->fieldnames_ordered, field->name);
+                Obj_Aggr_Field *field = ((Obj_Aggr_Field *)elems[i].o);
+                table_set(((Obj_Union *)un.o)->fields, field->name, field->default_value);
+                buf_push(((Obj_Union *)un.o)->fieldnames_ordered, field->name);
             }
         } break;
 
@@ -3272,9 +3267,9 @@ step(Vm *vm) {
             Value enumeration = stack_pop(vm);
 
             for ( int i = 0; i < num_fields; ++i ) {
-                Obj_Aggr_Field *field = ((Obj_Aggr_Field *)elems[i].obj_val);
-                table_set(((Obj_Enum *)enumeration.obj_val)->fields, field->name, field->default_value);
-                buf_push(((Obj_Enum *)enumeration.obj_val)->fieldnames_ordered, field->name);
+                Obj_Aggr_Field *field = ((Obj_Aggr_Field *)elems[i].o);
+                table_set(((Obj_Enum *)enumeration.o)->fields, field->name, field->default_value);
+                buf_push(((Obj_Enum *)enumeration.o)->fieldnames_ordered, field->name);
             }
         } break;
 
@@ -3331,16 +3326,16 @@ step(Vm *vm) {
             Value val     = (default_val.kind == VAL_NONE) ? type_val : default_val;
             Value new_val = val;
 
-            if ( val.kind == VAL_OBJ && val.obj_val->kind == OBJ_COMPOUND ) {
-                Obj_Compound * compound  = ((Obj_Compound *)val.obj_val);
+            if ( val.kind == VAL_OBJ && val.o->kind == OBJ_COMPOUND ) {
+                Obj_Compound * compound  = ((Obj_Compound *)val.o);
 
-                assert(type_val.obj_val->kind == OBJ_STRUCT);
-                Obj_Struct   * structure = (Obj_Struct *)type_val.obj_val;
+                assert(type_val.o->kind == OBJ_STRUCT);
+                Obj_Struct   * structure = (Obj_Struct *)type_val.o;
                                new_val   = val_struct(((Obj_String *)structure->name)->ptr);
 
                 for ( int i = 0; i < compound->num_elems; ++i ) {
                     Value compound_val = compound->elems[i];
-                    table_set(((Obj_Struct *)new_val.obj_val)->fields, structure->fieldnames_ordered[i], compound_val);
+                    table_set(((Obj_Struct *)new_val.o)->fields, structure->fieldnames_ordered[i], compound_val);
                 }
             }
 

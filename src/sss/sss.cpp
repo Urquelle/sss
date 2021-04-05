@@ -61,6 +61,7 @@ Stmt_If                * parse_stmt_if(Token_List *tokens);
 Stmt_For               * parse_stmt_for(Token_List *tokens);
 Stmt_Match             * parse_stmt_match(Token_List *tokens);
 Typespec               * parse_typespec(Token_List *tokens);
+Proc_Param *             parse_proc_param(Token_List *tokens);
 void                     resolve(Parsed_File *parsed_file, bool check_entry_point = true);
 void                     resolve_file(Parsed_File *parsed_file);
 Type                   * resolve_decl(Decl *d);
@@ -143,30 +144,32 @@ void                     type_complete(Type *type);
 #define IS_TSTR(T)            ((T)->kind == TYPE_STRING)
 
 #define IS_VOBJ(Val)          ((Val).kind == VAL_OBJ)
-#define IS_VARRAY(Val)        (IS_VOBJ(Val) && (Val).obj_val->kind == OBJ_ARRAY)
-#define IS_VCMPND(Val)        (IS_VOBJ(Val) && (Val).obj_val->kind == OBJ_COMPOUND)
-#define IS_VSTRUCT(Val)       (IS_VOBJ(Val) && (Val).obj_val->kind == OBJ_STRUCT)
-#define IS_VSTR(Val)          (IS_VOBJ(Val) && (Val).obj_val->kind == OBJ_STRING)
-#define IS_VENUM(Val)         (IS_VOBJ(Val) && (Val).obj_val->kind == OBJ_ENUM)
-#define IS_VNS(Val)           (IS_VOBJ(Val) && (Val).obj_val->kind == OBJ_NAMESPACE)
-#define IS_VRANGE(Val)        (IS_VOBJ(Val) && (Val).obj_val->kind == OBJ_RANGE)
-#define IS_VPROC(Val)         (IS_VOBJ(Val) && (Val).obj_val->kind == OBJ_PROC)
-#define IS_VPTR(Val)          (IS_VOBJ(Val) && (Val).obj_val->kind == OBJ_PTR)
+#define IS_VARRAY(Val)        (IS_VOBJ(Val) && (Val).o->kind == OBJ_ARRAY)
+#define IS_VCMPND(Val)        (IS_VOBJ(Val) && (Val).o->kind == OBJ_COMPOUND)
+#define IS_VSTRUCT(Val)       (IS_VOBJ(Val) && (Val).o->kind == OBJ_STRUCT)
+#define IS_VSTR(Val)          (IS_VOBJ(Val) && (Val).o->kind == OBJ_STRING)
+#define IS_VENUM(Val)         (IS_VOBJ(Val) && (Val).o->kind == OBJ_ENUM)
+#define IS_VNS(Val)           (IS_VOBJ(Val) && (Val).o->kind == OBJ_NAMESPACE)
+#define IS_VRANGE(Val)        (IS_VOBJ(Val) && (Val).o->kind == OBJ_RANGE)
+#define IS_VPROC(Val)         (IS_VOBJ(Val) && (Val).o->kind == OBJ_PROC)
+#define IS_VPTR(Val)          (IS_VOBJ(Val) && (Val).o->kind == OBJ_PTR)
+#define IS_VITER(Val)         (IS_VOBJ(Val) && (Val).o->kind == OBJ_ITER)
 
-#define VOBJ(Val)             ((Val).obj_val)
-#define VCMPND(Val)           ((Obj_Compound *)(Val).obj_val)
-#define VSTRUCT(Val)          ((Obj_Struct *)(Val).obj_val)
-#define VRANGE(Val)           ((Obj_Range *)(Val).obj_val)
-#define VARRAY(Val)           ((Obj_Array *)(Val).obj_val)
-#define VSTR(Val)             ((Obj_String *)(Val).obj_val)
-#define VPROC(Val)            ((Obj_Proc *)(Val).obj_val)
-#define VTYPE(Val)            ((Obj_Type *)(Val).obj_val)
-#define VPTR(Val)             ((Obj_Ptr *)(Val).obj_val)
-#define VAGGRFIELD(Val)       ((Obj_Aggr_Field *)(Val).obj_val)
+#define VOBJ(Val)             ((Val).o)
+#define VCMPND(Val)           ((Obj_Compound *)(Val).o)
+#define VSTRUCT(Val)          ((Obj_Struct *)(Val).o)
+#define VRANGE(Val)           ((Obj_Range *)(Val).o)
+#define VARRAY(Val)           ((Obj_Array *)(Val).o)
+#define VSTR(Val)             ((Obj_String *)(Val).o)
+#define VPROC(Val)            ((Obj_Proc *)(Val).o)
+#define VTYPE(Val)            ((Obj_Type *)(Val).o)
+#define VPTR(Val)             ((Obj_Ptr *)(Val).o)
+#define VAGGRFIELD(Val)       ((Obj_Aggr_Field *)(Val).o)
 
 #define OITER(Obj)            ((Obj_Iter *)(Obj))
 #define OITERRNG(Obj)         ((Obj_Iter_Range *)(Obj))
 #define OITERARRAY(Obj)       ((Obj_Iter_Array *)(Obj))
+#define OSTR(Obj)             ((Obj_String *)(Obj))
 
 #define IS_OITER(Obj)         ((Obj)->kind == OBJ_ITER)
 #define IS_OITERARRAY(Obj)    ((Obj)->kind == OBJ_ITER && OITER(Obj)->iter_kind == ITER_ARRAY)

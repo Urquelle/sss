@@ -60,33 +60,37 @@ struct Note : Ast_Elem {
     size_t num_exprs;
 };
 
-enum Expr_Kind {
-    EXPR_NONE,
+#define EXPRS        \
+    X(EXPR_NONE)     \
+    X(EXPR_AT)       \
+    X(EXPR_STR)      \
+    X(EXPR_CHAR)     \
+    X(EXPR_INT)      \
+    X(EXPR_FLOAT)    \
+    X(EXPR_BOOL)     \
+    X(EXPR_IDENT)    \
+    X(EXPR_NEW)      \
+    X(EXPR_RUN)      \
+    X(EXPR_KEYWORD)  \
+    X(EXPR_UNARY)    \
+    X(EXPR_CAST)     \
+    X(EXPR_BIN)      \
+    X(EXPR_FIELD)    \
+    X(EXPR_INDEX)    \
+    X(EXPR_PAREN)    \
+    X(EXPR_CALL)     \
+    X(EXPR_RANGE)    \
+    X(EXPR_SIZEOF)   \
+    X(EXPR_TUPLE)    \
+    X(EXPR_TYPEINFO) \
+    X(EXPR_TYPEOF)   \
+    X(EXPR_COMPOUND) \
+    X(EXPR_STMT)     \
 
-    EXPR_AT,
-    EXPR_STR,
-    EXPR_CHAR,
-    EXPR_INT,
-    EXPR_FLOAT,
-    EXPR_BOOL,
-    EXPR_IDENT,
-    EXPR_NEW,
-    EXPR_RUN,
-    EXPR_KEYWORD,
-    EXPR_UNARY,
-    EXPR_CAST,
-    EXPR_BIN,
-    EXPR_FIELD,
-    EXPR_INDEX,
-    EXPR_PAREN,
-    EXPR_CALL,
-    EXPR_RANGE,
-    EXPR_SIZEOF,
-    EXPR_TUPLE,
-    EXPR_TYPEINFO,
-    EXPR_TYPEOF,
-    EXPR_COMPOUND,
-    EXPR_STMT,
+enum Expr_Kind {
+#define X(Elem) Elem,
+    EXPRS
+#undef X
 };
 struct Expr : Ast_Elem {
     Expr_Kind   kind;
@@ -212,13 +216,13 @@ struct Expr_Range : Expr {
 };
 
 struct Expr_Tuple : Expr {
-    Exprs exprs;
-    size_t num_exprs;
+    Exprs   exprs;
+    int32_t num_exprs;
 };
 
 struct Expr_Compound : Expr {
     Compound_Elems elems;
-    size_t         num_elems;
+    int32_t        num_elems;
     bool           is_named;
 };
 
@@ -226,19 +230,24 @@ struct Expr_Stmt : Expr {
     Stmt *stmt;
 };
 
+#define STMTS      \
+    X(STMT_NONE)   \
+    X(STMT_ASSIGN) \
+    X(STMT_BLOCK)  \
+    X(STMT_DECL)   \
+    X(STMT_DEFER)  \
+    X(STMT_EXPR)   \
+    X(STMT_FOR)    \
+    X(STMT_IF)     \
+    X(STMT_MATCH)  \
+    X(STMT_RET)    \
+    X(STMT_WHILE)  \
+    X(STMT_USING)  \
+
 enum Stmt_Kind {
-    STMT_NONE,
-    STMT_ASSIGN,
-    STMT_BLOCK,
-    STMT_DECL,
-    STMT_DEFER,
-    STMT_EXPR,
-    STMT_FOR,
-    STMT_IF,
-    STMT_MATCH,
-    STMT_RET,
-    STMT_WHILE,
-    STMT_USING,
+#define X(Elem) Elem,
+    STMTS
+#undef X
 };
 struct Stmt : Ast_Elem {
     Stmt_Kind kind;
@@ -484,6 +493,34 @@ struct Parsed_File {
 
 Token empty_token_str = {};
 Token * empty_token = &empty_token_str;
+
+char *
+to_str(Stmt *stmt) {
+    switch ( stmt->kind ) {
+#define X(Stmt) case Stmt: return #Stmt;
+        STMTS
+#undef X
+
+        default: {
+            assert(!"unbekannt");
+            return "<unbekannt>";
+        } break;
+    }
+}
+
+char *
+to_str(Expr *expr) {
+    switch ( expr->kind ) {
+#define X(Expr) case Expr: return #Expr;
+        EXPRS
+#undef X
+
+        default: {
+            assert(!"unbekannt");
+            return "<unbekannt>";
+        } break;
+    }
+}
 
 Token *
 token_get(Token_List *tokens) {
@@ -848,7 +885,7 @@ expr_range(Ast_Elem *loc, Expr *left, Expr *right) {
 }
 
 Expr_Compound *
-expr_compound(Ast_Elem *loc, Compound_Elems elems, size_t num_elems, bool is_named) {
+expr_compound(Ast_Elem *loc, Compound_Elems elems, int32_t num_elems, bool is_named) {
     STRUCTK(Expr_Compound, EXPR_COMPOUND);
 
     result->elems     = (Compound_Elems)MEMDUP(elems);
@@ -859,7 +896,7 @@ expr_compound(Ast_Elem *loc, Compound_Elems elems, size_t num_elems, bool is_nam
 }
 
 Expr_Tuple *
-expr_tuple(Ast_Elem *loc, Exprs exprs, size_t num_exprs) {
+expr_tuple(Ast_Elem *loc, Exprs exprs, int32_t num_exprs) {
     STRUCTK(Expr_Tuple, EXPR_TUPLE);
 
     result->exprs     = (Exprs)MEMDUP(exprs);
@@ -1258,6 +1295,27 @@ aggr_field(Loc *loc, char *name, Typespec *typespec, Expr *value) {
     return result;
 }
 
+Proc_Param *
+proc_param(Loc *loc, char *name, Typespec *typespec, Expr *default_value = NULL) {
+    Proc_Param *result = urq_allocs(Proc_Param);
+
+    loc_copy(loc, result);
+
+    result->name     = name;
+    result->typespec = typespec;
+    result->type     = NULL;
+
+    return result;
+}
+
+bool
+ast_valid(Ast_Elem *elem) {
+    bool result = ( elem && !elem->has_error );
+
+    return result;
+}
+
+/* decl {{{ */
 Decl_Type *
 decl_type(Ast_Elem *loc, char *name, Typespec *typespec) {
     STRUCTK(Decl_Type, DECL_TYPE);
@@ -1346,14 +1404,8 @@ decl_impl(Ast_Elem *loc, char *name, Exprs exprs, size_t num_exprs, Stmt *block)
 
     return result;
 }
-
-bool
-ast_valid(Ast_Elem *elem) {
-    bool result = ( elem && !elem->has_error );
-
-    return result;
-}
-
+/* }}} */
+/* stmt {{{ */
 Stmt_Expr *
 stmt_expr(Ast_Elem *loc, Expr *expr) {
     STRUCTK(Stmt_Expr, STMT_EXPR);
@@ -1464,7 +1516,8 @@ stmt_using(Ast_Elem *loc, Expr *expr) {
 
     return result;
 }
-
+/* }}} */
+/* directives {{{ */
 Directive_Import *
 directive_import(Ast_Elem *loc, char *scope_name, bool wildcard, Module_Syms syms,
         size_t num_syms, Parsed_File *parsed_file)
@@ -1498,50 +1551,8 @@ directive_load(Ast_Elem *loc, Parsed_File *parsed_file) {
 
     return result;
 }
-
-Proc_Param *
-proc_param(Loc *loc, char *name, Typespec *typespec, Expr *default_value = NULL) {
-    Proc_Param *result = urq_allocs(Proc_Param);
-
-    loc_copy(loc, result);
-
-    result->name     = name;
-    result->typespec = typespec;
-    result->type     = NULL;
-
-    return result;
-}
-
-Proc_Param *
-parse_proc_param(Token_List *tokens) {
-    Token *loc = token_get(tokens);
-
-    char *name = NULL;
-    Typespec *typespec = NULL;
-    Expr *default_value = NULL;
-
-    if ( token_is(tokens, T_IDENT) ) {
-        Token *first = token_get(tokens);
-        Token *next  = token_peek(tokens, 1);
-
-        if ( next->kind == T_COLON ) {
-            token_eat(tokens, 2);
-            name = first->val_str;
-            typespec = parse_typespec(tokens);
-        } else {
-            typespec = parse_typespec(tokens);
-        }
-    } else {
-        typespec = parse_typespec(tokens);
-    }
-
-    if ( token_match(tokens, T_EQL_ASSIGN) ) {
-        default_value = parse_expr(tokens);
-    }
-
-    return proc_param(loc, name, typespec, default_value);
-}
-
+/* }}} */
+/* typespec {{{ */
 Typespec_Name *
 typespec_name(Ast_Elem *loc, char *name) {
     STRUCTK(Typespec_Name, TYPESPEC_NAME);
@@ -1657,6 +1668,37 @@ parse_typespec(Token_List *tokens) {
 
     return result;
 }
+/* }}} */
+
+Proc_Param *
+parse_proc_param(Token_List *tokens) {
+    Token *loc = token_get(tokens);
+
+    char *name = NULL;
+    Typespec *typespec = NULL;
+    Expr *default_value = NULL;
+
+    if ( token_is(tokens, T_IDENT) ) {
+        Token *first = token_get(tokens);
+        Token *next  = token_peek(tokens, 1);
+
+        if ( next->kind == T_COLON ) {
+            token_eat(tokens, 2);
+            name = first->val_str;
+            typespec = parse_typespec(tokens);
+        } else {
+            typespec = parse_typespec(tokens);
+        }
+    } else {
+        typespec = parse_typespec(tokens);
+    }
+
+    if ( token_match(tokens, T_EQL_ASSIGN) ) {
+        default_value = parse_expr(tokens);
+    }
+
+    return proc_param(loc, name, typespec, default_value);
+}
 
 Decl_Type *
 parse_decl_type(Token_List *tokens, char *name) {
@@ -1710,6 +1752,28 @@ parse_aggr_block(Token_List *tokens) {
     return fields;
 }
 
+Proc_Sign *
+parse_proc_sign(Token_List *tokens) {
+    Token *curr = token_get(tokens);
+
+    token_expect(tokens, T_LPAREN);
+    Proc_Params params = NULL;
+    if ( !token_is(tokens, T_RPAREN) ) {
+        do {
+            buf_push(params, parse_proc_param(tokens));
+            token_match(tokens, T_COMMA);
+        } while ( !token_is(tokens, T_RPAREN) );
+    }
+    token_expect(tokens, T_RPAREN);
+
+    Proc_Params rets = NULL;
+    if ( token_match(tokens, T_ARROW) ) {
+        buf_push(rets, parse_proc_param(tokens));
+    }
+
+    return proc_sign(curr, params, (uint32_t)buf_len(params), rets, (uint32_t)buf_len(rets));
+}
+
 Decl_Enum *
 parse_decl_enum(Token_List *tokens, char *name) {
     Token *curr = token_get(tokens);
@@ -1745,28 +1809,6 @@ parse_decl_struct(Token_List *tokens, char *name) {
     Aggr_Fields fields = parse_aggr_block(tokens);
 
     return decl_struct(curr, name, fields, buf_len(fields));
-}
-
-Proc_Sign *
-parse_proc_sign(Token_List *tokens) {
-    Token *curr = token_get(tokens);
-
-    token_expect(tokens, T_LPAREN);
-    Proc_Params params = NULL;
-    if ( !token_is(tokens, T_RPAREN) ) {
-        do {
-            buf_push(params, parse_proc_param(tokens));
-            token_match(tokens, T_COMMA);
-        } while ( !token_is(tokens, T_RPAREN) );
-    }
-    token_expect(tokens, T_RPAREN);
-
-    Proc_Params rets = NULL;
-    if ( token_match(tokens, T_ARROW) ) {
-        buf_push(rets, parse_proc_param(tokens));
-    }
-
-    return proc_sign(curr, params, (uint32_t)buf_len(params), rets, (uint32_t)buf_len(rets));
 }
 
 Decl_Proc *
