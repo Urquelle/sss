@@ -2292,7 +2292,7 @@ parse(Token_List *tokens) {
     KEYWORD_K(falsch, false);
     KEYWORD_K(iter, for);
     KEYWORD(free);
-    KEYWORD(from);
+    KEYWORD_K(aus, from);
     KEYWORD_K(falls, if);
     KEYWORD(impl);
     KEYWORD(import);

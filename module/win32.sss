@@ -6,9 +6,10 @@
     Creation_Disposition,
     Access,
 
-    WriteConsoleA as write_console,
-    GetStdHandle  as get_std_handle,
+    CloseHandle   as close_file,
     CreateFileA   as open_file,
+    GetStdHandle  as get_std_handle,
+    WriteConsoleA as write_console,
     WriteFile     as write_file,
 }
 
@@ -16,6 +17,7 @@ PVOID  :: typedef *void;
 HANDLE :: typedef PVOID;
 DWORD  :: typedef u32;
 PDWORD :: typedef *DWORD;
+BOOL   :: typedef bool;
 
 Sharing_Mode :: enum {
     NONE              :: 16b0000_0000;
@@ -73,7 +75,7 @@ WriteConsoleA :: proc(hConsoleOutput         : PVOID,
                       lpNumberOfCharsWritten : PDWORD,
                       lpReserved             : PVOID) #sys_call "kernel32.dll";
 
-CreateFileA   :: proc(lpFileName             : PVOID,
+CreateFileA   :: proc(lpFileName             : string,
                       dwDesiredAccess        : DWORD,
                       dwShareMode            : DWORD,
                       lpSecurityAttributes   : *Security_Attributes,
@@ -86,4 +88,6 @@ WriteFile     :: proc(hFile                  : HANDLE,
                       nNumberOfBytesToWrite  : DWORD,
                       lpNumberOfBytesWritten : PDWORD,
                       lpOverlapped           : *Overlapped) -> bool #sys_call "kernel32.dll";
+
+CloseHandle   :: proc(hObject                : HANDLE ) -> BOOL #sys_call "kernel32.dll";
 
