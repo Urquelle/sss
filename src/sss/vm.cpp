@@ -1,6 +1,6 @@
 namespace Vm {
 
-uint32_t entry_point_index;
+int32_t entry_point_index;
 
 struct Bytecode;
 struct Call_Frame;
@@ -193,6 +193,7 @@ enum Bytecode_Flags {
 
 void               bytecode_build_file(Bytecode *bc, Parsed_File *file);
 bool               bytecode_sym_set(Obj_String *key, Value val, uint32_t flags = BYTECODEFLAG_NONE);
+bool               bytecode_sym_get(Obj_String *key, Value *val);
 int32_t            bytecode_emit_const(Loc *loc, Bytecode *bc, Value val);
 void               bytecode_debug(Vm *vm, int32_t code);
 void               bytecode_stmt(Bytecode *bc, Stmt *stmt);
@@ -210,7 +211,8 @@ Call_Frame       * vm_curr_frame(Vm *vm);
 Obj_Proc         * obj_proc();
 Obj_Proc         * as_proc(Value val);
 Obj_Struct       * as_struct(Value val);
-Obj_Aggr_Field * as_struct_field(Value val);
+Obj_Aggr_Field   * as_struct_field(Value val);
+Value              operator-(Value left, Value right);
 
 
 #define AS_NAMESPACE(Val) ((Obj_Namespace *)(Val).o)
@@ -1298,11 +1300,11 @@ Value
 operator+(Value left, int32_t right) {
     switch ( left.kind ) {
         case VAL_INT: {
-            return val_int(left.int_val + right);
+            return val_int(left.i64 + right);
         } break;
 
         case VAL_FLOAT: {
-            return val_float(left.flt_val + right);
+            return val_float(left.f32 + right);
         } break;
 
         case VAL_OBJ: {
@@ -1336,7 +1338,7 @@ operator+(Value left, Value right) {
     switch ( left.kind ) {
         case VAL_INT: {
             if ( right.kind == VAL_INT ) {
-                return val_int(left.int_val + right.int_val);
+                return val_int(left.i64 + right.i64);
             } else {
                 assert(right.kind == VAL_OBJ && right.obj_val->kind == OBJ_ITER);
                 Value iter = ((Obj_Iter *)right.obj_val)->iter;
@@ -1347,7 +1349,7 @@ operator+(Value left, Value right) {
 
         case VAL_FLOAT: {
             assert(right.kind == VAL_FLOAT);
-            return val_float(left.flt_val + right.flt_val);
+            return val_float(left.f32 + right.f32);
         } break;
 
         default: {
@@ -1364,12 +1366,12 @@ operator-(Value left, Value right) {
     switch ( left.kind ) {
         case VAL_INT: {
             assert(right.kind == VAL_INT);
-            return val_int(left.int_val - right.int_val);
+            return val_int(left.i64 - right.i64);
         } break;
 
         case VAL_FLOAT: {
             assert(right.kind == VAL_FLOAT);
-            return val_float(left.flt_val - right.flt_val);
+            return val_float(left.f32 - right.f32);
         } break;
 
         default: {
@@ -2474,7 +2476,7 @@ bytecode_stmt(Bytecode *bc, Stmt *stmt) {
         } break;
 
         default: {
-            report_error(stmt, "unbekannte anweisung");
+            report_error(stmt, "unbekannte anweisung: %s", to_str(stmt));
         } break;
     }
 }

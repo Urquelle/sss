@@ -2282,7 +2282,7 @@ parse(Token_List *tokens) {
 #define KEYWORD(Key) KEYWORD_K(Key, Key)
     KEYWORD(api);
     KEYWORD(as);
-    KEYWORD_K(weg, break);
+    KEYWORD_K(raus, break);
     KEYWORD_K(als, cast);
     KEYWORD(const);
     KEYWORD_K(defer, defer);
