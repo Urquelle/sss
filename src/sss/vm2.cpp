@@ -35,10 +35,6 @@ enum Vm_Op {
     OP_CALL,
 };
 
-struct Vm_Reg {
-    uint64_t val;
-};
-
 #define REGS  \
     X(RAX)    \
     X(RBX)    \
@@ -59,35 +55,35 @@ struct Vm_Reg {
     X(RIP)    \
     X(RFLAGS)
 
-enum Vm_Regs64 {
+enum Vm_Reg64 {
 #define X(Reg) REG_ ## Reg,
     REGS
 #undef X
     REG_COUNT,
 };
 
-enum Vm_Regs32 {
+enum Vm_Reg32 {
     REG_EAX,
     REG_EBX,
     REG_ECX,
     REG_EDX,
 };
 
-enum Vm_Regs16 {
+enum Vm_Reg16 {
     REG_AX,
     REG_BX,
     REG_CX,
     REG_DX,
 };
 
-enum Vm_Regs8h {
+enum Vm_Reg8h {
     REG_AH,
     REG_BH,
     REG_CH,
     REG_DH,
 };
 
-enum Vm_Regs8l {
+enum Vm_Reg8l {
     REG_AL,
     REG_BL,
     REG_CL,
@@ -141,17 +137,18 @@ struct Operand {
 
     union {
         uint64_t  addr;
-        Vm_Regs64 reg64;
-        Vm_Regs32 reg32;
-        Vm_Regs16 reg16;
-        Vm_Regs8l reg8l;
-        Vm_Regs8h reg8h;
+        Vm_Reg64 reg64;
+        Vm_Reg32 reg32;
+        Vm_Reg16 reg16;
+        Vm_Reg8l reg8l;
+        Vm_Reg8h reg8h;
         Value     val;
     };
 };
 
 struct Instr : Loc {
     char    * label;
+    char    * comment;
     Vm_Op     op;
 
     union {
@@ -174,43 +171,43 @@ struct Cpu {
     Instrs   instrs;
     uint32_t num_instrs;
 
-    Vm_Reg   regs[REG_COUNT];
+    uint64_t regs[REG_COUNT];
     uint8_t  stack[MAX_STACK_SIZE];
 };
 
 Instrs vm_instrs;
 
 uint64_t
-reg_read(Cpu *cpu, Vm_Regs64 reg) {
-    uint64_t result = cpu->regs[reg].val;
+reg_read(Cpu *cpu, Vm_Reg64 reg) {
+    uint64_t result = cpu->regs[reg];
 
     return result;
 }
 
 uint32_t
-reg_read(Cpu *cpu, Vm_Regs32 reg) {
-    uint32_t result = (uint32_t)(cpu->regs[reg].val & 0xffffffff);
+reg_read(Cpu *cpu, Vm_Reg32 reg) {
+    uint32_t result = (uint32_t)(cpu->regs[reg] & 0xffffffff);
 
     return result;
 }
 
 uint16_t
-reg_read(Cpu *cpu, Vm_Regs16 reg) {
-    uint16_t result = (uint16_t)(cpu->regs[reg].val & 0xffff);
+reg_read(Cpu *cpu, Vm_Reg16 reg) {
+    uint16_t result = (uint16_t)(cpu->regs[reg] & 0xffff);
 
     return result;
 }
 
 uint16_t
-reg_read(Cpu *cpu, Vm_Regs8l reg) {
-    uint8_t result = (uint8_t)(cpu->regs[reg].val & 0xff);
+reg_read(Cpu *cpu, Vm_Reg8l reg) {
+    uint8_t result = (uint8_t)(cpu->regs[reg] & 0xff);
 
     return result;
 }
 
 uint16_t
-reg_read(Cpu *cpu, Vm_Regs8h reg) {
-    uint8_t result = (uint8_t)((cpu->regs[reg].val >> 2) & 0xff00);
+reg_read(Cpu *cpu, Vm_Reg8h reg) {
+    uint8_t result = (uint8_t)((cpu->regs[reg] >> 2) & 0xff00);
 
     return result;
 }
@@ -246,30 +243,30 @@ reg_read(Cpu *cpu, Operand op) {
 }
 
 void
-reg_write(Cpu *cpu, Vm_Regs64 reg, uint64_t val) {
-    cpu->regs[reg].val = val;
+reg_write(Cpu *cpu, Vm_Reg64 reg, uint64_t val) {
+    cpu->regs[reg] = val;
 }
 
 void
-reg_write(Cpu *cpu, Vm_Regs32 reg, uint32_t val) {
-    cpu->regs[reg].val = (cpu->regs[reg].val & 0xffffffff00000000) | val;
+reg_write(Cpu *cpu, Vm_Reg32 reg, uint32_t val) {
+    cpu->regs[reg] = (cpu->regs[reg] & 0xffffffff00000000) | val;
 }
 
 void
-reg_write(Cpu *cpu, Vm_Regs16 reg, uint16_t val) {
-    cpu->regs[reg].val = (cpu->regs[reg].val & 0xffffffffffff0000) | val;
+reg_write(Cpu *cpu, Vm_Reg16 reg, uint16_t val) {
+    cpu->regs[reg] = (cpu->regs[reg] & 0xffffffffffff0000) | val;
 }
 
 void
-reg_write(Cpu *cpu, Vm_Regs8l reg, uint8_t val) {
-    cpu->regs[reg].val = (cpu->regs[reg].val & 0xffffffffffffff00) | val;
+reg_write(Cpu *cpu, Vm_Reg8l reg, uint8_t val) {
+    cpu->regs[reg] = (cpu->regs[reg] & 0xffffffffffffff00) | val;
 }
 
 void
-reg_write(Cpu *cpu, Vm_Regs8h reg, uint8_t val) {
+reg_write(Cpu *cpu, Vm_Reg8h reg, uint8_t val) {
     uint16_t temp = val;
 
-    cpu->regs[reg].val = (cpu->regs[reg].val & 0xffffffffffff00ff) | ((temp << 2) & 0xff00);
+    cpu->regs[reg] = (cpu->regs[reg] & 0xffffffffffff00ff) | ((temp << 2) & 0xff00);
 }
 
 void
@@ -393,7 +390,7 @@ operand_imm(Value val) {
 }
 
 Operand
-operand_reg(Vm_Regs64 reg) {
+operand_reg(Vm_Reg64 reg) {
     Operand result = {};
 
     result.kind  = OPERAND_REG64;
@@ -403,7 +400,7 @@ operand_reg(Vm_Regs64 reg) {
 }
 
 Operand
-operand_reg(Vm_Regs32 reg) {
+operand_reg(Vm_Reg32 reg) {
     Operand result = {};
 
     result.kind  = OPERAND_REG32;
@@ -413,7 +410,7 @@ operand_reg(Vm_Regs32 reg) {
 }
 
 Operand
-operand_reg(Vm_Regs16 reg) {
+operand_reg(Vm_Reg16 reg) {
     Operand result = {};
 
     result.kind  = OPERAND_REG16;
@@ -423,7 +420,7 @@ operand_reg(Vm_Regs16 reg) {
 }
 
 Operand
-operand_reg(Vm_Regs8l reg) {
+operand_reg(Vm_Reg8l reg) {
     Operand result = {};
 
     result.kind  = OPERAND_REG8L;
@@ -433,7 +430,7 @@ operand_reg(Vm_Regs8l reg) {
 }
 
 Operand
-operand_reg(Vm_Regs8h reg) {
+operand_reg(Vm_Reg8h reg) {
     Operand result = {};
 
     result.kind  = OPERAND_REG8H;
@@ -453,12 +450,13 @@ operand_name(Value name) {
 }
 
 Instr *
-vm_instr(Loc *loc, Vm_Op op, Operand operand1, Operand operand2, char *label = NULL) {
+vm_instr(Loc *loc, Vm_Op op, Operand operand1, Operand operand2, char *label = NULL, char *comment = NULL) {
     Instr *result = urq_allocs(Instr);
 
     loc_copy(loc, result);
 
     result->label    = label;
+    result->comment  = comment;
     result->op       = op;
     result->operand1 = operand1;
     result->operand2 = operand2;
@@ -467,15 +465,15 @@ vm_instr(Loc *loc, Vm_Op op, Operand operand1, Operand operand2, char *label = N
 }
 
 Instr *
-vm_instr(Loc *loc, Vm_Op op, Operand operand1) {
-    Instr *result = vm_instr(loc, op, operand1, {});
+vm_instr(Loc *loc, Vm_Op op, Operand operand1, char *label = NULL, char *comment = NULL) {
+    Instr *result = vm_instr(loc, op, operand1, {}, label, comment);
 
     return result;
 }
 
 Instr *
-vm_instr(Loc *loc, Vm_Op op) {
-    Instr *result = vm_instr(loc, op, {}, {});
+vm_instr(Loc *loc, Vm_Op op, char *label = NULL, char *comment = NULL) {
+    Instr *result = vm_instr(loc, op, {}, {}, label, comment);
 
     return result;
 }
@@ -540,7 +538,7 @@ vm_stack_push(Cpu *cpu, uint64_t val) {
 }
 
 void
-vm_stack_pop(Cpu *cpu, Vm_Regs64 reg) {
+vm_stack_pop(Cpu *cpu, Vm_Reg64 reg) {
     assert(reg_read(cpu, REG_RSP) < MAX_STACK_SIZE);
 
     rsp_inc(cpu);
@@ -552,7 +550,7 @@ vm_stack_pop(Cpu *cpu, Vm_Regs64 reg) {
 }
 
 void
-vm_stack_pop(Cpu *cpu, Vm_Regs32 reg) {
+vm_stack_pop(Cpu *cpu, Vm_Reg32 reg) {
     assert(reg_read(cpu, REG_RSP) < MAX_STACK_SIZE);
 
     rsp_inc(cpu);
@@ -564,7 +562,7 @@ vm_stack_pop(Cpu *cpu, Vm_Regs32 reg) {
 }
 
 void
-vm_stack_pop(Cpu *cpu, Vm_Regs16 reg) {
+vm_stack_pop(Cpu *cpu, Vm_Reg16 reg) {
     assert(reg_read(cpu, REG_RSP) < MAX_STACK_SIZE);
 
     rsp_inc(cpu);
@@ -576,7 +574,7 @@ vm_stack_pop(Cpu *cpu, Vm_Regs16 reg) {
 }
 
 void
-vm_stack_pop(Cpu *cpu, Vm_Regs8l reg) {
+vm_stack_pop(Cpu *cpu, Vm_Reg8l reg) {
     assert(reg_read(cpu, REG_RSP) < MAX_STACK_SIZE);
 
     rsp_inc(cpu);
@@ -588,7 +586,7 @@ vm_stack_pop(Cpu *cpu, Vm_Regs8l reg) {
 }
 
 void
-vm_stack_pop(Cpu *cpu, Vm_Regs8h reg) {
+vm_stack_pop(Cpu *cpu, Vm_Reg8h reg) {
     assert(reg_read(cpu, REG_RSP) < MAX_STACK_SIZE);
 
     rsp_inc(cpu);
@@ -674,7 +672,7 @@ vm_expr(Expr *expr) {
                 vm_emit(vm_instr(expr, OP_SETLE, operand_reg(REG_RAX)));
             } else if ( EBIN(expr)->op == BIN_EQ ) {
                 vm_emit(vm_instr(expr, OP_CMP, operand_reg(REG_RAX), operand_reg(REG_RDI)));
-                vm_emit(vm_instr(expr, OP_SETE, operand_reg(REG_AL)));
+                vm_emit(vm_instr(expr, OP_SETE, operand_reg(REG_AL), NULL, "brauchen wir das alles?"));
                 vm_emit(vm_instr(expr, OP_MOVZX, operand_reg(REG_AL), operand_reg(REG_EAX)));
             } else if ( EBIN(expr)->op == BIN_GTE ) {
                 vm_emit(vm_instr(expr, OP_CMP, operand_reg(REG_RAX), operand_reg(REG_RDI)));

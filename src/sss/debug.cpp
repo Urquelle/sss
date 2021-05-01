@@ -175,6 +175,10 @@ to_str(Instr *instr) {
         } break;
     }
 
+    if ( instr->comment ) {
+        output = buf_printf(output, "    ; %s", instr->comment);
+    }
+
     return output;
 }
 
