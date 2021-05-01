@@ -676,6 +676,12 @@ vm_expr(Expr *expr) {
                 vm_emit(vm_instr(expr, OP_CMP, operand_reg(REG_RAX), operand_reg(REG_RDI)));
                 vm_emit(vm_instr(expr, OP_SETE, operand_reg(REG_AL)));
                 vm_emit(vm_instr(expr, OP_MOVZX, operand_reg(REG_AL), operand_reg(REG_EAX)));
+            } else if ( EBIN(expr)->op == BIN_GTE ) {
+                vm_emit(vm_instr(expr, OP_CMP, operand_reg(REG_RAX), operand_reg(REG_RDI)));
+                vm_emit(vm_instr(expr, OP_SETGE, operand_reg(REG_RAX)));
+            } else if ( EBIN(expr)->op == BIN_GT ) {
+                vm_emit(vm_instr(expr, OP_CMP, operand_reg(REG_RAX), operand_reg(REG_RDI)));
+                vm_emit(vm_instr(expr, OP_SETG, operand_reg(REG_RAX)));
             } else {
                 assert(0);
             }
@@ -834,11 +840,13 @@ vm_step(Cpu *cpu) {
             reg_write(cpu, REG_RAX, operand1 - operand2);
 
             if ( operand2 > operand1 ) {
-                flags_set(cpu, RFLAG_OF);
+                flags_set(cpu, RFLAG_CF);
+                flags_clear(cpu, RFLAG_ZF);
             } else if ( operand1 == operand2 ) {
                 flags_set(cpu, RFLAG_ZF);
+                flags_clear(cpu, RFLAG_CF);
             } else {
-                flags_clear(cpu, RFLAG_OF | RFLAG_ZF);
+                flags_clear(cpu, RFLAG_CF | RFLAG_ZF);
             }
         } break;
 
@@ -919,10 +927,46 @@ vm_step(Cpu *cpu) {
             }
         } break;
 
+        case OP_SETL: {
+            assert(operand_is_reg(instr->dst));
+
+            // SF≠OF
+            reg_write(cpu, instr->dst, flag_state(cpu, RFLAG_SF) != flag_state(cpu, RFLAG_OF));
+        } break;
+
+        case OP_SETLE: {
+            assert(operand_is_reg(instr->dst));
+
+            // ZF=1 or SF≠OF
+            reg_write(cpu, instr->dst, flag_state(cpu, RFLAG_ZF) || (flag_state(cpu, RFLAG_SF) != flag_state(cpu, RFLAG_OF)));
+        } break;
+
         case OP_SETE: {
             assert(operand_is_reg(instr->dst));
 
+            // SF≠OF
             reg_write(cpu, instr->dst, flag_state(cpu, RFLAG_ZF));
+        } break;
+
+        case OP_SETGE: {
+            assert(operand_is_reg(instr->dst));
+
+            // SF=OF
+            reg_write(cpu, instr->dst, flag_state(cpu, RFLAG_SF) == flag_state(cpu, RFLAG_OF));
+        } break;
+
+        case OP_SETG: {
+            assert(operand_is_reg(instr->dst));
+
+            // ZF=0 and SF≠OF
+            reg_write(cpu, instr->dst, !flag_state(cpu, RFLAG_ZF) && flag_state(cpu, RFLAG_SF) == flag_state(cpu, RFLAG_OF));
+        } break;
+
+        case OP_SETNE: {
+            assert(operand_is_reg(instr->dst));
+
+            // ZF=0
+            reg_write(cpu, instr->dst, !flag_state(cpu, RFLAG_ZF));
         } break;
 
         default: {

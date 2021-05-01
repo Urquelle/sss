@@ -146,8 +146,28 @@ to_str(Instr *instr) {
             output = buf_printf(output, to_str_binop("cmp", instr));
         } break;
 
+        case OP_SETL: {
+            output = buf_printf(output, "setl %s", to_str(instr->dst));
+        } break;
+
+        case OP_SETLE: {
+            output = buf_printf(output, "setle %s", to_str(instr->dst));
+        } break;
+
         case OP_SETE: {
             output = buf_printf(output, "sete %s", to_str(instr->dst));
+        } break;
+
+        case OP_SETGE: {
+            output = buf_printf(output, "setge %s", to_str(instr->dst));
+        } break;
+
+        case OP_SETG: {
+            output = buf_printf(output, "setg %s", to_str(instr->dst));
+        } break;
+
+        case OP_SETNE: {
+            output = buf_printf(output, "setne %s", to_str(instr->dst));
         } break;
 
         default: {
