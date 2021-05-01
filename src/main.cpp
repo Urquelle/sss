@@ -64,6 +64,12 @@ int main(int argc, char* argv[]) {
 
     parse_args(argc, argv, args, true);
 
+    auto ts = tokenize("<0>", "(5 + 5) / 2 - 3 == 1;");
+    auto as = parse(&ts);
+    auto bc = vm_compile(as);
+    vm_debug(bc, "output.S");
+    vm_eval(bc);
+
     if ( argc < 2 ) {
         sss_repl();
     } else {
@@ -73,9 +79,11 @@ int main(int argc, char* argv[]) {
         auto tokens   = tokenize(file_name, content);
         auto ast      = parse(&tokens);
                         resolve(ast);
+#if 0
         auto code     = build(ast);
              code     = optimize(code);
                         eval(code);
+#endif
     }
 
     return 0;

@@ -9,10 +9,19 @@ namespace Urq { namespace Sss {
 
 char * entry_point = "master";
 
+char * prop_id     = "id";
+char * prop_size   = "größe";
+char * prop_name   = "name";
+char * prop_offset = "versatz";
+char * prop_base   = "basis";
+char * prop_fields = "felder";
+char * prop_params = "parameter";
+char * prop_rets   = "rückgabewerte";
+char * prop_num    = "anzahl";
+
 struct Compound_Elem;
 struct Decl;
 struct Directive;
-struct Enum_Field;
 struct Expr;
 struct Match_Line;
 struct Module_Sym;
@@ -40,7 +49,6 @@ struct Typespec;
 typedef Compound_Elem ** Compound_Elems;
 typedef Decl          ** Decls;
 typedef Directive     ** Directives;
-typedef Enum_Field    ** Enum_Fields;
 typedef Expr          ** Exprs;
 typedef Match_Line    ** Match_Lines;
 typedef Module_Sym    ** Module_Syms;
@@ -61,7 +69,7 @@ Stmt_If                * parse_stmt_if(Token_List *tokens);
 Stmt_For               * parse_stmt_for(Token_List *tokens);
 Stmt_Match             * parse_stmt_match(Token_List *tokens);
 Typespec               * parse_typespec(Token_List *tokens);
-Proc_Param *             parse_proc_param(Token_List *tokens);
+Proc_Param             * parse_proc_param(Token_List *tokens);
 void                     resolve(Parsed_File *parsed_file, bool check_entry_point = true);
 void                     resolve_file(Parsed_File *parsed_file);
 Type                   * resolve_decl(Decl *d);
@@ -156,6 +164,7 @@ void                     type_complete(Type *type);
 #define IS_VITER(Val)         (IS_VOBJ(Val) && (Val).o->kind == OBJ_ITER)
 
 #define VOBJ(Val)             ((Val).o)
+#define VNS(Val)              ((Obj_Namespace *)(Val).o)
 #define VCMPND(Val)           ((Obj_Compound *)(Val).o)
 #define VSTRUCT(Val)          ((Obj_Struct *)(Val).o)
 #define VRANGE(Val)           ((Obj_Range *)(Val).o)
@@ -165,6 +174,7 @@ void                     type_complete(Type *type);
 #define VTYPE(Val)            ((Obj_Type *)(Val).o)
 #define VPTR(Val)             ((Obj_Ptr *)(Val).o)
 #define VAGGRFIELD(Val)       ((Obj_Aggr_Field *)(Val).o)
+#define VITER(Val)            ((Obj_Iter *)(Val).o)
 
 #define OITER(Obj)            ((Obj_Iter *)(Obj))
 #define OITERRNG(Obj)         ((Obj_Iter_Range *)(Obj))
@@ -178,7 +188,9 @@ void                     type_complete(Type *type);
 #include "lex.cpp"
 #include "parser.cpp"
 #include "resolver.cpp"
-#include "vm.cpp"
+//#include "vm.cpp"
+#include "vm2.cpp"
+#include "debug.cpp"
 
 void sss_repl() {
     char buf[1000];
@@ -190,20 +202,29 @@ void sss_repl() {
         auto tokens   = tokenize("<repl>", buf);
         auto ast      = parse(&tokens);
                         resolve(ast, false);
+#if 0
         auto code     = Vm::build(ast);
                         Vm::eval(code);
+#endif
     }
 }
 
 namespace api {
+#if 0
     using Urq::Sss::Vm::build;
     using Urq::Sss::Vm::optimize;
+#endif
 
     using Urq::Sss::parse;
     using Urq::Sss::resolve;
     using Urq::Sss::resolver_init;
     using Urq::Sss::sss_repl;
     using Urq::Sss::tokenize;
+
+    using Urq::Sss::vm_debug;
+
+    // VM2
+    using Urq::Sss::Vm2::vm_compile;
 }
 
 }}

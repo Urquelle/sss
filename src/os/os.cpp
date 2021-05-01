@@ -137,6 +137,22 @@ os_file_read(char *filename, char **result, size_t *size = 0) {
     return true;
 }
 
+static bool
+os_file_write(char *filename, char *data, size_t len) {
+    HANDLE file = CreateFileA(filename, GENERIC_WRITE, FILE_SHARE_WRITE, 0, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, 0);
+
+    if ( file == INVALID_HANDLE_VALUE ) {
+        return false;
+    }
+
+    DWORD bytes_written = 0;
+    HRESULT h = WriteFile(file, data, (DWORD)len, &bytes_written, NULL);
+
+    CloseHandle(file);
+
+    return SUCCEEDED(h);
+}
+
 void *
 os_alloc(size_t size) {
     void *result = VirtualAlloc(NULL, size, MEM_RESERVE|MEM_COMMIT, PAGE_READWRITE);
@@ -165,6 +181,7 @@ os_init() {
 
 namespace api {
     using Urq::Os::os_file_read;
+    using Urq::Os::os_file_write;
     using Urq::Os::os_alloc;
     using Urq::Os::os_env;
     using Urq::Os::os_init;

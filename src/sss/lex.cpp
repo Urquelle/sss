@@ -1,8 +1,9 @@
 Map interns;
 
 struct Ast_Elem : Loc {
-    bool has_error;
-    char *error_msg;
+    bool   has_error;
+    char * error_msg;
+    bool   dump_ir;
 };
 
 enum Token_Kind {

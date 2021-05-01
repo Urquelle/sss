@@ -4,6 +4,10 @@ Vec3 :: struktur {
     x, y, z : s32;
 }
 
+T :: struktur {
+    mit a : Vec3;
+}
+
 z := new Vec3;
 a : s32 = 5 + 3;
 b := a + 1;
@@ -27,7 +31,18 @@ falls a == b {
     b = 0;
 }
 
-iter b..a {
+asdf :: proc(mit bla: Vec3) {
+    temp_x := x;
+}
+
+alfa :: proc() -> u32 {
+    res 1;
+}
+
+omega :: proc() -> u32 {
+    res 10;
+}
+iter alfa()..omega() {
     b = b + it;
 }
 
@@ -54,6 +69,11 @@ i := typeinfo(typeof(h));
 j := "abcdefg";
 k := j[0];
 l := 'a';
+m := "ᚻᚨᛚᛚᛟ".anzahl;
+
+falls m > 0 {
+    Sys.ausgabe("ᛟ ist größer 0");
+}
 
 iter feld: i.felder {
     Sys.ausgabe(feld.name);

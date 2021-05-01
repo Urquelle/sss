@@ -49,7 +49,7 @@ struct Value {
 
     union {
         char    chr;
-        int32_t i32;
+        int32_t s32;
         float   f32;
         char *  str;
         bool    b;
@@ -102,7 +102,7 @@ struct Type {
 
     uint32_t size;
     uint32_t align;
-    uint32_t id;
+    uint16_t id;
 
     Sym   * sym;
     char  * name;
@@ -154,7 +154,7 @@ struct Type_Variadic : Type {
 };
 
 enum { PTR_SIZE = 8 };
-uint32_t type_id   = 1;
+uint16_t global_type_id = 1;
 
 Type *type_void;
 Type *type_char;
@@ -209,7 +209,7 @@ val_int(int32_t val) {
     Value result = {};
 
     result.kind = VAL_INT;
-    result.i32  = val;
+    result.s32  = val;
 
     return result;
 }
@@ -252,7 +252,7 @@ type_new( uint32_t size, Type_Kind kind ) {
     result->sym   = NULL;
     result->size  = size;
     result->align = 0;
-    result->id    = type_id++;
+    result->id    = global_type_id++;
     result->scope = scope_new("type");
 
     buf_push(types, result);
@@ -266,10 +266,11 @@ type_string_new() {
 
     result->kind  = TYPE_STRING;
     result->size  = sizeof(uint64_t) + PTR_SIZE;
-    result->id    = type_id++;
+    result->id    = global_type_id++;
     result->scope = scope_new("string");
 
-    sym_push_scope(&loc_none, result->scope, "größe", type_u64);
+    sym_push_scope(&loc_none, result->scope, prop_size, type_u64);
+    sym_push_scope(&loc_none, result->scope, prop_num, type_u64);
 
     buf_push(types, result);
 
@@ -284,7 +285,7 @@ type_incomplete_struct(Sym *sym) {
     result->sym   = sym;
     result->size  = 0;
     result->align = 0;
-    result->id    = type_id++;
+    result->id    = global_type_id++;
     result->scope = scope_new(sym->name);
 
     buf_push(types, result);
@@ -300,7 +301,7 @@ type_incomplete_enum(Sym *sym) {
     result->sym   = sym;
     result->size  = 0;
     result->align = 0;
-    result->id    = type_id++;
+    result->id    = global_type_id++;
     result->scope = scope_new(sym->name);
 
     buf_push(types, result);
@@ -316,7 +317,7 @@ type_incomplete_union(Sym *sym) {
     result->sym   = sym;
     result->size  = 0;
     result->align = 0;
-    result->id    = type_id++;
+    result->id    = global_type_id++;
     result->scope = scope_new(sym->name);
 
     buf_push(types, result);
@@ -331,7 +332,7 @@ type_union() {
     result->kind  = TYPE_UNION;
     result->size  = 0;
     result->align = 0;
-    result->id    = type_id++;
+    result->id    = global_type_id++;
     result->scope = scope_new("union");
 
     buf_push(types, result);
@@ -358,7 +359,7 @@ type_compound(Compound_Elems elems, uint32_t num_elems) {
     result->sym       = NULL;
     result->size      = 0;
     result->align     = 0;
-    result->id        = type_id++;
+    result->id        = global_type_id++;
     result->scope     = NULL;
     result->elems     = elems;
     result->num_elems = num_elems;
@@ -527,7 +528,7 @@ type_array(Type *base, size_t num_elems) {
     result->num_elems = num_elems;
     result->scope     = scope_new("array");
 
-    sym_push_scope(&loc_none, result->scope, "größe", type_u64);
+    sym_push_scope(&loc_none, result->scope, prop_size, type_u64);
 
     return result;
 }
@@ -767,6 +768,8 @@ sym_resolve(Sym *sym) {
         } break;
     }
 
+    sym->decl->sym = sym;
+    sym->decl->type = sym->type;
     sym->state = SYMSTATE_RESOLVED;
 }
 
@@ -894,9 +897,9 @@ resolve_expr(Expr *expr, Type *given_type = NULL) {
             Operand *left = resolve_expr(EBIN(expr)->left);
             Operand *right = resolve_expr(EBIN(expr)->right);
 
-            if ( EBIN(expr)->op >= OP_CMP_START && EBIN(expr)->op <= OP_CMP_END ) {
+            if ( EBIN(expr)->op >= BIN_CMP_START && EBIN(expr)->op <= BIN_CMP_END ) {
                 result = operand(type_bool);
-            } else if ( EBIN(expr)->op >= OP_MATH_START && EBIN(expr)->op <= OP_MATH_END ) {
+            } else if ( EBIN(expr)->op >= BIN_MATH_START && EBIN(expr)->op <= BIN_MATH_END ) {
                 if ( left->is_const && right->is_const ) {
                     result = operand_const(left->type);
                 } else {
@@ -954,8 +957,21 @@ resolve_expr(Expr *expr, Type *given_type = NULL) {
 
             Type_Proc *op_type = TPROC(op->type);
 
-            if ( op_type->num_params != ECALL(expr)->num_args ) {
-                report_error(expr, "argumente übergeben %d, erwartet wurden %d", ECALL(expr)->num_args, op_type->num_params);
+            bool variadic = false;
+            if ( op_type->num_params ) {
+                Proc_Param *param = op_type->params[op_type->num_params-1];
+
+                if (param->typespec->kind == TYPESPEC_VARIADIC) {
+                    variadic = true;
+                }
+            }
+
+            if ( !variadic ) {
+                if ( op_type->num_params != ECALL(expr)->num_args ) {
+                    report_error(expr, "argumente übergeben %d, erwartet wurden %d", ECALL(expr)->num_args, op_type->num_params);
+                }
+            } else if ( variadic && (op_type->num_params-1) > ECALL(expr)->num_args ) {
+                    report_error(expr, "ungenügend argumente an eine prozedur mit variabler argumentenliste übergeben");
             }
 
             for ( uint32_t i = 0; i < TPROC(op->type)->num_params; ++i ) {
@@ -1100,7 +1116,7 @@ resolve_typespec(Typespec *typespec) {
 
                 if ( op->is_const ) {
                     assert(op->val.kind != VAL_NONE);
-                    result = type_array(type, op->val.i32);
+                    result = type_array(type, op->val.s32);
                 } else {
                     result = type_array(type, 0);
                 }
@@ -1109,7 +1125,7 @@ resolve_typespec(Typespec *typespec) {
             }
         } break;
 
-        case TYPESPEC_VARARG: {
+        case TYPESPEC_VARIADIC: {
             result = type_variadic;
         } break;
 
@@ -1310,14 +1326,10 @@ resolve_stmt(Stmt *stmt, Types rets, uint32_t num_rets) {
         } break;
 
         case STMT_FOR: {
-            char *it = NULL;
+            scope_enter("for-loop");
 
-            if ( SFOR(stmt)->it ) {
-                assert(SFOR(stmt)->it->kind == EXPR_IDENT);
-                it = EIDENT(SFOR(stmt)->it)->val;
-            } else {
-                it = intern_str("it");
-            }
+            resolve_stmt(SFOR(stmt)->init);
+            resolve_stmt(SFOR(stmt)->step);
 
             Operand *cond = resolve_expr(SFOR(stmt)->cond);
             Type *type = cond->type;
@@ -1326,8 +1338,6 @@ resolve_stmt(Stmt *stmt, Types rets, uint32_t num_rets) {
                 type = TARRAY(type)->base;
             }
 
-            scope_enter("for-loop");
-            Sym *sym = sym_push_var(stmt, it, type);
             resolve_stmt(SFOR(stmt)->block);
             scope_leave();
 
@@ -1567,6 +1577,18 @@ resolve_aggr_fields(Aggr_Fields fields, uint32_t num_fields) {
         field->operand = operand;
 
         sym_push_var(field, field->name, field_type);
+
+        if ( field->has_using ) {
+            if ( field->type->kind != TYPE_STRUCT ) {
+                report_error(field, "'%s' kann nur auf strukturen angewendet werden", keyword_using);
+            }
+
+            for ( int j = 0; j < TSTRUCT(field->type)->num_fields; ++j ) {
+                Aggr_Field *struct_field = TSTRUCT(field->type)->fields[j];
+
+                sym_push_var(struct_field, struct_field->name, struct_field->type);
+            }
+        }
     }
 }
 
@@ -1589,14 +1611,17 @@ type_complete_struct(Type_Struct *type) {
     uint32_t align = 0;
 
     for ( uint32_t i = 0; i < DSTRUCT(decl)->num_fields; ++i ) {
-        type->size += DSTRUCT(decl)->fields[i]->type->size;
-        type->align = MAX(type->size, DSTRUCT(decl)->fields[i]->type->align);
-        DSTRUCT(decl)->fields[i]->offset = offset;
-        offset += DSTRUCT(decl)->fields[i]->type->size;
+        Aggr_Field *field = DSTRUCT(decl)->fields[i];
+
+        type->size += field->type->size;
+        type->align = MAX(type->size, field->type->align);
+        field->offset = offset;
+
+        offset += field->type->size;
     }
 
-    ((Type_Struct *)type)->fields     = DSTRUCT(decl)->fields;
-    ((Type_Struct *)type)->num_fields = DSTRUCT(decl)->num_fields;
+    TSTRUCT(type)->fields     = DSTRUCT(decl)->fields;
+    TSTRUCT(type)->num_fields = DSTRUCT(decl)->num_fields;
 }
 
 void
@@ -1642,8 +1667,8 @@ type_complete_enum(Type_Enum *type) {
         type->align = MAX(type->size, DENUM(decl)->fields[i]->type->align);
     }
 
-    ((Type_Enum *)type)->fields     = DENUM(decl)->fields;
-    ((Type_Enum *)type)->num_fields = DENUM(decl)->num_fields;
+    TENUM(type)->fields     = DENUM(decl)->fields;
+    TENUM(type)->num_fields = DENUM(decl)->num_fields;
 }
 
 void
@@ -1670,8 +1695,8 @@ type_complete_union(Type_Union *type) {
         type->align = MAX(size, DUNION(decl)->fields[i]->type->align);
     }
 
-    (TUNION(type))->fields     = DUNION(decl)->fields;
-    (TUNION(type))->num_fields = DUNION(decl)->num_fields;
+    TUNION(type)->fields     = DUNION(decl)->fields;
+    TUNION(type)->num_fields = DUNION(decl)->num_fields;
 }
 
 void
@@ -1702,9 +1727,24 @@ resolve_proc(Sym *sym) {
     Proc_Sign *sign = decl->sign;
 
     scope_enter(decl->name);
+
     for ( uint32_t i = 0; i < sign->num_params; ++i ) {
         Proc_Param *param = sign->params[i];
-        sym_push_var(param, param->name, resolve_typespec(param->typespec));
+        Type *type = resolve_typespec(param->typespec);
+
+        sym_push_var(param, param->name, type);
+
+        if ( param->has_using ) {
+            if ( type->kind != TYPE_STRUCT ) {
+                report_error(param, "'%s' kann nur auf strukturen angewendet werden", keyword_using);
+            }
+
+            for ( int j = 0; j < TSTRUCT(type)->num_fields; ++j ) {
+                Aggr_Field *field = TSTRUCT(type)->fields[j];
+
+                sym_push_var(field, field->name, field->type);
+            }
+        }
     }
 
     Types ret_types = NULL;
@@ -1890,8 +1930,8 @@ resolver_init() {
     sym_push_sys("s16",    type_s16);
     sym_push_sys("s32",    type_s32);
     sym_push_sys("s64",    type_s64);
-    sym_push_sys("f32",    type_f32);
-    sym_push_sys("f64",    type_f64);
+    sym_push_sys("d32",    type_f32);
+    sym_push_sys("d64",    type_f64);
     sym_push_sys("bool",   type_bool);
     sym_push_sys("string", type_string);
 

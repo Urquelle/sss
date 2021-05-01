@@ -156,37 +156,37 @@ struct Expr_Typeof : Expr {
     Expr * expr;
 };
 
-enum Op_Kind {
-    OP_NONE,
+enum Bin_Kind {
+    BIN_NONE,
 
-    OP_ADD,
-    OP_MATH_START = OP_ADD,
-    OP_SUB,
-    OP_MUL,
-    OP_DIV,
-    OP_MATH_END = OP_DIV,
+    BIN_ADD,
+    BIN_MATH_START = BIN_ADD,
+    BIN_SUB,
+    BIN_MUL,
+    BIN_DIV,
+    BIN_MATH_END = BIN_DIV,
 
-    OP_LT,
-    OP_CMP_START = OP_LT,
-    OP_LTE,
-    OP_EQ,
-    OP_GTE,
-    OP_GT,
-    OP_CMP_END = OP_GT,
+    BIN_LT,
+    BIN_CMP_START = BIN_LT,
+    BIN_LTE,
+    BIN_EQ,
+    BIN_GTE,
+    BIN_GT,
+    BIN_CMP_END = BIN_GT,
 
-    OP_AND,
-    OP_LOGIC_START = OP_AND,
-    OP_OR,
-    OP_LOGIC_END = OP_OR,
+    BIN_AND,
+    BIN_LOGIC_START = BIN_AND,
+    BIN_OR,
+    BIN_LOGIC_END = BIN_OR,
 };
 struct Expr_Bin : Expr {
-    Op_Kind op;
+    Bin_Kind op;
     Expr * left;
     Expr * right;
 };
 
 struct Expr_Unary : Expr {
-    Op_Kind op;
+    Bin_Kind op;
     Expr *expr;
 };
 
@@ -284,8 +284,10 @@ struct Stmt_Defer : Stmt {
 };
 
 struct Stmt_For : Stmt {
-    Expr *it;
+    Stmt *init;
     Expr *cond;
+    Stmt *step;
+
     Stmt *block;
     Stmt *stmt_else;
 };
@@ -341,6 +343,7 @@ struct Aggr_Field : Ast_Elem {
     Expr     * value;
     Operand  * operand;
     int32_t    offset;
+    bool       has_using;
 };
 
 struct Stmt_Ret : Stmt {
@@ -373,20 +376,21 @@ struct Decl : Ast_Elem {
     Decl_Kind   kind;
     char      * name;
     Sym       * sym;
+    Type      * type;
 };
 
 struct Decl_Var : Decl {
-    Typespec *typespec;
-    Expr     *expr;
+    Typespec * typespec;
+    Expr     * expr;
 };
 
 struct Decl_Type : Decl {
-    Typespec *typespec;
+    Typespec * typespec;
 };
 
 struct Decl_Const : Decl {
-    Typespec *typespec;
-    Expr *expr;
+    Typespec * typespec;
+    Expr     * expr;
 };
 
 struct Decl_Enum : Decl {
@@ -396,18 +400,18 @@ struct Decl_Enum : Decl {
 
 struct Decl_Struct : Decl {
     Aggr_Fields fields;
-    size_t num_fields;
+    size_t      num_fields;
 };
 
 struct Decl_Union : Decl {
     Aggr_Fields fields;
-    size_t num_fields;
+    size_t      num_fields;
 };
 
 struct Decl_Proc : Decl {
-    Typespec *typespec;
-    Proc_Sign *sign;
-    Stmt *block;
+    Typespec  * typespec;
+    Proc_Sign * sign;
+    Stmt      * block;
 };
 
 struct Decl_Api : Decl {
@@ -427,7 +431,7 @@ enum Typespec_Kind {
     TYPESPEC_ARRAY,
     TYPESPEC_NAME,
     TYPESPEC_PROC,
-    TYPESPEC_VARARG,
+    TYPESPEC_VARIADIC,
     TYPESPEC_UNION,
 };
 struct Typespec : Ast_Elem {
@@ -467,6 +471,7 @@ struct Proc_Param : Loc {
     Typespec * typespec;
     Type     * type;
     Expr     * default_value;
+    bool       has_using;
 };
 
 struct Proc_Sign : Ast_Elem {
@@ -633,24 +638,24 @@ token_read_str(Token_List *tokens) {
     return result->val_str;
 }
 
-Op_Kind
+Bin_Kind
 token_op(Token *t) {
     switch ( t->kind ) {
-        case T_LT:         return OP_LT;
-        case T_LTE:        return OP_LTE;
-        case T_EQ:         return OP_EQ;
-        case T_GTE:        return OP_GTE;
-        case T_GT:         return OP_GT;
-        case T_PLUS:       return OP_ADD;
-        case T_MINUS:      return OP_SUB;
-        case T_ASTERISK:   return OP_MUL;
-        case T_SLASH:      return OP_DIV;
-        case T_AND:        return OP_AND;
-        case T_OR:         return OP_OR;
+        case T_LT:         return BIN_LT;
+        case T_LTE:        return BIN_LTE;
+        case T_EQ:         return BIN_EQ;
+        case T_GTE:        return BIN_GTE;
+        case T_GT:         return BIN_GT;
+        case T_PLUS:       return BIN_ADD;
+        case T_MINUS:      return BIN_SUB;
+        case T_ASTERISK:   return BIN_MUL;
+        case T_SLASH:      return BIN_DIV;
+        case T_AND:        return BIN_AND;
+        case T_OR:         return BIN_OR;
 
         default:           {
             report_error(t, "unbekanntes token");
-            return OP_NONE;
+            return BIN_NONE;
         }
     }
 }
@@ -825,7 +830,7 @@ expr_call(Ast_Elem *loc, Expr *base, Exprs args, size_t num_args) {
 }
 
 Expr_Unary *
-expr_unary(Ast_Elem *loc, Op_Kind op, Expr *expr) {
+expr_unary(Ast_Elem *loc, Bin_Kind op, Expr *expr) {
     STRUCTK(Expr_Unary, EXPR_UNARY);
 
     result->op   = op;
@@ -835,7 +840,7 @@ expr_unary(Ast_Elem *loc, Op_Kind op, Expr *expr) {
 }
 
 Expr_Bin *
-expr_bin(Ast_Elem *loc, Op_Kind op, Expr *left, Expr *right) {
+expr_bin(Ast_Elem *loc, Bin_Kind op, Expr *left, Expr *right) {
     STRUCTK(Expr_Bin, EXPR_BIN);
 
     result->op    = op;
@@ -1052,7 +1057,7 @@ parse_expr_base(Token_List *tokens) {
             /* - */
         }
 
-        result = expr_unary(curr, OP_SUB, parse_expr(tokens));
+        result = expr_unary(curr, BIN_SUB, parse_expr(tokens));
     } else if ( token_match(tokens, T_AT) ) {
         result = expr_at(curr, parse_expr(tokens));
     } else if ( token_is(tokens, T_IDENT) ) {
@@ -1082,6 +1087,7 @@ parse_expr_base(Token_List *tokens) {
         }
     } else if ( token_match(tokens, T_LPAREN) ) {
         result = expr_paren(curr, parse_expr(tokens));
+        token_expect(tokens, T_RPAREN);
     } else if ( token_match(tokens, T_HASH) ) {
         if ( keyword_matches(tokens, keyword_run) ) {
             result = expr_run(curr, parse_expr(tokens));
@@ -1169,7 +1175,7 @@ parse_expr_mul(Token_List *tokens) {
 
     while ( token_is(tokens, T_ASTERISK) || token_is(tokens, T_SLASH) ) {
         Token *op = token_read(tokens);
-        left = expr_bin(curr, token_op(op), left, parse_expr(tokens));
+        left = expr_bin(curr, token_op(op), left, parse_expr_mul(tokens));
     }
 
     return left;
@@ -1182,7 +1188,7 @@ parse_expr_plus(Token_List *tokens) {
 
     while ( token_is(tokens, T_PLUS) || token_is(tokens, T_MINUS) ) {
         Token *op = token_read(tokens);
-        left = expr_bin(curr, token_op(op), left, parse_expr(tokens));
+        left = expr_bin(curr, token_op(op), left, parse_expr_plus(tokens));
     }
 
     return left;
@@ -1282,7 +1288,7 @@ match_line(Ast_Elem *loc, Expr *resolution, Stmt *stmt) {
 }
 
 Aggr_Field *
-aggr_field(Loc *loc, char *name, Typespec *typespec, Expr *value) {
+aggr_field(Loc *loc, char *name, Typespec *typespec, Expr *value, bool has_using) {
     STRUCT(Aggr_Field);
 
     result->name      = name;
@@ -1291,19 +1297,21 @@ aggr_field(Loc *loc, char *name, Typespec *typespec, Expr *value) {
     result->type      = NULL;
     result->operand   = NULL;
     result->offset    = 0;
+    result->has_using = has_using;
 
     return result;
 }
 
 Proc_Param *
-proc_param(Loc *loc, char *name, Typespec *typespec, Expr *default_value = NULL) {
+proc_param(Loc *loc, char *name, Typespec *typespec, Expr *default_value, bool has_using) {
     Proc_Param *result = urq_allocs(Proc_Param);
 
     loc_copy(loc, result);
 
-    result->name     = name;
-    result->typespec = typespec;
-    result->type     = NULL;
+    result->name      = name;
+    result->typespec  = typespec;
+    result->type      = NULL;
+    result->has_using = has_using;
 
     return result;
 }
@@ -1456,11 +1464,12 @@ stmt_if(Ast_Elem *loc, Expr *cond, Stmt *stmt, Stmt_If *stmt_else) {
 }
 
 Stmt_For *
-stmt_for(Ast_Elem *loc, Expr *it, Expr *cond, Stmt *block, Stmt *stmt_else) {
+stmt_for(Ast_Elem *loc, Stmt *init, Expr *cond, Stmt *step, Stmt *block, Stmt *stmt_else) {
     STRUCTK(Stmt_For, STMT_FOR);
 
-    result->it        = it;
+    result->init      = init;
     result->cond      = cond;
+    result->step      = step;
     result->block     = block;
     result->stmt_else = stmt_else;
 
@@ -1572,8 +1581,8 @@ typespec_ptr(Ast_Elem *loc, Typespec *base) {
 }
 
 Typespec *
-typespec_vararg(Ast_Elem *loc) {
-    STRUCTK(Typespec, TYPESPEC_VARARG);
+typespec_variadic(Ast_Elem *loc) {
+    STRUCTK(Typespec, TYPESPEC_VARIADIC);
 
     return result;
 }
@@ -1628,7 +1637,7 @@ parse_typespec(Token_List *tokens) {
             token_eat(tokens);
             result = typespec_ptr(curr, parse_typespec(tokens));
         } else if ( token_match(tokens, T_ELLIPSIS) ) {
-            result = typespec_vararg(curr);
+            result = typespec_variadic(curr);
         } else if ( curr->kind == T_LBRACKET ) {
             token_eat(tokens);
             Expr *num_elems = NULL;
@@ -1674,9 +1683,14 @@ Proc_Param *
 parse_proc_param(Token_List *tokens) {
     Token *loc = token_get(tokens);
 
-    char *name = NULL;
-    Typespec *typespec = NULL;
+    char *name          = NULL;
+    Typespec *typespec  = NULL;
     Expr *default_value = NULL;
+    bool has_using      = false;
+
+    if ( keyword_matches(tokens, keyword_using) ) {
+        has_using = true;
+    }
 
     if ( token_is(tokens, T_IDENT) ) {
         Token *first = token_get(tokens);
@@ -1697,7 +1711,7 @@ parse_proc_param(Token_List *tokens) {
         default_value = parse_expr(tokens);
     }
 
-    return proc_param(loc, name, typespec, default_value);
+    return proc_param(loc, name, typespec, default_value, has_using);
 }
 
 Decl_Type *
@@ -1721,9 +1735,15 @@ parse_aggr_block(Token_List *tokens) {
     Aggr_Fields fields = NULL;
     if ( !token_is(tokens, T_RBRACE) ) {
         do {
+            bool has_using = false;
+            if ( keyword_matches(tokens, keyword_using) ) {
+                has_using = true;
+            }
+
             Token **field_names = NULL;
             while ( !token_is(tokens, T_COLON) ) {
                 do {
+
                     Token *field_name = token_read(tokens);
                     assert(field_name->kind == T_IDENT);
                     buf_push(field_names, field_name);
@@ -1740,7 +1760,7 @@ parse_aggr_block(Token_List *tokens) {
 
             for ( int field_name_index = 0; field_name_index < buf_len(field_names); ++field_name_index ) {
                 Token *field_name = field_names[field_name_index];
-                buf_push(fields, aggr_field(field_name, field_name->val_str, typespec, value));
+                buf_push(fields, aggr_field(field_name, field_name->val_str, typespec, value, has_using));
             }
 
             token_expect(tokens, T_SEMICOLON);
@@ -1771,7 +1791,7 @@ parse_proc_sign(Token_List *tokens) {
         buf_push(rets, parse_proc_param(tokens));
     }
 
-    return proc_sign(curr, params, (uint32_t)buf_len(params), rets, (uint32_t)buf_len(rets));
+    return proc_sign(curr, params, buf_len(params), rets, buf_len(rets));
 }
 
 Decl_Enum *
@@ -1791,7 +1811,7 @@ parse_decl_enum(Token_List *tokens, char *name) {
                 value = parse_expr(tokens);
             }
 
-            buf_push(fields, aggr_field(field_name, field_name->val_str, typespec_name(field_name, intern_str("u32")), value));
+            buf_push(fields, aggr_field(field_name, field_name->val_str, typespec_name(field_name, intern_str("u32")), value, false));
 
             token_expect(tokens, T_SEMICOLON);
         } while ( !token_is(tokens, T_RBRACE) );
@@ -1823,6 +1843,8 @@ parse_decl_proc(Token_List *tokens, char *name, Typespec *typespec) {
         if ( dir == intern_str("sys_call") ) {
             sign->sys_call = true;
             sign->sys_lib = parse_expr_string(tokens);
+        } else if ( dir == intern_str("dump_ir") ) {
+            sign->dump_ir = true;
         } else {
             report_error(curr, "unbekannte direktive");
         }
@@ -1961,15 +1983,31 @@ parse_stmt_if(Token_List *tokens) {
 
 Stmt_For *
 parse_stmt_for(Token_List *tokens) {
+    /* @TODO: umstellen auf init, cond, step! auch wenn range als cond im code steht */
+
     Token *curr = token_get(tokens);
 
-    Expr *it    = NULL;
-    Expr *cond  = parse_expr(tokens);
+    Stmt *init = NULL;
+    Expr *cond = NULL;
+    Stmt *step = NULL;
 
+    Expr *expr = parse_expr(tokens);
     if ( token_match(tokens, T_COLON) ) {
-        it = cond;
+        init = stmt_decl(curr, decl_var(curr, EIDENT(expr)->val, NULL, NULL));
         cond = parse_expr(tokens);
+    } else {
+        init = stmt_decl(curr, decl_var(curr, intern_str("it"), NULL, NULL));
+        cond = expr;
     }
+
+    if ( cond->kind == EXPR_RANGE ) {
+        DVAR(SDECL(init)->decl)->expr = ERNG(cond)->left;
+        cond = expr_bin(curr, BIN_LT, DVAR(SDECL(init)->decl)->expr, ERNG(cond)->right);
+    }
+
+    Expr *iter      = DVAR(SDECL(init)->decl)->expr;
+    Expr *step_expr = expr_bin(curr, BIN_ADD, iter, expr_int(curr, 1));
+    step = stmt_assign(curr, iter, token_new(T_EQL_ASSIGN, "", 0, 0), step_expr);
 
     Stmt *stmt = parse_stmt(tokens);
 
@@ -1978,7 +2016,7 @@ parse_stmt_for(Token_List *tokens) {
         stmt_else = parse_stmt_block(tokens);
     }
 
-    return stmt_for(curr, it, cond, stmt, stmt_else);
+    return stmt_for(curr, init, cond, step, stmt, stmt_else);
 }
 
 Stmt_Defer *
@@ -2108,7 +2146,7 @@ parse_directive_import(Token_List *tokens) {
 
     token_expect(tokens, T_SEMICOLON);
 
-    char *ident = ((Expr_Ident *)module)->val;
+    char *ident = EIDENT(module)->val;
     size_t len = utf8_str_size(ident);
 
     char *sss_dir = Urq::Os::os_env("SSS_DIR");
