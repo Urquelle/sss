@@ -22,10 +22,12 @@ struct Sym : Loc {
 };
 
 struct Scope {
-    char *name;
-    Map syms;
-    Sym **sym_list;
-    Scope *parent;
+    char     * name;
+    Map        syms;
+    Sym     ** sym_list;
+    Scope    * parent;
+    uint32_t   frame_size;
+    bool       is_proc;
 
     Module_Syms export_syms;
     size_t      num_export_syms;
@@ -103,6 +105,7 @@ struct Type {
     uint32_t size;
     uint32_t align;
     uint16_t id;
+    bool     is_signed;
 
     Sym   * sym;
     char  * name;
@@ -142,9 +145,9 @@ struct Type_Union : Type {
 };
 
 struct Type_Proc : Type {
-    Proc_Params params;
+    Decl_Var ** params;
     uint32_t    num_params;
-    Proc_Params rets;
+    Decl_Var ** rets;
     uint32_t    num_rets;
 };
 
@@ -245,15 +248,16 @@ val_bool(bool val) {
 }
 
 Type *
-type_new( uint32_t size, Type_Kind kind ) {
+type_new( uint32_t size, Type_Kind kind, bool is_signed = false ) {
     Type *result = urq_allocs(Type);
 
-    result->kind  = kind;
-    result->sym   = NULL;
-    result->size  = size;
-    result->align = 0;
-    result->id    = global_type_id++;
-    result->scope = scope_new("type");
+    result->kind      = kind;
+    result->sym       = NULL;
+    result->size      = size;
+    result->align     = 0;
+    result->id        = global_type_id++;
+    result->is_signed = is_signed;
+    result->scope     = scope_new("type");
 
     buf_push(types, result);
 
@@ -520,12 +524,13 @@ type_ptr(Type *base) {
 }
 
 Type_Array *
-type_array(Type *base, size_t num_elems) {
+type_array(Type *base, size_t num_elems, uint32_t size = 0) {
     Type_Array *result = urq_allocs(Type_Array);
 
     result->kind      = TYPE_ARRAY;
     result->base      = base;
     result->num_elems = num_elems;
+    result->size      = size;
     result->scope     = scope_new("array");
 
     sym_push_scope(&loc_none, result->scope, prop_size, type_u64);
@@ -534,13 +539,13 @@ type_array(Type *base, size_t num_elems) {
 }
 
 Type_Proc *
-type_proc(Proc_Params params, uint32_t num_params, Proc_Params rets, uint32_t num_rets) {
+type_proc(Decl_Var **params, uint32_t num_params, Decl_Var **rets, uint32_t num_rets) {
     Type_Proc *result = urq_allocs(Type_Proc);
 
     result->kind       = TYPE_PROC;
-    result->params     = (Proc_Params)MEMDUP(params);
+    result->params     = (Decl_Var **)MEMDUP(params);
     result->num_params = num_params;
-    result->rets       = (Proc_Params)MEMDUP(rets);
+    result->rets       = (Decl_Var **)MEMDUP(rets);
     result->num_rets   = num_rets;
 
     return result;
@@ -559,11 +564,13 @@ Scope *
 scope_new(char *name, Scope *parent) {
     Scope *result = urq_allocs(Scope);
 
-    result->name = name;
-    result->syms = {};
-    result->export_syms = NULL;
+    result->name            = name;
+    result->syms            = {};
+    result->export_syms     = NULL;
     result->num_export_syms = 0;
-    result->parent = parent;
+    result->parent          = parent;
+    result->frame_size      = 0;
+    result->is_proc         = false;
 
     return result;
 }
@@ -959,7 +966,7 @@ resolve_expr(Expr *expr, Type *given_type = NULL) {
 
             bool variadic = false;
             if ( op_type->num_params ) {
-                Proc_Param *param = op_type->params[op_type->num_params-1];
+                Decl_Var *param = op_type->params[op_type->num_params-1];
 
                 if (param->typespec->kind == TYPESPEC_VARIADIC) {
                     variadic = true;
@@ -975,7 +982,7 @@ resolve_expr(Expr *expr, Type *given_type = NULL) {
             }
 
             for ( uint32_t i = 0; i < TPROC(op->type)->num_params; ++i ) {
-                Proc_Param *param = TPROC(op->type)->params[i];
+                Decl_Var *param = TPROC(op->type)->params[i];
 
                 if ( param->type == type_variadic ) {
                     break;
@@ -1121,7 +1128,7 @@ resolve_typespec(Typespec *typespec) {
                     result = type_array(type, 0);
                 }
             } else {
-                result = type_array(type, 0);
+                result = type_array(type, 0, PTR_SIZE);
             }
         } break;
 
@@ -1175,6 +1182,8 @@ resolve_typespec(Typespec *typespec) {
 Type_Proc *
 resolve_decl_proc(Decl *decl) {
     assert(decl->kind == DECL_PROC);
+
+    decl->is_global = true;
 
     Proc_Sign *sign = DPROC(decl)->sign;
     for ( size_t i = 0; i < sign->num_params; ++i ) {
@@ -1241,6 +1250,21 @@ resolve_decl_var(Decl *decl) {
         if ( type != op->type ) {
             report_error(decl, "datentyp erwartet %s, bekommen %s", type->name, op->type->name);
         }
+    }
+
+    if ( curr_scope != global_scope ) {
+        Scope *scope = curr_scope;
+
+        while ( scope && !scope->is_proc ) {
+            scope = scope->parent;
+        }
+
+        if ( scope ) {
+            decl->offset            = scope->frame_size;
+            scope->frame_size += type->size;
+        }
+    } else {
+        decl->is_global = true;
     }
 
     type_complete(type);
@@ -1311,8 +1335,8 @@ resolve_stmt(Stmt *stmt, Types rets, uint32_t num_rets) {
             switch ( decl->kind ) {
                 case DECL_VAR: {
                     Type *type = resolve_decl_var(decl);
-                    type_complete(type);
                     Sym *sym = sym_push_var(decl, decl->name, type);
+                    sym->decl = decl;
                 } break;
 
                 default: {
@@ -1726,13 +1750,19 @@ resolve_proc(Sym *sym) {
     assert(sym->state == SYMSTATE_RESOLVED);
     Proc_Sign *sign = decl->sign;
 
-    scope_enter(decl->name);
+    decl->scope = scope_enter(decl->name);
+    decl->scope->is_proc = true;
 
     for ( uint32_t i = 0; i < sign->num_params; ++i ) {
-        Proc_Param *param = sign->params[i];
+        Decl_Var *param = sign->params[i];
         Type *type = resolve_typespec(param->typespec);
+        param->type = type;
+        type_complete(type);
 
-        sym_push_var(param, param->name, type);
+        param->sym = sym_push_var(param, param->name, type);
+        param->sym->decl = param;
+        param->offset = decl->scope->frame_size;
+        decl->scope->frame_size += param->type->size;
 
         if ( param->has_using ) {
             if ( type->kind != TYPE_STRUCT ) {
@@ -1781,6 +1811,7 @@ register_global_syms(Stmts stmts) {
 
         Decl *decl = stmt->decl;
         Sym *sym = sym_push(decl, decl->name, decl);
+
         decl->sym = sym;
 
         switch ( decl->kind ) {
@@ -1869,7 +1900,7 @@ resolve(Parsed_File *parsed_file, bool check_entry_point) {
             report_error(entry_point_sym->decl, "\"%s\" muss einen parameter entgegennehmen", entry_point);
         }
 
-        Proc_Param *param = TPROC(type)->params[0];
+        Decl_Var *param = TPROC(type)->params[0];
         if ( param->type->kind != TYPE_ARRAY || TARRAY(param->type)->base->kind != TYPE_STRING ) {
             report_error(&loc_none, "%s muss ein [] string sein", param->name);
         }
@@ -1909,10 +1940,10 @@ resolver_init() {
     type_u16      = type_new(2, TYPE_U16);
     type_u32      = type_new(4, TYPE_U32);
     type_u64      = type_new(8, TYPE_U64);
-    type_s8       = type_new(1, TYPE_S8);
-    type_s16      = type_new(2, TYPE_S16);
-    type_s32      = type_new(4, TYPE_S32);
-    type_s64      = type_new(8, TYPE_S64);
+    type_s8       = type_new(1, TYPE_S8,  true);
+    type_s16      = type_new(2, TYPE_S16, true);
+    type_s32      = type_new(4, TYPE_S32, true);
+    type_s64      = type_new(8, TYPE_S64, true);
     type_f32      = type_new(4, TYPE_F32);
     type_f64      = type_new(8, TYPE_F64);
     type_bool     = type_new(1, TYPE_BOOL);

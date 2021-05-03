@@ -377,6 +377,9 @@ struct Decl : Ast_Elem {
     char      * name;
     Sym       * sym;
     Type      * type;
+    uint32_t    offset;
+    bool        is_global;
+    bool        has_using;
 };
 
 struct Decl_Var : Decl {
@@ -412,6 +415,7 @@ struct Decl_Proc : Decl {
     Typespec  * typespec;
     Proc_Sign * sign;
     Stmt      * block;
+    Scope     * scope;
 };
 
 struct Decl_Api : Decl {
@@ -445,7 +449,7 @@ struct Typespec_Name : Typespec {
 };
 
 struct Typespec_Ptr : Typespec {
-    Typespec *base;
+    Typespec * base;
 };
 
 struct Typespec_Array : Typespec {
@@ -454,9 +458,9 @@ struct Typespec_Array : Typespec {
 };
 
 struct Typespec_Proc : Typespec {
-    Proc_Params  params;
+    Decl_Var  ** params;
     uint32_t     num_params;
-    Proc_Params  rets;
+    Decl_Var  ** rets;
     uint32_t     num_rets;
 };
 
@@ -465,19 +469,10 @@ struct Typespec_Union : Typespec {
     uint32_t    num_fields;
 };
 
-struct Proc_Param : Loc {
-    char     * name;
-    Sym      * sym;
-    Typespec * typespec;
-    Type     * type;
-    Expr     * default_value;
-    bool       has_using;
-};
-
 struct Proc_Sign : Ast_Elem {
-    Proc_Params   params;
+    Decl_Var   ** params;
     uint32_t      num_params;
-    Proc_Params   rets;
+    Decl_Var   ** rets;
     uint32_t      num_rets;
     bool          sys_call;
     char        * sys_lib;
@@ -1262,9 +1257,7 @@ parse_expr(Token_List *tokens, bool with_stmt) {
 /* }}} */
 
 Proc_Sign *
-proc_sign(Ast_Elem *loc, Proc_Params params, uint32_t num_params, Proc_Params rets,
-        uint32_t num_rets)
-{
+proc_sign(Ast_Elem *loc, Decl_Var **params, uint32_t num_params, Decl_Var **rets, uint32_t num_rets) {
     STRUCT(Proc_Sign);
 
     result->params     = params;
@@ -1302,20 +1295,6 @@ aggr_field(Loc *loc, char *name, Typespec *typespec, Expr *value, bool has_using
     return result;
 }
 
-Proc_Param *
-proc_param(Loc *loc, char *name, Typespec *typespec, Expr *default_value, bool has_using) {
-    Proc_Param *result = urq_allocs(Proc_Param);
-
-    loc_copy(loc, result);
-
-    result->name      = name;
-    result->typespec  = typespec;
-    result->type      = NULL;
-    result->has_using = has_using;
-
-    return result;
-}
-
 bool
 ast_valid(Ast_Elem *elem) {
     bool result = ( elem && !elem->has_error );
@@ -1335,12 +1314,15 @@ decl_type(Ast_Elem *loc, char *name, Typespec *typespec) {
 }
 
 Decl_Var *
-decl_var(Ast_Elem *loc, char *name, Typespec *typespec, Expr *expr) {
+decl_var(Ast_Elem *loc, char *name, Typespec *typespec, Expr *expr, bool has_using = false) {
     STRUCTK(Decl_Var, DECL_VAR);
 
-    result->name     = name;
-    result->typespec = typespec;
-    result->expr     = expr;
+    result->name      = name;
+    result->typespec  = typespec;
+    result->expr      = expr;
+    result->offset    = 0;
+    result->is_global = false;
+    result->has_using = has_using;
 
     return result;
 }
@@ -1349,9 +1331,12 @@ Decl_Const *
 decl_const(Ast_Elem *loc, char *name, Typespec *typespec, Expr *expr) {
     STRUCTK(Decl_Const, DECL_CONST);
 
-    result->name     = name;
-    result->typespec = typespec;
-    result->expr     = expr;
+    result->name      = name;
+    result->typespec  = typespec;
+    result->expr      = expr;
+    result->offset    = 0;
+    result->is_global = false;
+    result->has_using = false;
 
     return result;
 }
@@ -1598,12 +1583,12 @@ typespec_array(Ast_Elem *loc, Typespec *base, Expr *num_elems) {
 }
 
 Typespec_Proc *
-typespec_proc(Ast_Elem *loc, Proc_Params params, uint32_t num_params, Proc_Params rets, uint32_t num_rets) {
+typespec_proc(Ast_Elem *loc, Decls params, uint32_t num_params, Decls rets, uint32_t num_rets) {
     STRUCTK(Typespec_Proc, TYPESPEC_PROC);
 
-    result->params     = (Proc_Params)MEMDUP(params);
+    result->params     = (Decl_Var **)MEMDUP(params);
     result->num_params = num_params;
-    result->rets       = (Proc_Params)rets;
+    result->rets       = (Decl_Var **)rets;
     result->num_rets   = num_rets;
 
     return result;
@@ -1650,7 +1635,7 @@ parse_typespec(Token_List *tokens) {
             result = typespec_array(curr, parse_typespec(tokens), num_elems);
         } else if ( keyword_matches(tokens, keyword_proc) ) {
             token_expect(tokens, T_LPAREN);
-            Proc_Params params = NULL;
+            Decls params = NULL;
 
             if ( !token_is(tokens, T_RPAREN) ) {
                 do {
@@ -1660,7 +1645,7 @@ parse_typespec(Token_List *tokens) {
 
             token_expect(tokens, T_RPAREN);
 
-            Proc_Params rets = NULL;
+            Decls rets = NULL;
             if ( token_match(tokens, T_ARROW) ) {
                 do {
                     buf_push(rets, parse_proc_param(tokens));
@@ -1679,7 +1664,7 @@ parse_typespec(Token_List *tokens) {
 }
 /* }}} */
 
-Proc_Param *
+Decl_Var *
 parse_proc_param(Token_List *tokens) {
     Token *loc = token_get(tokens);
 
@@ -1711,7 +1696,7 @@ parse_proc_param(Token_List *tokens) {
         default_value = parse_expr(tokens);
     }
 
-    return proc_param(loc, name, typespec, default_value, has_using);
+    return decl_var(loc, name, typespec, default_value, has_using);
 }
 
 Decl_Type *
@@ -1777,7 +1762,7 @@ parse_proc_sign(Token_List *tokens) {
     Token *curr = token_get(tokens);
 
     token_expect(tokens, T_LPAREN);
-    Proc_Params params = NULL;
+    Decl_Var **params = NULL;
     if ( !token_is(tokens, T_RPAREN) ) {
         do {
             buf_push(params, parse_proc_param(tokens));
@@ -1786,7 +1771,7 @@ parse_proc_sign(Token_List *tokens) {
     }
     token_expect(tokens, T_RPAREN);
 
-    Proc_Params rets = NULL;
+    Decl_Var **rets = NULL;
     if ( token_match(tokens, T_ARROW) ) {
         buf_push(rets, parse_proc_param(tokens));
     }
