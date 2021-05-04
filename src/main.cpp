@@ -64,14 +64,6 @@ int main(int argc, char* argv[]) {
 
     parse_args(argc, argv, args, true);
 
-    auto ts = tokenize("<0>", "main :: proc (args : u32, bla : u32) { a: u8 = 7; (5 + bla) / 2 - 3 == a; } main(32, 15);");
-    auto as = parse(&ts);
-              resolve(as, false);
-    auto bc = vm_compile(as);
-    vm_debug(bc, "output.S");
-    uint64_t result = vm_eval(bc);
-    printf("ergebnis: %lld\n", result);
-
     if ( argc < 2 ) {
         sss_repl();
     } else {
@@ -80,12 +72,12 @@ int main(int argc, char* argv[]) {
 
         auto tokens   = tokenize(file_name, content);
         auto ast      = parse(&tokens);
-                        resolve(ast);
-#if 0
-        auto code     = build(ast);
-             code     = optimize(code);
-                        eval(code);
-#endif
+                        resolve(ast, false);
+        auto bc       = compile(ast);
+                        debug(bc, "output.S");
+        auto result   = eval(bc);
+
+        printf("result = %lld\n", result);
     }
 
     return 0;

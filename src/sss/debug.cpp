@@ -178,10 +178,6 @@ to_str(Instr *instr) {
             output = buf_printf(output, to_str_binop("mov", instr));
         } break;
 
-        case OP_MOVZX: {
-            output = buf_printf(output, to_str_binop("movzx", instr));
-        } break;
-
         case OP_PUSH: {
             output = buf_printf(output, "push %s", to_str(instr->operand1));
         } break;
@@ -255,7 +251,7 @@ to_str(Instr *instr) {
 }
 
 void
-vm_debug(Instrs instrs, char *file_name) {
+debug(Instrs instrs, char *file_name) {
     char *output = NULL;
 
     for ( int32_t i = 0; i < buf_len(instrs); ++i ) {

@@ -187,7 +187,6 @@ void                     type_complete(Type *type);
 #include "lex.cpp"
 #include "parser.cpp"
 #include "resolver.cpp"
-//#include "vm.cpp"
 #include "vm2.cpp"
 #include "debug.cpp"
 
@@ -201,29 +200,26 @@ void sss_repl() {
         auto tokens   = tokenize("<repl>", buf);
         auto ast      = parse(&tokens);
                         resolve(ast, false);
-#if 0
-        auto code     = Vm::build(ast);
-                        Vm::eval(code);
-#endif
+        auto bc       = compile(ast);
+                        debug(bc, "output.S");
+        auto result   = eval(bc);
+
+        printf("-> %lld\n", result);
     }
 }
 
 namespace api {
-#if 0
-    using Urq::Sss::Vm::build;
-    using Urq::Sss::Vm::optimize;
-#endif
-
     using Urq::Sss::parse;
     using Urq::Sss::resolve;
     using Urq::Sss::resolver_init;
     using Urq::Sss::sss_repl;
     using Urq::Sss::tokenize;
 
-    using Urq::Sss::vm_debug;
+    using Urq::Sss::debug;
 
     // VM2
-    using Urq::Sss::Vm2::vm_compile;
+    using Urq::Sss::Vm2::compile;
+    using Urq::Sss::Vm2::eval;
 }
 
 }}

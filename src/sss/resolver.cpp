@@ -1260,8 +1260,8 @@ resolve_decl_var(Decl *decl) {
         }
 
         if ( scope ) {
-            decl->offset            = scope->frame_size;
-            scope->frame_size += type->size;
+            decl->offset       = scope->frame_size;
+            scope->frame_size += 8; // type->size;
         }
     } else {
         decl->is_global = true;
@@ -1762,7 +1762,7 @@ resolve_proc(Sym *sym) {
         param->sym = sym_push_var(param, param->name, type);
         param->sym->decl = param;
         param->offset = decl->scope->frame_size;
-        decl->scope->frame_size += param->type->size;
+        decl->scope->frame_size += 8; // param->type->size;
 
         if ( param->has_using ) {
             if ( type->kind != TYPE_STRUCT ) {
