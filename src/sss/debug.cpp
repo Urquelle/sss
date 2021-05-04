@@ -1,6 +1,6 @@
 using namespace Urq::Sss::Vm2;
 
-char *regs64[] = {
+char *regs64_dbg[] = {
     "rax",
     "rbx",
     "rcx",
@@ -21,18 +21,24 @@ char *regs64[] = {
     "rflags",
 };
 
-char *regs32[] = {
+char *regs32_dbg[] = {
     "eax",
     "ebx",
     "ecx",
     "edx",
+    "ebp",
+    "esi",
+    "edi",
 };
 
-char *regs16[] = {
+char *regs16_dbg[] = {
     "ax",
     "bx",
     "cx",
     "dx",
+    "bp",
+    "si",
+    "di",
 };
 
 char *regs8l[] = {
@@ -93,25 +99,25 @@ to_str(Urq::Sss::Vm2::Operand op) {
 
         case OPERAND_REG64: {
             if ( op.with_displacement ) {
-                result = buf_printf(result, "%%%%%d(%s)", op.displacement, regs64[op.reg64]);
+                result = buf_printf(result, "%%%%%d(%s)", op.displacement, regs64_dbg[op.reg64]);
             } else {
-                result = buf_printf(result, "%s", regs64[op.reg64]);
+                result = buf_printf(result, "%s", regs64_dbg[op.reg64]);
             }
         } break;
 
         case OPERAND_REG32: {
             if ( op.with_displacement ) {
-                result = buf_printf(result, "%%%%%d(%s)", op.displacement, regs32[op.reg32]);
+                result = buf_printf(result, "%%%%%d(%s)", op.displacement, regs32_dbg[op.reg32]);
             } else {
-                result = buf_printf(result, "%s", regs32[op.reg32]);
+                result = buf_printf(result, "%s", regs32_dbg[op.reg32]);
             }
         } break;
 
         case OPERAND_REG16: {
             if ( op.with_displacement ) {
-                result = buf_printf(result, "%%%%%d(%s)", op.displacement, regs16[op.reg16]);
+                result = buf_printf(result, "%%%%%d(%s)", op.displacement, regs16_dbg[op.reg16]);
             } else {
-                result = buf_printf(result, "%s", regs16[op.reg16]);
+                result = buf_printf(result, "%s", regs16_dbg[op.reg16]);
             }
         } break;
 

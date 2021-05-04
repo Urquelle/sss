@@ -377,7 +377,7 @@ struct Decl : Ast_Elem {
     char      * name;
     Sym       * sym;
     Type      * type;
-    uint32_t    offset;
+    int32_t     offset;
     bool        is_global;
     bool        has_using;
 };

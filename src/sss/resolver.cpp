@@ -26,7 +26,7 @@ struct Scope {
     Map        syms;
     Sym     ** sym_list;
     Scope    * parent;
-    uint32_t   frame_size;
+    int32_t    frame_size;
     bool       is_proc;
 
     Module_Syms export_syms;
@@ -1260,8 +1260,8 @@ resolve_decl_var(Decl *decl) {
         }
 
         if ( scope ) {
-            decl->offset       = scope->frame_size;
-            scope->frame_size += 8; // type->size;
+            scope->frame_size += type->size;
+            decl->offset       = -scope->frame_size;
         }
     } else {
         decl->is_global = true;
@@ -1631,8 +1631,8 @@ type_complete_struct(Type_Struct *type) {
     resolve_aggr_fields(DSTRUCT(decl)->fields, (uint32_t)DSTRUCT(decl)->num_fields);
     scope_leave();
 
-    uint32_t offset = 0;
-    uint32_t align = 0;
+    int32_t offset = 0;
+    int32_t align = 0;
 
     for ( uint32_t i = 0; i < DSTRUCT(decl)->num_fields; ++i ) {
         Aggr_Field *field = DSTRUCT(decl)->fields[i];
@@ -1761,8 +1761,8 @@ resolve_proc(Sym *sym) {
 
         param->sym = sym_push_var(param, param->name, type);
         param->sym->decl = param;
-        param->offset = decl->scope->frame_size;
-        decl->scope->frame_size += 8; // param->type->size;
+        decl->scope->frame_size += param->type->size;
+        param->offset = -decl->scope->frame_size;
 
         if ( param->has_using ) {
             if ( type->kind != TYPE_STRUCT ) {
