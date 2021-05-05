@@ -187,7 +187,7 @@ void                     type_complete(Type *type);
 #include "lex.cpp"
 #include "parser.cpp"
 #include "resolver.cpp"
-#include "vm2.cpp"
+#include "vm.cpp"
 #include "debug.cpp"
 
 void sss_repl() {
@@ -217,9 +217,8 @@ namespace api {
 
     using Urq::Sss::debug;
 
-    // VM2
-    using Urq::Sss::Vm2::compile;
-    using Urq::Sss::Vm2::eval;
+    using Urq::Sss::Vm::compile;
+    using Urq::Sss::Vm::eval;
 }
 
 }}

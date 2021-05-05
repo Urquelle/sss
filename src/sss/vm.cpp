@@ -1,1096 +1,459 @@
 namespace Vm {
 
-int32_t entry_point_index;
+struct Cpu;
 
-struct Bytecode;
-struct Call_Frame;
-struct Instr;
-struct Scope;
-struct Obj;
-struct Obj_Array;
-struct Obj_Proc;
-struct Table;
-struct Value;
-struct Vm;
+void rip_inc(Cpu *cpu);
+void vm_stmt(Stmt *stmt);
 
-typedef Value *  Values;
-typedef Instr ** Instrs;
+enum Vm_Op {
+    OP_HLT,
+    OP_DATA,
 
-struct Basic_Block {
-    int32_t id;
-    Instrs   instrs;
+    OP_ADD,
+    OP_SUB,
+    OP_MUL,
+    OP_DIV,
+    OP_IMUL,
+    OP_IDIV,
+    OP_CMP,
+    OP_MOV,
+    OP_LEA,
+    OP_PUSH,
+    OP_POP,
+    OP_SETE,
+    OP_SETL,
+    OP_SETLE,
+    OP_SETG,
+    OP_SETGE,
+    OP_SETNE,
+
+    OP_JMP,
+    OP_JZ,
+
+    OP_CALL,
+    OP_RET,
 };
 
-#define VALUES      \
-    X(VAL_NONE)     \
-    X(VAL_CHAR)     \
-    X(VAL_INT)      \
-    X(VAL_FLOAT)    \
-    X(VAL_BOOL)     \
-    X(VAL_OBJ)
+enum Vm_Reg64 {
+    REG_RAX,
+    REG_RBX,
+    REG_RCX,
+    REG_RDX,
+    REG_RBP,
+    REG_RSI,
+    REG_RDI,
+    REG_RSP,
+    REG_R8,
+    REG_R9,
+    REG_R10,
+    REG_R11,
+    REG_R12,
+    REG_R13,
+    REG_R14,
+    REG_R15,
+    REG_RIP,
+    REG_RFLAGS,
+
+    REG_COUNT,
+};
+
+enum Vm_Reg32 {
+    REG_EAX,
+    REG_EBX,
+    REG_ECX,
+    REG_EDX,
+    REG_EBP,
+    REG_ESI,
+    REG_EDI,
+    REG_ESP,
+    REG_R8D,
+    REG_R9D,
+};
+
+enum Vm_Reg16 {
+    REG_AX,
+    REG_BX,
+    REG_CX,
+    REG_DX,
+    REG_BP,
+    REG_SI,
+    REG_DI,
+    REG_SP,
+    REG_R8W,
+    REG_R9W,
+};
+
+enum Vm_Reg8h {
+    REG_AH,
+    REG_BH,
+    REG_CH,
+    REG_DH,
+};
+
+enum Vm_Reg8l {
+    REG_AL,
+    REG_BL,
+    REG_CL,
+    REG_DL,
+    REG_SPL = REG_SP,
+    REG_R8B = REG_R8W,
+    REG_R9B = REG_R9W,
+};
+
+enum Vm_Rflag {
+    RFLAG_CF = 0,
+    RFLAG_PF = 2,
+    RFLAG_AF = 4,
+    RFLAG_ZF = 6,
+    RFLAG_SF = 7,
+    RFLAG_OF = 11,
+    RFLAG_DF = 10,
+    RFLAG_ID = 21,
+};
 
 enum Value_Kind {
-#define X(Elem) Elem,
-    VALUES
-#undef X
+    VAL_BOOL,
+    VAL_CHAR,
+    VAL_U64,
+    VAL_S64,
+    VAL_F32,
+    VAL_STR,
 };
-
-struct Value : Loc {
+struct Value {
     Value_Kind kind;
-    int32_t    size;
+    uint32_t   size;
 
     union {
-        char      c;
-        int64_t   i64;
-        float     f32;
-        bool      b;
-        Obj     * o;
+        bool       b;
+        char       c;
+        uint64_t   u64;
+        int64_t    s64;
+        float      f32;
+        char     * str;
     };
 };
 
-#define OBJECTS         \
-    X(OBJ_NONE)         \
-    X(OBJ_STRING)       \
-    X(OBJ_ARRAY)        \
-    X(OBJ_RANGE)        \
-    X(OBJ_PROC)         \
-    X(OBJ_ITER)         \
-    X(OBJ_NAMESPACE)    \
-    X(OBJ_STRUCT)       \
-    X(OBJ_ENUM)         \
-    X(OBJ_UNION)        \
-    X(OBJ_COMPOUND)     \
-    X(OBJ_PTR)          \
-    X(OBJ_AGGR_FIELD)   \
-    X(OBJ_TYPE)         \
-    X(OBJ_TYPE_FIELD)
-
-enum Obj_Kind {
-#define X(Elem) Elem,
-    OBJECTS
-#undef X
+enum Operand_Kind {
+    OPERAND_NONE,
+    OPERAND_IMM,
+    OPERAND_REG64,
+    OPERAND_REG32,
+    OPERAND_REG16,
+    OPERAND_REG8L,
+    OPERAND_REG8H,
+    OPERAND_ADDR,
+    OPERAND_NAME,
 };
+struct Operand {
+    Operand_Kind kind;
 
-struct Obj : Loc {
-    Obj_Kind   kind;
-    Scope    * scope;
-};
+    bool         with_displacement;
+    int32_t      displacement;
+    uint32_t     size;
 
-struct Obj_String : Obj {
-    uint32_t   size;
-    char     * ptr;
-    uint32_t   hash;
-};
-
-struct Obj_Compound : Obj {
-    Values  elems;
-    int32_t num_elems;
-};
-
-struct Obj_Proc : Obj {
-    Obj_String     * name;
-    Bytecode       * bc;
-    int32_t          num_params;
-    bool             sys_call;
-    char           * lib;
-    Proc_Sign      * sign;
-};
-
-struct Obj_Namespace : Obj {
-    Obj_String     * name;
-    char           * scope_name;
-    Obj_Proc       * proc;
-    Scope          * prev_scope;
-};
-
-struct Obj_Range : Obj {
-    Value left;
-    Value right;
-};
-
-enum Iter_Kind {
-    ITER_NONE,
-    ITER_RANGE,
-    ITER_ARRAY,
-};
-struct Obj_Iter : Obj {
-    Iter_Kind   iter_kind;
-    Value       iter;
-    uint32_t    curr_index;
-};
-
-struct Obj_Iter_Range : Obj_Iter {
-    Obj_Range * range;
-};
-
-struct Obj_Iter_Array : Obj_Iter {
-    Obj_Array * array;
-};
-
-struct Obj_Struct : Obj {
-    Obj_String *  name;
-    Table      *  fields;
-    Obj_String ** fieldnames_ordered;
-};
-
-struct Obj_Union : Obj {
-    Obj_String *  name;
-    Table      *  fields;
-    Obj_String ** fieldnames_ordered;
-};
-
-struct Obj_Aggr_Field : Obj {
-    Obj_String * name;
-    Value        default_value;
-};
-
-struct Obj_Enum : Obj {
-    Obj_String *  name;
-    Table      *  fields;
-    Obj_String ** fieldnames_ordered;
-};
-
-struct Obj_Ptr : Obj {
-    void *ptr;
-};
-
-struct Obj_Array : Obj {
-    Values   elems;
-    uint32_t num_elems;
-};
-
-struct Obj_Type : Obj {
-    uint32_t   id;
-    char     * name;
-    uint32_t   size;
-    uint32_t   offset;
-
-    Obj_Type * base;
-
-    char     * field_name;
-    Values     fields;
-    uint32_t   num_fields;
-
-    Values     params;
-    uint32_t   num_params;
-
-    Values     rets;
-    uint32_t   num_rets;
-};
-
-struct Obj_Type_Field : Obj {
-    uint32_t   id;
-    char     * name;
-};
-
-Obj_Type **obj_types;
-
-enum Bytecode_Flags {
-    BYTECODEFLAG_NONE,
-    BYTECODEFLAG_ASSIGNABLE,
-    BYTECODEFLAG_SET_EXISTING,
-};
-
-void               bytecode_build_file(Bytecode *bc, Parsed_File *file);
-bool               bytecode_sym_set(Obj_String *key, Value val, uint32_t flags = BYTECODEFLAG_NONE);
-bool               bytecode_sym_get(Obj_String *key, Value *val);
-int32_t            bytecode_emit_const(Loc *loc, Bytecode *bc, Value val);
-void               bytecode_debug(Vm *vm, int32_t code);
-void               bytecode_stmt(Bytecode *bc, Stmt *stmt);
-void               bytecode_init(Bytecode *bc);
-void               bytecode_typespec(Bytecode *bc, Typespec *typespec);
-Value              val_none();
-Value              val_array(Values elems, uint32_t num_elems);
-Value              val_char(char val);
-Value              val_int(int64_t val, uint32_t size = 4);
-Value              val_str(char *ptr);
-Value              val_bool(bool val);
-Value              val_obj(Obj *val);
-void               val_print(Value val);
-Call_Frame       * vm_curr_frame(Vm *vm);
-Obj_Proc         * obj_proc();
-Obj_Proc         * as_proc(Value val);
-Obj_Struct       * as_struct(Value val);
-Obj_Aggr_Field   * as_struct_field(Value val);
-Value              operator-(Value left, Value right);
-
-
-#define AS_NAMESPACE(Val) ((Obj_Namespace *)(Val).o)
-
-struct Value_Array {
-    int32_t   size;
-    int32_t   cap;
-    Value   * values;
-};
-
-#define TABLE_MAX_LOAD 0.75f
-struct Table_Entry {
-    Obj_String * key;
-    Value        val;
-};
-
-struct Table {
-    uint32_t       size;
-    uint32_t       cap;
-    Table_Entry  * entries;
-    Table_Entry  ** ordered_entries;
-};
-
-struct Scope {
-    char  * name;
-    Scope * parent;
-    Table   syms;
-    Table   export_syms;
-};
-
-Scope   sys_scope    = {"sys",    NULL,       {}};
-Scope   global_scope = {"global", &sys_scope, {}};
-Scope * curr_scope   = &global_scope;
-
-struct Bytecode {
-    Bytecode *  parent;
-    Instr    ** instructions;
-    int32_t     curr;
-    int32_t     size;
-    Value_Array constants;
-};
-
-#define BYTECODES                   \
-    X(BYTECODEOP_HLT)               \
-    X(BYTECODEOP_AGGR_FIELD)        \
-    X(BYTECODEOP_ALLOC)             \
-    X(BYTECODEOP_ADDR)              \
-    X(BYTECODEOP_NEG)               \
-    X(BYTECODEOP_ADD)               \
-    X(BYTECODEOP_CALL)              \
-    X(BYTECODEOP_CAST)              \
-    X(BYTECODEOP_CMP_LT)            \
-    X(BYTECODEOP_CMP_GT)            \
-    X(BYTECODEOP_CMP_EQ)            \
-    X(BYTECODEOP_COMPOUND)          \
-    X(BYTECODEOP_CONST)             \
-    X(BYTECODEOP_DIV)               \
-    X(BYTECODEOP_ENUM)              \
-    X(BYTECODEOP_EXPORT_SYM)        \
-    X(BYTECODEOP_INC)               \
-    X(BYTECODEOP_INC_LOOP)          \
-    X(BYTECODEOP_INIT_LOOP)         \
-    X(BYTECODEOP_IMPORT_SYMS)       \
-    X(BYTECODEOP_JMP)               \
-    X(BYTECODEOP_JMP_FALSE)         \
-    X(BYTECODEOP_LOAD_STRUCT_FIELD) \
-    X(BYTECODEOP_LOAD_STRUCT_FIELD_ASSIGNABLE) \
-    X(BYTECODEOP_LOAD_SYM)          \
-    X(BYTECODEOP_LOAD_SYMREF)       \
-    X(BYTECODEOP_LOAD_TYPEINFO)     \
-    X(BYTECODEOP_LOAD_TYPEOF)       \
-    X(BYTECODEOP_MATCH_CASE)        \
-    X(BYTECODEOP_MUL)               \
-    X(BYTECODEOP_NAMED_COMPOUND)    \
-    X(BYTECODEOP_NAMESPACE_ENTER)   \
-    X(BYTECODEOP_NAMESPACE_LEAVE)   \
-    X(BYTECODEOP_NONE)              \
-    X(BYTECODEOP_POP)               \
-    X(BYTECODEOP_PUSH)              \
-    X(BYTECODEOP_PUSH_SYM)          \
-    X(BYTECODEOP_PUSH_DECL_SYM)     \
-    X(BYTECODEOP_PUSH_SYSSYM)       \
-    X(BYTECODEOP_PUSH_TYPEVAL)      \
-    X(BYTECODEOP_RANGE)             \
-    X(BYTECODEOP_RET)               \
-    X(BYTECODEOP_SCOPE_ENTER)       \
-    X(BYTECODEOP_SCOPE_LEAVE)       \
-    X(BYTECODEOP_SET_SYM)           \
-    X(BYTECODEOP_STRUCT)            \
-    X(BYTECODEOP_SUB)               \
-    X(BYTECODEOP_SUBSCRIPT)         \
-    X(BYTECODEOP_TYPEDEF)           \
-    X(BYTECODEOP_UNION)             \
-
-enum Instr_Opcode {
-#define X(Elem) Elem,
-    BYTECODES
-#undef X
+    union {
+        uint64_t  addr;
+        Vm_Reg64 reg64;
+        Vm_Reg32 reg32;
+        Vm_Reg16 reg16;
+        Vm_Reg8l reg8l;
+        Vm_Reg8h reg8h;
+        Value     val;
+    };
 };
 
 struct Instr : Loc {
-    Instr_Opcode opcode;
-    int32_t      op1;
-    int32_t      op2;
+    char    * label;
+    char    * comment;
+    Vm_Op     op;
+    uint32_t  addr;
+
+    union {
+        struct {
+            Operand   operand1;
+            Operand   operand2;
+        };
+
+        struct {
+            Operand   dst;
+            Operand   src;
+        };
+    };
 };
 
-struct Call_Frame {
-    Obj_Proc   * proc;
-    Scope      * prev_scope;
-    int32_t      pc;
-    int32_t      sp;
+typedef Instr ** Instrs;
+
+struct Mem {
+    uint8_t  * mem;
+    uint32_t   used;
+    uint32_t   size;
 };
 
-enum { MAX_STACK_SIZE = 1024, MAX_FRAME_NUM = 100 };
-struct Vm {
-    Value        stack[MAX_STACK_SIZE];
-    Call_Frame   frames[MAX_FRAME_NUM];
-    int32_t      frame_num;
+struct Cpu {
+    Instrs     instrs;
+    uint32_t   num_instrs;
+
+    uint64_t   regs[REG_COUNT];
+
+    Mem      * mem;
+    uint32_t   stack_size;
 };
 
-Table strings;
+Instrs   vm_instrs;
+Instrs   vm_instrs_labeled;
 
-Basic_Block *
-basic_block(int32_t id, Instrs instrs) {
-    Basic_Block *result = urq_allocs(Basic_Block);
+Vm_Reg64 regs64[] = { REG_RCX, REG_RDX, REG_R8,  REG_R9  };
+Vm_Reg32 regs32[] = { REG_ECX, REG_EDX, REG_R8D, REG_R9D };
+Vm_Reg16 regs16[] = { REG_CX,  REG_DX,  REG_R8W, REG_R9W };
+Vm_Reg8l  regs8[] = { REG_CL,  REG_DL,  REG_R8B, REG_R9B };
 
-    result->id     = id;
-    result->instrs = instrs;
+uint32_t
+addr_lookup(Value val) {
+    assert(val.kind == VAL_STR);
+
+    char *label = intern_str(val.str);
+
+    for ( int i = 0; i < buf_len(vm_instrs_labeled); ++i ) {
+        Instr *instr = vm_instrs_labeled[i];
+
+        if ( instr->label == label ) {
+            return instr->addr;
+        }
+    }
+
+    report_error(&loc_none, "keine passenden bezeichner für %s gefunden", label);
+    return 0;
+}
+
+uint64_t
+reg_read(Cpu *cpu, Vm_Reg64 reg) {
+    uint64_t result = cpu->regs[reg];
 
     return result;
-}
-
-Instr *
-instr_new(Loc *loc, Instr_Opcode opcode, int32_t op1, int32_t op2) {
-    Instr *result = urq_allocs(Instr);
-
-    loc_copy(loc, result);
-
-    result->opcode = opcode;
-    result->op1    = op1;
-    result->op2    = op2;
-
-    return result;
-}
-
-void
-instr_print(Instr *instr) {
-}
-
-Instr *
-instr_push(Loc *loc, Bytecode *bc, Instr_Opcode opcode, int32_t op1, int32_t op2) {
-    Instr *result = instr_new(loc, opcode, op1, op2);
-
-    buf_push(bc->instructions, result);
-
-    bc->curr = (uint32_t)buf_len(bc->instructions)-1;
-    bc->size = (uint32_t)buf_len(bc->instructions);
-
-    return result;
-}
-
-Instr *
-instr_push(Loc *loc, Bytecode *bc, Instr_Opcode opcode, int32_t op1) {
-    Instr *result = instr_push(loc, bc, opcode, op1, -1);
-
-    return result;
-}
-
-Instr *
-instr_push(Loc *loc, Bytecode *bc, Instr_Opcode opcode) {
-    return instr_push(loc, bc, opcode, -1, -1);
-}
-
-void
-instr_patch(Bytecode *bc, int32_t index, int32_t val) {
-    bc->instructions[index]->op1 = val;
-}
-
-void
-instr_patch2(Bytecode *bc, int32_t index, int32_t val) {
-    bc->instructions[index]->op2 = val;
-}
-
-Instr *
-instr_fetch(Vm *vm) {
-    Call_Frame *frame = vm_curr_frame(vm);
-
-    Instr *result = frame->proc->bc->instructions[frame->pc];
-    frame->pc += 1;
-
-    return result;
-}
-
-Scope *
-bytecode_scope_new(char *name, Scope *parent = NULL) {
-    Scope *result = urq_allocs(Scope);
-
-    result->name   = name;
-    result->parent = parent;
-
-    return result;
-}
-
-void
-bytecode_scope_enter(char *name = NULL) {
-    Scope *scope = urq_allocs(Scope);
-
-    scope->name   = name;
-    scope->parent = curr_scope;
-    curr_scope = scope;
-}
-
-void
-bytecode_scope_leave() {
-    assert(curr_scope->parent);
-    curr_scope = curr_scope->parent;
 }
 
 uint32_t
-hash_string(char* key, int32_t size) {
-    uint32_t hash = 2166136261u;
-
-    for (int i = 0; i < size; i++) {
-        hash ^= (uint8_t)key[i];
-        hash *= 16777619;
-    }
-
-    return hash;
-}
-
-Table *
-table_new() {
-    Table *result = urq_allocs(Table);
-
-    result->size            = 0;
-    result->cap             = 0;
-    result->entries         = NULL;
-    result->ordered_entries = NULL;
+reg_read(Cpu *cpu, Vm_Reg32 reg) {
+    uint32_t result = (uint32_t)(cpu->regs[reg] & 0xffffffff);
 
     return result;
 }
 
-Table_Entry *
-table_find(Table_Entry *entries, int32_t cap, Obj_String *key) {
-    uint32_t index = key->hash % cap;
-    Table_Entry* tombstone = NULL;
-
-    for (;;) {
-        Table_Entry *entry = &entries[index];
-
-        if (entry->key == NULL) {
-            if (entry->val.kind == VAL_NONE) {
-                return tombstone != NULL ? tombstone : entry;
-            } else {
-                if (tombstone == NULL) tombstone = entry;
-            }
-        } else if (entry->key == key) {
-            return entry;
-        }
-
-        index = (index + 1) % cap;
-    }
-}
-
-Obj_String *
-table_find_string(Table *table, char* chars, uint32_t size, uint32_t hash) {
-    if (table->size == 0) {
-        return NULL;
-    }
-
-    uint32_t index = hash % table->cap;
-
-    for (;;) {
-        Table_Entry *entry = &table->entries[index];
-
-        if (entry->key == NULL) {
-            if (entry->val.kind == VAL_NONE) {
-                return NULL;
-            }
-        } else if (entry->key->size == size &&
-                   entry->key->hash == hash &&
-                   memcmp(entry->key->ptr, chars, size) == 0)
-        {
-            return entry->key;
-        }
-
-        index = (index + 1) % table->cap;
-    }
-}
-
-void
-table_adjust(Table* table, int cap) {
-    Table_Entry *entries = (Table_Entry *)urq_alloc(sizeof(Table_Entry)*cap);
-
-    for (int i = 0; i < cap; i++) {
-        entries[i].key = NULL;
-        entries[i].val = val_none();
-    }
-
-    table->size = 0;
-    for ( uint32_t i = 0; i < table->cap; i++) {
-        Table_Entry *entry = &table->entries[i];
-        if (entry->key == NULL) continue;
-
-        Table_Entry *dest = table_find(entries, cap, entry->key);
-        dest->key = entry->key;
-        dest->val = entry->val;
-        table->size += 1;
-    }
-
-    table->entries = entries;
-    table->cap = cap;
-}
-
-bool
-table_set(Table *table, Obj_String *key, Value val) {
-    if ( table->size + 1 > table->cap * TABLE_MAX_LOAD) {
-        int cap = (table->cap < 16) ? 16 : table->cap*2;
-        table_adjust(table, cap);
-    }
-
-    Table_Entry *entry = table_find(table->entries, table->cap, key);
-
-    bool is_new_key = entry->key == NULL;
-    if (is_new_key && entry->val.kind == VAL_NONE) {
-        table->size += 1;
-    }
-
-    entry->key = key;
-    entry->val = val;
-
-    if ( is_new_key ) {
-        buf_push(table->ordered_entries, entry);
-    }
-
-    return is_new_key;
-}
-
-void
-table_add_all(Table* from, Table* to) {
-    for ( uint32_t i = 0; i < from->cap; i++) {
-        Table_Entry* entry = &from->entries[i];
-        if (entry->key != NULL) {
-            table_set(to, entry->key, entry->val);
-        }
-    }
-}
-
-Value *
-table_get_ref(Table *table, Obj_String *key) {
-    if (table->size == 0) {
-        return NULL;
-    }
-
-    Table_Entry *entry = table_find(table->entries, table->cap, key);
-    if (entry->key == NULL) {
-        return NULL;
-    }
-
-    return &entry->val;
-}
-
-bool
-table_get(Table *table, Obj_String *key, Value *val) {
-    Value *source_val = table_get_ref(table, key);
-
-    if ( !source_val ) {
-        return false;
-    }
-
-    *val = *source_val;
-
-    return true;
-}
-
-bool
-table_del(Table *table, Obj_String *key) {
-  if (table->size == 0) {
-      return false;
-  }
-
-  Table_Entry* entry = table_find(table->entries, table->cap, key);
-  if (entry->key == NULL) {
-      return false;
-  }
-
-  entry->key = NULL;
-  entry->val = val_bool(true);
-
-  return true;
-}
-
-Vm *
-vm_new(Bytecode *bc) {
-    Vm *result = urq_allocs(Vm);
-
-    result->frame_num = 1;
-
-    result->frames[0].proc = obj_proc();
-    result->frames[0].pc   = 0;
-    result->frames[0].sp   = 0;
-    result->frames[0].proc->bc = bc;
+uint16_t
+reg_read(Cpu *cpu, Vm_Reg16 reg) {
+    uint16_t result = (uint16_t)(cpu->regs[reg] & 0xffff);
 
     return result;
 }
 
-Call_Frame *
-vm_curr_frame(Vm *vm) {
-    Call_Frame *result = vm->frames + vm->frame_num - 1;
+uint16_t
+reg_read(Cpu *cpu, Vm_Reg8l reg) {
+    uint8_t result = (uint8_t)(cpu->regs[reg] & 0xff);
 
     return result;
 }
 
-void
-vm_debug(Vm *vm) {
-    Call_Frame *frame = vm_curr_frame(vm);
-
-    printf("\n*************************************************\n\n");
-    printf("frame: %d | ", vm->frame_num);
-    printf("pc: %d | ", frame->pc);
-    printf("sp: %d | \n", frame->sp);
-
-    printf("\n******************** CODE ***********************\n");
-    for ( int i = 0; i < 32; ++i ) {
-        instr_print(frame->proc->bc->instructions[i]);
-    }
-    printf("\n\n***************** STACK *************************\n");
-    if ( frame->sp ) {
-        for ( int i = 0; i < frame->sp; ++i ) {
-            printf("%s%02d[", (i % 4 == 0) ? "\n" : "", i);
-            val_print(vm->stack[i]);
-            printf("] ");
-        }
-    } else {
-        printf("##    LEER   ##");
-    }
-    printf("\n\n*************************************************\n");
-}
-
-Bytecode *
-bytecode_new() {
-    Bytecode *result = urq_allocs(Bytecode);
-
-    result->parent       = NULL;
-    result->instructions = NULL;
-    result->curr         = 0;
-    result->constants    = {};
+uint16_t
+reg_read(Cpu *cpu, Vm_Reg8h reg) {
+    uint8_t result = (uint8_t)((cpu->regs[reg] >> 2) & 0xff00);
 
     return result;
 }
 
-void
-stack_push(Vm *vm, Value val) {
-    Call_Frame *frame = vm_curr_frame(vm);
-
-    assert( frame->sp < MAX_STACK_SIZE );
-    vm->stack[frame->sp++] = val;
-}
-
-Value
-stack_pop(Vm *vm) {
-    Call_Frame *frame = vm_curr_frame(vm);
-
-    assert(frame->sp > 0);
-    Value result = vm->stack[--frame->sp];
-
-    return result;
-}
-
-int32_t
-value_push(Value_Array *array, Value value) {
-    if ( array->size + 1 > array->cap ) {
-        uint32_t cap = ( array->cap < 16 ) ? 16 : array->cap*2;
-        Value *values = (Value *)urq_alloc(cap*sizeof(Value));
-        memcpy(values, array->values, array->size*sizeof(Value));
-
-        array->values = values;
-        array->cap    = cap;
-    }
-
-    int32_t result = array->size;
-
-    array->values[array->size] = value;
-    array->size += 1;
-
-    return result;
-}
-
-Value
-value_get(Value_Array *array, int32_t index) {
-    Value result = array->values[index];
-
-    return result;
-}
-
-void
-value_set(Value_Array *array, int32_t index, Value val) {
-    array->values[index] = val;
-}
-
-Obj_String *
-obj_string(char *ptr) {
-    int32_t size = utf8_str_size(ptr);
-    int32_t hash = hash_string(ptr, size);
-    Obj_String *interned = table_find_string(&strings, ptr, size, hash);
-
-    if ( interned ) {
-        return interned;
-    }
-
-    Obj_String *result = urq_allocs(Obj_String);
-
-    result->kind  = OBJ_STRING;
-    result->scope = bytecode_scope_new("string");
-    result->ptr   = ptr;
-    result->size  = size;
-    result->hash  = hash;
-
-    table_set(&strings, result, val_none());
-
-    return result;
-}
-
-Obj_Compound *
-obj_compound(Values elems, uint32_t num_elems) {
-    Obj_Compound *result = urq_allocs(Obj_Compound);
-
-    result->kind      = OBJ_COMPOUND;
-    result->elems     = elems;
-    result->num_elems = num_elems;
-    result->scope     = bytecode_scope_new("compound");
-
-    return result;
-}
-
-Obj_Range *
-obj_range(Value left, Value right) {
-    Obj_Range *result = urq_allocs(Obj_Range);
-
-    result->kind  = OBJ_RANGE;
-    result->left  = left;
-    result->right = right;
-
-    return result;
-}
-
-Obj_Proc *
-obj_proc() {
-    Obj_Proc *result = urq_allocs(Obj_Proc);
-
-    result->kind       = OBJ_PROC;
-    result->scope      = bytecode_scope_new(NULL, NULL);
-    result->num_params = 0;
-    result->bc         = bytecode_new();
-    result->name       = NULL;
-    result->sys_call   = false;
-    result->lib        = NULL;
-    result->sign       = NULL;
-
-    return result;
-}
-
-Obj_Proc *
-obj_proc(bool sys_call, char *lib) {
-    Obj_Proc *result = obj_proc();
-
-    result->sys_call = sys_call;
-    result->lib      = lib;
-
-    return result;
-}
-
-Obj_Namespace *
-obj_namespace(char *name, char *scope_name) {
-    Obj_Namespace *result = urq_allocs(Obj_Namespace);
-
-    result->kind       = OBJ_NAMESPACE;
-    result->name       = obj_string(name);
-    result->scope_name = scope_name;
-    result->proc       = obj_proc();
-    result->scope      = bytecode_scope_new(scope_name, &sys_scope);
-
-    return result;
-}
-
-Obj_Iter_Range *
-obj_iter_range(Obj_Range *range, Value iter) {
-    Obj_Iter_Range *result = urq_allocs(Obj_Iter_Range);
-
-    result->kind       = OBJ_ITER;
-    result->iter_kind  = ITER_RANGE;
-    result->range      = range;
-    result->iter       = iter;
-    result->curr_index = 0;
-
-    return result;
-}
-
-Obj_Iter_Array *
-obj_iter_array(Obj_Array *array, Value iter) {
-    Obj_Iter_Array *result = urq_allocs(Obj_Iter_Array);
-
-    result->kind       = OBJ_ITER;
-    result->iter_kind  = ITER_ARRAY;
-    result->array      = array;
-    result->iter       = iter;
-    result->curr_index = 0;
-
-    return result;
-}
-
-Obj_Struct *
-obj_struct(Obj_String *name) {
-    Obj_Struct *result = urq_allocs(Obj_Struct);
-
-    result->kind   = OBJ_STRUCT;
-    result->name   = name;
-    result->fields = table_new();
-    result->fieldnames_ordered = NULL;
-
-    return result;
-}
-
-Obj_Aggr_Field *
-obj_aggr_field(Obj_String *name) {
-    Obj_Aggr_Field *result = urq_allocs(Obj_Aggr_Field);
-
-    result->kind = OBJ_AGGR_FIELD;
-    result->name = name;
-
-    return result;
-}
-
-Obj_Enum *
-obj_enum(Obj_String *name) {
-    Obj_Enum *result = urq_allocs(Obj_Enum);
-
-    result->kind   = OBJ_ENUM;
-    result->name   = name;
-    result->fields = table_new();
-    result->fieldnames_ordered = NULL;
-
-    return result;
-}
-
-Obj_Ptr *
-obj_ptr(void *ptr) {
-    Obj_Ptr *result = urq_allocs(Obj_Ptr);
-
-    result->kind = OBJ_PTR;
-    result->ptr = ptr;
-
-    return result;
-}
-
-Obj_Array *
-obj_array(Values elems, uint32_t num_elems) {
-    Obj_Array *result = urq_allocs(Obj_Array);
-
-    result->kind      = OBJ_ARRAY;
-    result->elems     = elems;
-    result->num_elems = num_elems;
-    result->scope     = bytecode_scope_new("array");
-
-    return result;
-}
-
-Obj_Type *
-obj_type(uint32_t id, char *name, uint32_t size) {
-    Obj_Type *result = urq_allocs(Obj_Type);
-
-    result->kind       = OBJ_TYPE;
-    result->scope     = bytecode_scope_new("datentyp");
-
-    result->id         = id;
-    result->name       = name;
-    result->size       = size;
-    result->offset     = 0;
-
-    result->base       = NULL;
-
-    result->fields     = NULL;
-    result->num_fields = 0;
-
-    result->params     = NULL;
-    result->num_params = 0;
-
-    result->rets       = NULL;
-    result->num_rets   = 0;
-
-    table_set(&result->scope->syms, obj_string("id"), val_int(result->id));
-    table_set(&result->scope->syms, obj_string("name"), val_str(result->name));
-    table_set(&result->scope->syms, obj_string("größe"), val_int(result->size));
-    table_set(&result->scope->syms, obj_string("versatz"), val_int(0));
-    table_set(&result->scope->syms, obj_string("basis"), val_int(0));
-    table_set(&result->scope->syms, obj_string("felder"), val_array(NULL, 0));
-    table_set(&result->scope->syms, obj_string("parameter"), val_array(NULL, 0));
-    table_set(&result->scope->syms, obj_string("rückgabewerte"), val_array(NULL, 0));
-
-    return result;
-}
-
-Obj_Type *
-obj_type(uint32_t id, char *name, uint32_t size, Obj_Type *base) {
-    Obj_Type *result = obj_type(id, name, size);
-
-    result->base = base;
-
-    table_set(&result->scope->syms, obj_string("basis"), val_obj(base));
-
-    return result;
-}
-
-Obj_Type *
-obj_type(uint32_t id, char *name, uint32_t size, Values fields, uint32_t num_fields) {
-    Obj_Type *result = obj_type(id, name, size);
-
-    result->fields     = fields;
-    result->num_fields = num_fields;
-
-    table_set(&result->scope->syms, obj_string("felder"), val_array(fields, num_fields));
-
-    return result;
-}
-
-Obj_Type *
-obj_type(uint32_t id, char *name, uint32_t size, Values params, uint32_t num_params, Values rets, uint32_t num_rets) {
-    Obj_Type *result = obj_type(id, name, size);
-
-    result->params     = params;
-    result->num_params = num_params;
-    result->rets       = rets;
-    result->num_rets   = num_rets;
-
-    table_set(&result->scope->syms, obj_string("parameter"), val_array(params, num_params));
-    table_set(&result->scope->syms, obj_string("rückgabewerte"), val_array(rets, num_rets));
-
-    return result;
-}
-
-Obj_Type_Field *
-obj_type_field(uint32_t id, char *name) {
-    Obj_Type_Field *result = urq_allocs(Obj_Type_Field);
-
-    result->id   = id;
-    result->name = name;
-
-    result->scope     = bytecode_scope_new("datentyp");
-
-    table_set(&result->scope->syms, obj_string("id"), val_int(result->id));
-    table_set(&result->scope->syms, obj_string("name"), val_str(result->name));
-
-    return result;
-}
-
-void
-obj_print(Obj *obj) {
-    switch ( obj->kind ) {
-        case OBJ_STRING: {
-            printf("(string: \"%s\")", ((Obj_String *)obj)->ptr);
+uint64_t
+reg_read(Cpu *cpu, Operand op) {
+    switch ( op.kind ) {
+        case OPERAND_REG64: {
+            return reg_read(cpu, op.reg64);
         } break;
 
-        case OBJ_RANGE: {
-            printf("(range: ");
-            val_print(((Obj_Range *)obj)->left);
-            printf("..");
-            val_print(((Obj_Range *)obj)->right);
-            printf(")");
+        case OPERAND_REG32: {
+            return reg_read(cpu, op.reg32);
         } break;
 
-        case OBJ_COMPOUND: {
-            Obj_Compound *c = ((Obj_Compound *)obj);
-            printf("(compound: ");
-            for ( int i = 0; i < c->num_elems; ++i ) {
-                printf("[%01d: ", i);
-                val_print(c->elems[i]);
-                printf("]");
-            }
-            printf(")\n");
+        case OPERAND_REG16: {
+            return reg_read(cpu, op.reg16);
         } break;
 
-        case OBJ_PROC: {
-            printf("(proc: ");
-            obj_print(((Obj_Proc *)obj)->name);
-            printf(")");
+        case OPERAND_REG8L: {
+            return reg_read(cpu, op.reg8l);
         } break;
 
-        case OBJ_ITER: {
-            printf("(iter: [");
-
-            if ( OITER(obj)->iter_kind == ITER_RANGE ) {
-                obj_print((OITERRNG(obj)->range));
-            } else {
-                assert(IS_OITERARRAY(obj));
-                obj_print((OITERARRAY(obj)->array));
-            }
-
-            printf("][it: ");
-            val_print((OITER(obj))->iter);
-            printf("]\n");
-        } break;
-
-        case OBJ_STRUCT: {
-            printf("(struct: ");
-            obj_print(((Obj_Struct *)obj)->name);
-            printf(")");
-        } break;
-
-        case OBJ_ENUM: {
-            printf("(enum: ");
-            obj_print(((Obj_Enum *)obj)->name);
-            printf(")");
-        } break;
-
-        case OBJ_AGGR_FIELD: {
-            printf("aggr_field: ");
-            obj_print(((Obj_Aggr_Field *)obj)->name);
-        } break;
-
-        case OBJ_NAMESPACE: {
-            printf("(namespace: ");
-            obj_print(((Obj_Namespace *)obj)->name);
-            printf(")");
-        } break;
-
-        case OBJ_PTR: {
-            printf("(ptr: 0x%p)", ((Obj_Ptr *)obj)->ptr);
+        case OPERAND_REG8H: {
+            return reg_read(cpu, op.reg8h);
         } break;
 
         default: {
-            assert(!"unbekanntes objekt");
+            assert(0);
+            return 0;
         } break;
     }
 }
 
-Value
-val_none() {
-    Value result = {};
+void
+reg_write(Cpu *cpu, Vm_Reg64 reg, uint64_t val) {
+    cpu->regs[reg] = val;
+}
 
-    result.kind  = VAL_NONE;
-    result.i64   = 0;
+void
+reg_write(Cpu *cpu, Vm_Reg32 reg, uint32_t val) {
+    cpu->regs[reg] = (cpu->regs[reg] & 0xffffffff00000000) | val;
+}
+
+void
+reg_write(Cpu *cpu, Vm_Reg16 reg, uint16_t val) {
+    cpu->regs[reg] = (cpu->regs[reg] & 0xffffffffffff0000) | val;
+}
+
+void
+reg_write(Cpu *cpu, Vm_Reg8l reg, uint8_t val) {
+    cpu->regs[reg] = (cpu->regs[reg] & 0xffffffffffffff00) | val;
+}
+
+void
+reg_write(Cpu *cpu, Vm_Reg8h reg, uint8_t val) {
+    uint16_t temp = val;
+
+    cpu->regs[reg] = (cpu->regs[reg] & 0xffffffffffff00ff) | ((temp << 2) & 0xff00);
+}
+
+void
+reg_write(Cpu *cpu, Operand op, uint64_t val) {
+    switch ( op.kind ) {
+        case OPERAND_REG64: {
+            reg_write(cpu, op.reg64, val);
+        } break;
+        case OPERAND_REG32: {
+            reg_write(cpu, op.reg32, (uint32_t)val);
+        } break;
+        case OPERAND_REG16: {
+            reg_write(cpu, op.reg16, (uint16_t)val);
+        } break;
+        case OPERAND_REG8L: {
+            reg_write(cpu, op.reg8l, (uint8_t)val);
+        } break;
+        case OPERAND_REG8H: {
+            reg_write(cpu, op.reg8h, (uint8_t)val);
+        } break;
+    }
+}
+
+void
+flags_set(Cpu *cpu, uint32_t flags) {
+    reg_write(cpu, REG_RFLAGS, reg_read(cpu, REG_RFLAGS) | flags);
+}
+
+void
+flags_clear(Cpu *cpu, uint64_t flags) {
+    reg_write(cpu, REG_RFLAGS, reg_read(cpu, REG_RFLAGS) & ~(flags));
+}
+
+uint32_t
+flag_state(Cpu *cpu, Vm_Rflag flag) {
+    uint32_t result = (reg_read(cpu, REG_RFLAGS) & flag) == flag;
+
+    return result;
+}
+
+Mem *
+mem_new(uint32_t size) {
+    Mem *result = urq_allocs(Mem);
+
+    result->size = size;
+    result->used = 0;
+    result->mem  = (uint8_t *)urq_alloc(result->size);
+
+    return result;
+}
+
+uint32_t
+mem_alloc(Mem *mem, uint32_t size) {
+    assert(mem->size > (mem->used + size));
+    uint32_t result = mem->used;
+
+    mem->used += size;
+
+    return result;
+}
+
+void
+mem_write(Mem *mem, uint64_t addr, uint64_t val) {
+    assert(addr < mem->size);
+    *(uint64_t *)(mem->mem + addr) = val;
+}
+
+void
+mem_write(Mem *mem, uint64_t addr, uint32_t val) {
+    assert(addr < mem->size);
+    *(uint32_t *)(mem->mem + addr) = val;
+}
+
+void
+mem_write(Mem *mem, uint64_t addr, uint16_t val) {
+    assert(addr < mem->size);
+    *(uint16_t *)(mem->mem + addr) = val;
+}
+
+void
+mem_write(Mem *mem, uint64_t addr, uint8_t val) {
+    assert(addr < mem->size);
+    *(uint8_t *)(mem->mem + addr) = val;
+}
+
+uint8_t
+mem_read8(Mem *mem, uint32_t addr) {
+    assert(addr < mem->size);
+
+    uint8_t result = *(uint8_t *)(mem->mem + addr);
+
+    return result;
+}
+
+uint16_t
+mem_read16(Mem *mem, uint32_t addr) {
+    assert(addr < mem->size);
+
+    uint16_t result = *(uint16_t *)(mem->mem + addr);
+
+    return result;
+}
+
+uint32_t
+mem_read32(Mem *mem, uint32_t addr) {
+    assert(addr < mem->size);
+
+    uint32_t result = *(uint32_t *)(mem->mem + addr);
+
+    return result;
+}
+
+uint64_t
+mem_read64(Mem *mem, uint32_t addr) {
+    assert(addr < mem->size);
+
+    uint64_t result = *(uint64_t *)(mem->mem + addr);
+
+    return result;
+}
+
+Cpu *
+cpu_new(Instrs instrs, uint32_t mem_size, uint32_t start = 0) {
+    Cpu *result = urq_allocs(Cpu);
+
+    result->instrs     = instrs;
+    result->num_instrs = buf_len(instrs);
+
+    result->stack_size = 1024;
+    result->mem        = mem_new(mem_size);
+
+    reg_write(result, REG_RIP, start);
+    reg_write(result, REG_RSP, result->mem->size);
 
     return result;
 }
 
 Value
-val_char(char val) {
-    Value result = {};
-
-    result.kind = VAL_CHAR;
-    result.c    = val;
-
-    return result;
-}
-
-Value
-val_int(int64_t val, uint32_t size) {
-    Value result = {};
-
-    result.kind = VAL_INT;
-    result.size = size;
-    result.i64  = val;
-
-    return result;
-}
-
-Value
-val_float(float val) {
-    Value result = {};
-
-    result.kind = VAL_FLOAT;
-    result.f32  = val;
-
-    return result;
-}
-
-Value
-val_bool(bool val) {
+value(bool val) {
     Value result = {};
 
     result.kind = VAL_BOOL;
@@ -1100,1191 +463,582 @@ val_bool(bool val) {
 }
 
 Value
-val_obj(Obj *val) {
+value(char val) {
     Value result = {};
 
-    result.kind = VAL_OBJ;
-    result.o    = val;
+    result.kind = VAL_CHAR;
+    result.c    = val;
 
     return result;
 }
 
 Value
-val_ptr(void *ptr) {
-    Value result = val_obj(obj_ptr(ptr));
-
-    return result;
-}
-
-Value
-val_str(char *ptr) {
-    Value result = val_obj(obj_string(ptr));
-
-    table_set(&result.o->scope->syms, obj_string("größe"), val_int(VSTR(result)->size));
-
-    return result;
-}
-
-Value
-val_compound(Values elems, uint32_t num_elems) {
-    Value result = val_obj(obj_compound(elems, num_elems));
-
-    table_set(&result.o->scope->syms, obj_string("größe"), val_int(num_elems));
-
-    return result;
-}
-
-Value
-val_range(Value left, Value right) {
-    Value result = val_obj(obj_range(left, right));
-
-    return result;
-}
-
-Value
-val_proc(char *ptr, bool sys_call, char *lib) {
-    Value result = val_obj(obj_proc(sys_call, lib));
-
-    return result;
-}
-
-Value
-val_iter_range(Obj_Range *range, Value iter) {
-    Value result = val_obj(obj_iter_range(range, iter));
-
-    return result;
-}
-
-Value
-val_iter_array(Obj_Array *array, Value iter) {
-    Value result = val_obj(obj_iter_array(array, iter));
-
-    return result;
-}
-
-Value
-val_struct(char *name) {
-    Value result = val_obj(obj_struct(obj_string(name)));
-
-    return result;
-}
-
-Value
-val_struct(Obj_String *name) {
-    Value result = val_obj(obj_struct(name));
-
-    return result;
-}
-
-Value
-val_enum(char *name) {
-    Value result = val_obj(obj_enum(obj_string(name)));
-
-    return result;
-}
-
-Value
-val_aggr_field(char *name) {
-    Value result = val_obj(obj_aggr_field(obj_string(name)));
-
-    return result;
-}
-
-Value
-val_namespace(Obj_Namespace *ns) {
-    Value result = val_obj(ns);
-
-    return result;
-}
-
-Value
-val_array(Values elems, uint32_t num_elems) {
-    Value result = val_obj(obj_array(elems, num_elems));
-
-    table_set(&result.o->scope->syms, obj_string("größe"), val_int(num_elems));
-
-    return result;
-}
-
-Value
-val_type(Obj_Type *type) {
-    Value result = val_obj(type);
-
-    return result;
-}
-
-Value
-val_type_field(uint32_t id, char *name) {
-    Value result = val_obj(obj_type_field(id, name));
-
-    return result;
-}
-
-void
-val_print(Value val) {
-    switch ( val.kind ) {
-        case VAL_INT: {
-            printf("(int: %lld)", val.i64);
-        } break;
-
-        case VAL_FLOAT: {
-            printf("(float: %f)", val.f32);
-        } break;
-
-        case VAL_BOOL: {
-            printf("(bool: %s)", (val.b == true) ? "true" : "false");
-        } break;
-
-        case VAL_NONE: {
-            printf("(none)");
-        } break;
-
-        case VAL_OBJ: {
-            obj_print(val.o);
-        } break;
-
-        default: {
-            assert(!"unbekannter wert");
-        } break;
-    }
-}
-
-Value
-val_to_ptr(Value val) {
+value(uint64_t val) {
     Value result = {};
 
-    switch ( val.kind ) {
-        case VAL_INT: {
-            result = val_ptr(&val.i64);
-        } break;
-
-        case VAL_FLOAT: {
-            result = val_ptr(&val.f32);
-        } break;
-
-        case VAL_BOOL: {
-            result = val_ptr(&val.b);
-        } break;
-
-        case VAL_OBJ: {
-            result = val_ptr(val.o);
-        } break;
-
-        default: {
-            assert(!"unbekannter datentyp");
-        } break;
-    }
+    result.kind = VAL_U64;
+    result.u64  = val;
 
     return result;
 }
 
 Value
-operator-(Value val) {
-    switch ( val.kind ) {
-        case VAL_INT: {
-            return val_int(-val.i64);
-        } break;
-
-        case VAL_FLOAT: {
-            return val_float(-val.f32);
-        } break;
-
-        default: {
-            assert(!"operator- implementieren");
-            return val_none();
-        } break;
-    }
-}
-
-Value
-operator+(Value left, int32_t right) {
-    switch ( left.kind ) {
-        case VAL_INT: {
-            return val_int(left.i64 + right);
-        } break;
-
-        case VAL_FLOAT: {
-            return val_float(left.f32 + right);
-        } break;
-
-        case VAL_OBJ: {
-            assert(left.obj_val->kind == OBJ_ITER);
-            OITER(left.obj_val)->curr_index += right;
-
-            if ( IS_OITERRNG(left.obj_val) ) {
-                Obj_Iter_Range *iter = OITERRNG(left.obj_val);
-                iter->iter = iter->iter + 1;
-            } else {
-                Obj_Iter_Array *iter = OITERARRAY(left.obj_val);
-                if ( iter->curr_index < iter->array->num_elems ) {
-                    iter->iter = iter->array->elems[iter->curr_index];
-                }
-            }
-
-            return left;
-        } break;
-
-        default: {
-            assert(0);
-        } break;
-    }
-
-    assert(0);
-    return val_none();
-}
-
-Value
-operator+(Value left, Value right) {
-    switch ( left.kind ) {
-        case VAL_INT: {
-            if ( right.kind == VAL_INT ) {
-                return val_int(left.i64 + right.i64);
-            } else {
-                assert(right.kind == VAL_OBJ && right.obj_val->kind == OBJ_ITER);
-                Value iter = ((Obj_Iter *)right.obj_val)->iter;
-
-                return iter + (int32_t)left.int_val;
-            }
-        } break;
-
-        case VAL_FLOAT: {
-            assert(right.kind == VAL_FLOAT);
-            return val_float(left.f32 + right.f32);
-        } break;
-
-        default: {
-            assert(0);
-        } break;
-    }
-
-    assert(0);
-    return val_none();
-}
-
-Value
-operator-(Value left, Value right) {
-    switch ( left.kind ) {
-        case VAL_INT: {
-            assert(right.kind == VAL_INT);
-            return val_int(left.i64 - right.i64);
-        } break;
-
-        case VAL_FLOAT: {
-            assert(right.kind == VAL_FLOAT);
-            return val_float(left.f32 - right.f32);
-        } break;
-
-        default: {
-            assert(0);
-        } break;
-    }
-
-    assert(0);
-    return val_none();
-}
-
-Value
-operator*(Value left, Value right) {
-    switch ( left.kind ) {
-        case VAL_INT: {
-            assert(right.kind == VAL_INT);
-            return val_int(left.i64 * right.i64);
-        } break;
-
-        case VAL_FLOAT: {
-            assert(right.kind == VAL_FLOAT);
-            return val_float(left.f32 * right.f32);
-        } break;
-
-        default: {
-            assert(0);
-        } break;
-    }
-
-    assert(0);
-    return val_none();
-}
-
-Value
-operator/(Value left, Value right) {
-    switch ( left.kind ) {
-        case VAL_INT: {
-            assert(right.kind == VAL_INT);
-            return val_int(left.i64 / right.i64);
-        } break;
-
-        case VAL_FLOAT: {
-            assert(right.kind == VAL_FLOAT);
-            return val_float(left.f32 / right.f32);
-        } break;
-
-        default: {
-            assert(0);
-        } break;
-    }
-
-    assert(0);
-    return val_none();
-}
-
-bool
-operator<(Value left, Value right) {
-    switch ( left.kind ) {
-        case VAL_INT: {
-            assert(right.kind == VAL_INT);
-            return left.i64 < right.i64;
-        } break;
-
-        case VAL_FLOAT: {
-            assert(right.kind == VAL_FLOAT);
-            return left.f32 < right.f32;
-        } break;
-
-        default: {
-            assert(0);
-        } break;
-    }
-
-    assert(0);
-    return false;
-}
-
-bool
-operator>=(float left, Value right) {
-    assert(right.kind == VAL_FLOAT);
-
-    return left >= right.f32;
-}
-
-bool
-operator>=(Value left, float right) {
-    assert(left.kind == VAL_FLOAT);
-
-    return left.f32 >= right;
-}
-
-bool
-operator>=(int64_t left, Value right) {
-    assert(right.kind == VAL_INT);
-
-    return left >= right.i64;
-}
-
-bool
-operator>=(Value left, int64_t right) {
-    assert(left.kind == VAL_INT);
-
-    return left.i64 >= right;
-}
-
-bool
-operator<=(int64_t left, Value right) {
-    assert(right.kind == VAL_INT);
-
-    return left <= right.i64;
-}
-
-bool
-operator<=(Value left, int64_t right) {
-    assert(left.kind == VAL_INT);
-
-    return left.i64 <= right;
-}
-
-bool
-operator<=(float left, Value right) {
-    assert(right.kind == VAL_FLOAT);
-
-    return left <= right.f32;
-}
-
-bool
-operator<=(Value left, float right) {
-    assert(left.kind == VAL_FLOAT);
-
-    return left.f32 <= right;
-}
-
-bool
-operator>=(Value left, Value right) {
-    switch ( left.kind ) {
-        case VAL_INT: {
-            assert(right.kind == VAL_INT);
-
-            return left.i64 >= right.i64;
-        } break;
-
-        default: {
-            assert(0);
-        } break;
-    }
-
-    assert(0);
-    return false;
-}
-
-bool
-operator<=(Value left, Value right) {
-    switch ( left.kind ) {
-        case VAL_INT: {
-            assert(right.kind == VAL_INT);
-
-            return left.i64 <= right.i64;
-        } break;
-
-        default: {
-            assert(0);
-        } break;
-    }
-
-    assert(0);
-    return false;
-}
-
-bool
-operator!=(Value left, Value right) {
-    switch ( left.kind ) {
-        case VAL_INT: {
-            switch ( right.kind ) {
-                case VAL_INT: {
-                    return left.i64 != right.i64;
-                } break;
-
-                case VAL_FLOAT: {
-                    return left.i64 != right.f32;
-                } break;
-
-                case VAL_OBJ: {
-                    assert(right.o->kind == OBJ_RANGE);
-
-                    bool gt = !(left.i64 >= ((Obj_Range *)right.o)->left);
-                    bool lt = !(left.i64 <= ((Obj_Range *)right.o)->right);
-                    bool result = gt || lt;
-
-                    return result;
-                } break;
-            }
-        } break;
-
-        case VAL_FLOAT: {
-            switch ( right.kind ) {
-                case VAL_INT: {
-                    return left.f32 != right.i64;
-                } break;
-
-                case VAL_FLOAT: {
-                    return left.f32 != right.f32;
-                } break;
-
-                case VAL_OBJ: {
-                    assert(right.o->kind == OBJ_RANGE);
-
-                    return left.f32 >= ((Obj_Range *)right.o)->left &&
-                           left.f32 <= ((Obj_Range *)right.o)->right;
-                } break;
-            }
-        } break;
-
-        case VAL_OBJ: {
-            assert(left.o->kind == OBJ_RANGE);
-            Obj_Range *range = (Obj_Range *)left.o;
-
-            switch ( right.kind ) {
-                case VAL_INT: {
-                    return range->left >= right.i64 && range->right <= right.i64;
-                } break;
-
-                case VAL_FLOAT: {
-                    return range->left >= right.f32 &&
-                           range->right <= right.f32;
-                } break;
-
-                case VAL_OBJ: {
-                    assert(left.o->kind == OBJ_RANGE);
-
-                    Obj_Range *left_range = (Obj_Range *)left.o;
-                    return range->left != left_range->left && range->right != left_range->right;
-                } break;
-            }
-        } break;
-
-        default: {
-            assert(0);
-        } break;
-    }
-
-    assert(0);
-    return false;
-}
-
-bool
-operator==(Value left, Value right) {
-    bool result = !(left != right);
+value(int64_t val) {
+    Value result = {};
+
+    result.kind = VAL_U64;
+    result.s64  = val;
 
     return result;
 }
 
-int32_t
-bytecode_emit_jmp(Loc *loc, Bytecode *bc) {
-    instr_push(loc, bc, BYTECODEOP_JMP);
-    int32_t result = bc->curr;
+Value
+value(float val) {
+    Value result = {};
+
+    result.kind = VAL_F32;
+    result.f32  = val;
 
     return result;
 }
 
-int32_t
-bytecode_emit_jmp_false(Loc *loc, Bytecode *bc) {
-    instr_push(loc, bc, BYTECODEOP_JMP_FALSE);
-    int32_t result = bc->curr;
+Value
+value(char *val) {
+    Value result = {};
+
+    result.kind = VAL_STR;
+    result.str  = val;
 
     return result;
 }
 
-int32_t
-bytecode_push_constant(Bytecode *bc, Value value) {
-    int32_t result = value_push(&bc->constants, value);
+Operand
+operand_imm(Value val) {
+    Operand result = {};
+
+    result.kind = OPERAND_IMM;
+    result.val  = val;
 
     return result;
 }
 
-int32_t
-bytecode_emit_const(Loc *loc, Bytecode *bc, Value val) {
-    int32_t index = bytecode_push_constant(bc, val);
+Operand
+operand_addr(uint32_t addr) {
+    Operand result = {};
 
-    instr_push(loc, bc, BYTECODEOP_CONST, index);
+    result.kind = OPERAND_ADDR;
+    result.addr = addr;
 
-    return index;
+    return result;
+}
+
+Operand
+operand_reg(Vm_Reg64 reg, int32_t displacement) {
+    Operand result = {};
+
+    result.kind  = OPERAND_REG64;
+    result.displacement = displacement;
+    result.with_displacement = true;
+    result.reg64 = reg;
+
+    return result;
+}
+
+Operand
+operand_reg(Vm_Reg64 reg) {
+    Operand result = {};
+
+    result.kind  = OPERAND_REG64;
+    result.reg64 = reg;
+
+    return result;
+}
+
+Operand
+operand_reg(Vm_Reg32 reg, int32_t displacement) {
+    Operand result = {};
+
+    result.kind  = OPERAND_REG32;
+    result.displacement = displacement;
+    result.with_displacement = true;
+    result.reg32 = reg;
+
+    return result;
+}
+
+Operand
+operand_reg(Vm_Reg32 reg) {
+    Operand result = {};
+
+    result.kind  = OPERAND_REG32;
+    result.reg32 = reg;
+
+    return result;
+}
+
+Operand
+operand_reg(Vm_Reg16 reg, int32_t displacement) {
+    Operand result = {};
+
+    result.kind  = OPERAND_REG16;
+    result.displacement = displacement;
+    result.with_displacement = true;
+    result.reg16 = reg;
+
+    return result;
+}
+
+Operand
+operand_reg(Vm_Reg16 reg) {
+    Operand result = {};
+
+    result.kind  = OPERAND_REG16;
+    result.reg16 = reg;
+
+    return result;
+}
+
+Operand
+operand_reg(Vm_Reg8l reg, int32_t displacement) {
+    Operand result = {};
+
+    result.kind  = OPERAND_REG8L;
+    result.displacement = displacement;
+    result.with_displacement = true;
+    result.reg8l = reg;
+
+    return result;
+}
+
+Operand
+operand_reg(Vm_Reg8l reg) {
+    Operand result = {};
+
+    result.kind  = OPERAND_REG8L;
+    result.reg8l = reg;
+
+    return result;
+}
+
+Operand
+operand_reg(Vm_Reg8h reg, int32_t displacement) {
+    Operand result = {};
+
+    result.kind  = OPERAND_REG8H;
+    result.displacement = displacement;
+    result.with_displacement = true;
+    result.reg8h = reg;
+
+    return result;
+}
+
+Operand
+operand_reg(Vm_Reg8h reg) {
+    Operand result = {};
+
+    result.kind  = OPERAND_REG8H;
+    result.reg8h = reg;
+
+    return result;
+}
+
+Operand
+operand_rax(int32_t size) {
+    if ( size == 1 ) {
+        return operand_reg(REG_AL);
+    } else if ( size == 2 ) {
+        return operand_reg(REG_AX);
+    } else if ( size == 4 ) {
+        return operand_reg(REG_EAX);
+    } else if ( size == 8 ) {
+        return operand_reg(REG_RAX);
+    } else {
+        assert(0);
+        return operand_reg(REG_RAX);
+    }
+}
+
+Operand
+operand_rdi(int32_t size) {
+    if ( size == 1 ) {
+        return operand_reg(REG_DI);
+    } else if ( size == 2 ) {
+        return operand_reg(REG_DI);
+    } else if ( size == 4 ) {
+        return operand_reg(REG_EDI);
+    } else if ( size == 8 ) {
+        return operand_reg(REG_RDI);
+    } else {
+        assert(0);
+        return operand_reg(REG_RDI);
+    }
+}
+
+Operand
+operand_rbp(int32_t size, int32_t displacement) {
+    if ( size == 1 ) {
+        return operand_reg(REG_BP, displacement);
+    } else if ( size == 2 ) {
+        return operand_reg(REG_BP, displacement);
+    } else if ( size == 4 ) {
+        return operand_reg(REG_EBP, displacement);
+    } else if ( size == 8 ) {
+        return operand_reg(REG_RBP, displacement);
+    } else {
+        assert(0);
+        return operand_reg(REG_RBP);
+    }
+}
+
+Operand
+operand_args(int32_t size, int32_t count) {
+    if ( size == 1 ) {
+        return operand_reg(regs8[count]);
+    } else if ( size == 2 ) {
+        return operand_reg(regs16[count]);
+    } else if ( size == 4 ) {
+        return operand_reg(regs32[count]);
+    } else if ( size == 8 ) {
+        return operand_reg(regs64[count]);
+    } else {
+        assert(0);
+        return operand_reg(REG_RCX);
+    }
+}
+
+Operand
+operand_name(Value name) {
+    Operand result = {};
+
+    result.kind = OPERAND_NAME;
+    result.val  = name;
+
+    return result;
+}
+
+Instr *
+vm_instr(Loc *loc, Vm_Op op, Operand operand1, Operand operand2, char *label = NULL, char *comment = NULL) {
+    Instr *result = urq_allocs(Instr);
+
+    loc_copy(loc, result);
+
+    result->label    = label;
+    result->comment  = comment;
+    result->op       = op;
+    result->operand1 = operand1;
+    result->operand2 = operand2;
+
+    return result;
+}
+
+Instr *
+vm_instr(Loc *loc, Vm_Op op, Operand operand1, char *label = NULL, char *comment = NULL) {
+    Instr *result = vm_instr(loc, op, operand1, {}, label, comment);
+
+    return result;
+}
+
+Instr *
+vm_instr(Loc *loc, Vm_Op op, char *label = NULL, char *comment = NULL) {
+    Instr *result = vm_instr(loc, op, {}, {}, label, comment);
+
+    return result;
+}
+
+Instr *
+vm_instr_fetch(Cpu *cpu) {
+    Instr *result = cpu->instrs[reg_read(cpu, REG_RIP)];
+    rip_inc(cpu);
+
+    return result;
 }
 
 void
-bytecode_debug(Vm *vm, Instr *instr) {
-    Call_Frame *frame = vm_curr_frame(vm);
-    Value_Array constants = frame->proc->bc->constants;
+vm_instr_patch(uint32_t index, uint32_t addr) {
+    vm_instrs[index]->operand1.addr = addr;
+}
 
-    switch ( instr->opcode ) {
-        case BYTECODEOP_CONST: {
-            printf("push ");
-            val_print(value_get(&constants, instr->op1));
-            printf("\n");
+uint32_t
+vm_emit(Instr *instr) {
+    uint32_t result = buf_len(vm_instrs);
+    buf_push(vm_instrs, instr);
+    instr->addr = result;
+
+    if ( instr->label ) {
+        buf_push(vm_instrs_labeled, instr);
+    }
+
+    return result;
+}
+
+void
+rsp_dec(Cpu *cpu, uint32_t by_how_much) {
+    reg_write(cpu, REG_RSP, reg_read(cpu, REG_RSP) - by_how_much);
+}
+
+void
+rsp_inc(Cpu *cpu, uint32_t by_how_much) {
+    reg_write(cpu, REG_RSP, reg_read(cpu, REG_RSP) + by_how_much);
+}
+
+void
+rip_inc(Cpu *cpu) {
+    reg_write(cpu, REG_RIP, reg_read(cpu, REG_RIP) + 1);
+}
+
+void
+stack_push(Cpu *cpu, uint64_t val) {
+    rsp_dec(cpu, 8);
+    uint64_t addr = reg_read(cpu, REG_RSP);
+    assert(addr > cpu->stack_size);
+    mem_write(cpu->mem, addr, val);
+}
+
+void
+stack_push(Cpu *cpu, uint32_t val) {
+    rsp_dec(cpu, 4);
+    uint64_t addr = reg_read(cpu, REG_ESP);
+    assert(addr > cpu->stack_size);
+    mem_write(cpu->mem, addr, val);
+}
+
+void
+stack_push(Cpu *cpu, uint16_t val) {
+    rsp_dec(cpu, 2);
+    uint64_t addr = reg_read(cpu, REG_SP);
+    assert(addr > cpu->stack_size);
+    mem_write(cpu->mem, addr, val);
+}
+
+void
+stack_push(Cpu *cpu, uint8_t val) {
+    rsp_dec(cpu, 1);
+    uint64_t addr = reg_read(cpu, REG_SPL);
+    assert(addr > cpu->stack_size);
+    mem_write(cpu->mem, addr, val);
+}
+
+void
+stack_pop(Cpu *cpu, Vm_Reg64 reg) {
+    assert(cpu->mem->size > reg_read(cpu, REG_RSP) + 8);
+    reg_write(cpu, reg, mem_read64(cpu->mem, (uint32_t)reg_read(cpu, REG_RSP)));
+    rsp_inc(cpu, 8);
+}
+
+void
+stack_pop(Cpu *cpu, Vm_Reg32 reg) {
+    assert(cpu->mem->size > reg_read(cpu, REG_RSP) + 4);
+    reg_write(cpu, reg, mem_read32(cpu->mem, (uint32_t)reg_read(cpu, REG_ESP)));
+    rsp_inc(cpu, 4);
+}
+
+void
+stack_pop(Cpu *cpu, Vm_Reg16 reg) {
+    assert(cpu->mem->size > reg_read(cpu, REG_RSP) + 2);
+    reg_write(cpu, reg, mem_read16(cpu->mem, (uint32_t)reg_read(cpu, REG_SP)));
+    rsp_inc(cpu, 2);
+}
+
+void
+stack_pop(Cpu *cpu, Vm_Reg8l reg) {
+    assert(cpu->mem->size > reg_read(cpu, REG_RSP) + 1);
+    reg_write(cpu, reg, mem_read8(cpu->mem, (uint32_t)reg_read(cpu, REG_SPL)));
+    rsp_inc(cpu, 1);
+}
+
+void
+stack_pop(Cpu *cpu, Vm_Reg8h reg) {
+    assert(cpu->mem->size > reg_read(cpu, REG_RSP) + 1);
+    reg_write(cpu, reg, mem_read8(cpu->mem, (uint32_t)reg_read(cpu, REG_SPL)));
+    rsp_inc(cpu, 1);
+}
+
+void
+stack_pop(Cpu *cpu, Operand op) {
+    switch ( op.kind ) {
+        case OPERAND_REG64: {
+            stack_pop(cpu, op.reg64);
         } break;
 
-        case BYTECODEOP_ADD: {
-            printf("BYTECODEOP_ADD [left: ");
-            val_print(vm->stack[frame->sp-2]);
-            printf("] + [right: ");
-            val_print(vm->stack[frame->sp-1]);
-            printf("]\n");
+        case OPERAND_REG32: {
+            stack_pop(cpu, op.reg32);
         } break;
 
-        case BYTECODEOP_SUB: {
-            printf("BYTECODEOP_SUB [left: ");
-            val_print(vm->stack[frame->sp-2]);
-            printf("] - [right: ");
-            val_print(vm->stack[frame->sp-1]);
-            printf("]\n");
+        case OPERAND_REG16: {
+            stack_pop(cpu, op.reg16);
         } break;
 
-        case BYTECODEOP_SUBSCRIPT: {
-            printf("subscript ");
-            val_print(vm->stack[frame->sp-2]);
-            printf("[");
-            val_print(vm->stack[frame->sp-1]);
-            printf("]\n");
+        case OPERAND_REG8L: {
+            stack_pop(cpu, op.reg8l);
         } break;
 
-        case BYTECODEOP_MUL: {
-            printf("BYTECODEOP_MUL [left: ");
-            val_print(vm->stack[frame->sp-2]);
-            printf("] * [right: ");
-            val_print(vm->stack[frame->sp-1]);
-            printf("]\n");
-        } break;
-
-        case BYTECODEOP_DIV: {
-            printf("BYTECODEOP_DIV [left: ");
-            val_print(vm->stack[frame->sp-2]);
-            printf("] / [right: ");
-            val_print(vm->stack[frame->sp-1]);
-            printf("]\n");
-        } break;
-
-        case BYTECODEOP_MATCH_CASE: {
-            printf("BYTECODEOP_MATCH_CASE\n");
-        } break;
-
-        case BYTECODEOP_PUSH_SYSSYM: {
-            printf("BYTECODEOP_PUSH_SYSSYM [index: %02d] (", instr->op1);
-            val_print(value_get(&constants, instr->op1));
-            printf(")\n");
-        } break;
-
-        case BYTECODEOP_PUSH_SYM: {
-            printf("BYTECODEOP_PUSH_SYM ");
-            val_print(value_get(&constants, instr->op1));
-            printf("[val: ");
-            val_print(vm->stack[frame->sp-1]);
-            printf("]\n");
-        } break;
-
-        case BYTECODEOP_PUSH_DECL_SYM: {
-            printf("BYTECODEOP_PUSH_DECL_SYM ");
-            val_print(value_get(&constants, instr->op1));
-            printf("[val: ");
-
-            Value type_val = vm->stack[frame->sp-1];
-            Value expr_val = vm->stack[frame->sp-2];
-            val_print(expr_val.kind == VAL_NONE ? type_val : expr_val);
-
-            printf("]\n");
-        } break;
-
-        case BYTECODEOP_CAST: {
-            printf("BYTECODEOP_CAST\n");
-        } break;
-
-        case BYTECODEOP_LOAD_STRUCT_FIELD: {
-            printf("BYTECODEOP_LOAD_STRUCT_FIELD [name: ");
-            val_print(value_get(&constants, (uint16_t)(instr->op1)));
-            printf("]\n");
-        } break;
-
-        case BYTECODEOP_LOAD_SYM: {
-            printf("BYTECODEOP_LOAD_SYM [index: %02d] (", instr->op1);
-            val_print(value_get(&constants, instr->op1));
-            printf(")\n");
-        } break;
-
-        case BYTECODEOP_CMP_LT: {
-            printf("cmp ");
-            val_print(vm->stack[frame->sp-2]);
-            printf(" < ");
-            val_print(vm->stack[frame->sp-1]);
-            printf("\n");
-        } break;
-
-        case BYTECODEOP_CMP_GT: {
-            printf("cmp ");
-            val_print(vm->stack[frame->sp-2]);
-            printf(" > ");
-            val_print(vm->stack[frame->sp-1]);
-            printf("\n");
-        } break;
-
-        case BYTECODEOP_CMP_EQ: {
-            printf("cmp ");
-            val_print(vm->stack[frame->sp-2]);
-            printf(" == ");
-            val_print(vm->stack[frame->sp-1]);
-            printf("\n");
-        } break;
-
-        case BYTECODEOP_JMP_FALSE: {
-            printf("BYTECODEOP_JMP_FALSE [op: ");
-            val_print(vm->stack[frame->sp-1]);
-            printf("] -> [addr: %d]\n", (uint16_t)(instr->op1));
-        } break;
-
-        case BYTECODEOP_RANGE: {
-            printf("BYTECODEOP_RANGE [left: ");
-            val_print(vm->stack[frame->sp-2]);
-            printf("] .. [right: ");
-            val_print(vm->stack[frame->sp-1]);
-            printf("]\n");
-        } break;
-
-        case BYTECODEOP_COMPOUND: {
-            printf("BYTECODEOP_COMPOUND\n");
-        } break;
-
-        case BYTECODEOP_INIT_LOOP: {
-            printf("BYTECODEOP_INIT_LOOP [loop var: ");
-            val_print(value_get(&constants, (uint16_t)(instr->op1)));
-            printf("][val: ");
-            Value val = vm->stack[frame->sp-1];
-
-            if ( IS_OITERRNG(val.o) ) {
-                //val_print(VRANGE(val)->left);
-            } else {
-                val_print(VARRAY(val)->elems[0]);
-            }
-            printf("]\n");
-        } break;
-
-        case BYTECODEOP_CALL: {
-            printf("call ");
-            val_print(vm->stack[frame->sp-1]);
-            //printf("(num_args: %d)\n", (uint16_t)(instr->op1));
-        } break;
-
-        case BYTECODEOP_RET: {
-            printf("BYTECODEOP_RET ");
-
-            /*
-            uint32_t num_elems = instr->op1;
-            for ( uint32_t i = 0; i < num_elems; ++i ) {
-                val_print(vm->stack[frame->sp-(1+i)]);
-            }
-            */
-
-            printf("\n");
-        } break;
-
-        case BYTECODEOP_LOAD_SYMREF: {
-            Value val = value_get(&constants, (uint16_t)(instr->op1));
-            printf("BYTECODEOP_LOAD_SYMREF ");
-            val_print(val);
-            printf("\n");
-        } break;
-
-        case BYTECODEOP_SET_SYM: {
-            printf("BYTECODEOP_SET_SYM ");
-            val_print(vm->stack[frame->sp-1]);
-            val_print(vm->stack[frame->sp-2]);
-            printf("\n");
-        } break;
-
-        case BYTECODEOP_INC_LOOP: {
-            Value val = value_get(&constants, (uint16_t)(instr->op1));
-
-            printf("BYTECODEOP_INC_LOOP ");
-            val_print(val);
-            printf("\n");
-        } break;
-
-        case BYTECODEOP_JMP: {
-            printf("jmp %d\n", (uint16_t)(instr->op1));
-        } break;
-
-        case BYTECODEOP_PUSH: {
-            Value val = value_get(&constants, (uint16_t)(instr->op1));
-
-            printf("push ");
-            val_print(val);
-            printf("\n");
-        } break;
-
-        case BYTECODEOP_POP: {
-            printf("pop\n");
-        } break;
-
-        case BYTECODEOP_SCOPE_ENTER: {
-            printf("scope enter\n");
-        } break;
-
-        case BYTECODEOP_SCOPE_LEAVE: {
-            printf("scope leave\n");
-        } break;
-
-        case BYTECODEOP_AGGR_FIELD: {
-            Value val   = vm->stack[frame->sp-1];
-            Value field = vm->stack[frame->sp-2];
-
-            printf("BYTECODEOP_AGGR_FIELD [name: ");
-            val_print(field);
-            printf("[value: ");
-            val_print(val);
-            printf("]\n");
-        } break;
-
-        case BYTECODEOP_HLT: {
-            printf("halt\n");
-        } break;
-
-        case BYTECODEOP_NAMESPACE_ENTER: {
-            Value name = vm->stack[frame->sp-1];
-            printf("namespace enter");
-            val_print(name);
-            printf("\n");
-        } break;
-
-        case BYTECODEOP_NAMESPACE_LEAVE: {
-            printf("namespace leave\n");
-        } break;
-
-        case BYTECODEOP_STRUCT: {
-            printf("struct\n");
-        } break;
-
-        case BYTECODEOP_ENUM: {
-            printf("enum\n");
-        } break;
-
-        case BYTECODEOP_NONE: {
-            printf("push val_none\n");
-        } break;
-
-        case BYTECODEOP_PUSH_TYPEVAL: {
-            printf("BYTECODEOP_PUSH_TYPEVAL [");
-            val_print(value_get(&constants, (uint16_t)(instr->op1)));
-            printf("]\n");
-        } break;
-
-        case BYTECODEOP_EXPORT_SYM: {
-            printf("export sym\n");
-        } break;
-
-        case BYTECODEOP_NEG: {
-            printf("neg ");
-            val_print(vm->stack[frame->sp-1]);
-            printf("\n");
-        } break;
-
-        case BYTECODEOP_IMPORT_SYMS: {
-            printf("using ");
-            val_print(vm->stack[frame->sp-1]);
-            printf("\n");
-        } break;
-
-        case BYTECODEOP_ALLOC: {
-            printf("alloc ");
-            val_print(vm->stack[frame->sp-1]);
-            printf("\n");
-        } break;
-
-        case BYTECODEOP_ADDR: {
-            printf("@");
-            val_print(vm->stack[frame->sp-1]);
-            printf("\n");
-        } break;
-
-        default: {
-            assert(!"unbekannter bytecode");
+        case OPERAND_REG8H: {
+            stack_pop(cpu, op.reg8h);
         } break;
     }
 }
 
 void
-bytecode_op(Loc *loc, Bytecode *bc, uint32_t unary_op) {
-    switch ( unary_op ) {
-        case OP_SUB: {
-            instr_push(loc, bc, BYTECODEOP_NEG);
-        } break;
-
-        default: {
-            assert(!"unary operator");
-        } break;
-    }
-}
-
-void
-bytecode_expr(Bytecode *bc, Expr *expr, uint32_t flags = BYTECODEFLAG_NONE) {
+vm_expr(Expr *expr) {
     switch ( expr->kind ) {
-        case EXPR_CHAR: {
-            bytecode_emit_const(expr, bc, val_char(ECHR(expr)->val));
-        } break;
-
         case EXPR_INT: {
-            assert(EINT(expr)->type);
-            bytecode_emit_const(expr, bc, val_int(EINT(expr)->val, EINT(expr)->type->size));
+            vm_emit(vm_instr(expr, OP_MOV, operand_rax(expr->type->size), operand_imm(value(EINT(expr)->val))));
         } break;
 
         case EXPR_FLOAT: {
-            bytecode_emit_const(expr, bc, val_float(EFLOAT(expr)->val));
-        } break;
-
-        case EXPR_STR: {
-            bytecode_emit_const(expr, bc, val_str(ESTR(expr)->val));
+            vm_emit(vm_instr(expr, OP_MOV, operand_reg(REG_RAX), operand_imm(value(EFLOAT(expr)->val))));
         } break;
 
         case EXPR_BOOL: {
-            bytecode_emit_const(expr, bc, val_bool(EBOOL(expr)->val));
+            vm_emit(vm_instr(expr, OP_MOV, operand_rax(expr->type->size), operand_imm(value(EBOOL(expr)->val))));
         } break;
 
-        case EXPR_COMPOUND: {
-            if ( ECMPND(expr)->is_named ) {
-                report_error(expr, "benamtes compound implementieren");
-                instr_push(expr, bc, BYTECODEOP_NAMED_COMPOUND);
-            } else {
-                /* @AUFGABE: alle elemente des ausdrucks durchgehen und auf den stack holen */
-                for ( int i = (int32_t)ECMPND(expr)->num_elems; i > 0; --i ) {
-                    bytecode_expr(bc, ECMPND(expr)->elems[i-1]->value);
-                }
+        case EXPR_STR: {
+            static uint32_t string_num = 0;
 
-                instr_push(expr, bc, BYTECODEOP_COMPOUND, (int32_t)ECMPND(expr)->num_elems);
-            }
-        } break;
+            char *name = NULL;
+            name = buf_printf(name, ".string.%d", string_num);
 
-        case EXPR_NEW: {
-            bytecode_expr(bc, ENEW(expr)->expr);
-            instr_push(expr, bc, BYTECODEOP_ALLOC);
-        } break;
+            vm_emit(vm_instr(expr, OP_DATA, operand_name(value(".string")), operand_imm(value(ESTR(expr)->val)), name));
+            vm_emit(vm_instr(expr, OP_LEA, operand_name(value(name)), operand_rax(expr->type->size)));
 
-        case EXPR_FIELD: {
-            bytecode_expr(bc, EFIELD(expr)->base);
-            int32_t index = bytecode_push_constant(bc, val_str(EFIELD(expr)->field));
-
-            if ( flags & BYTECODEFLAG_ASSIGNABLE ) {
-                instr_push(expr, bc, BYTECODEOP_LOAD_STRUCT_FIELD_ASSIGNABLE, index);
-            } else {
-                instr_push(expr, bc, BYTECODEOP_LOAD_STRUCT_FIELD, index);
-            }
-        } break;
-
-        case EXPR_RANGE: {
-            bytecode_expr(bc, ERNG(expr)->left);
-            bytecode_expr(bc, ERNG(expr)->right);
-
-            instr_push(expr, bc, BYTECODEOP_RANGE);
-        } break;
-
-        case EXPR_PAREN: {
-            bytecode_expr(bc, EPAREN(expr)->expr);
+            string_num++;
         } break;
 
         case EXPR_IDENT: {
-            int32_t index = bytecode_push_constant(bc, val_str(EIDENT(expr)->val));
+            assert(EIDENT(expr)->sym);
+            Sym *sym = EIDENT(expr)->sym;
 
-            if ( flags & BYTECODEFLAG_ASSIGNABLE ) {
-                instr_push(expr, bc, BYTECODEOP_LOAD_SYMREF, index);
+            if (sym->decl->is_global) {
+                vm_emit(vm_instr(expr, OP_LEA, operand_reg(REG_RAX), operand_name(value(EIDENT(expr)->val))));
             } else {
-                instr_push(expr, bc, BYTECODEOP_LOAD_SYM, index);
+                vm_emit(vm_instr(expr, OP_LEA, operand_rax(expr->type->size), operand_rbp(expr->type->size, sym->decl->offset)));
             }
-        } break;
-
-        case EXPR_CAST: {
-            bytecode_typespec(bc, ECAST(expr)->typespec);
-            bytecode_expr(bc, ECAST(expr)->expr);
-            instr_push(expr, bc, BYTECODEOP_CAST);
-        } break;
-
-        case EXPR_SIZEOF: {
-            int32_t index = bytecode_push_constant(bc, val_int(ESIZEOF(expr)->typespec->type->size));
-            instr_push(expr, bc, BYTECODEOP_CONST, index);
-        } break;
-
-        case EXPR_TYPEINFO: {
-            bytecode_expr(bc, ETYPEINFO(expr)->expr);
-            instr_push(expr, bc, BYTECODEOP_LOAD_TYPEINFO);
-        } break;
-
-        case EXPR_TYPEOF: {
-            instr_push(expr, bc, BYTECODEOP_LOAD_TYPEOF, ETYPEOF(expr)->expr->type->id);
-        } break;
-
-        case EXPR_CALL: {
-            for ( int i = 0; i < ECALL(expr)->num_args; ++i ) {
-                bytecode_expr(bc, ECALL(expr)->args[i]);
-            }
-
-            bytecode_expr(bc, ECALL(expr)->base);
-            instr_push(expr, bc, BYTECODEOP_CALL, (int32_t)ECALL(expr)->num_args);
-        } break;
-
-        case EXPR_UNARY: {
-            bytecode_expr(bc, EUNARY(expr)->expr);
-            bytecode_op(expr, bc, EUNARY(expr)->op);
         } break;
 
         case EXPR_BIN: {
-            bytecode_expr(bc, EBIN(expr)->left);
-            bytecode_expr(bc, EBIN(expr)->right);
+            vm_expr(EBIN(expr)->right);
+            vm_emit(vm_instr(expr, OP_PUSH, operand_rax(EBIN(expr)->right->type->size)));
 
-            if ( EBIN(expr)->op == OP_ADD ) {
-                instr_push(expr, bc, BYTECODEOP_ADD);
-            } else if ( EBIN(expr)->op == OP_SUB ) {
-                instr_push(expr, bc, BYTECODEOP_SUB);
-            } else if ( EBIN(expr)->op == OP_MUL ) {
-                instr_push(expr, bc, BYTECODEOP_MUL);
-            } else if ( EBIN(expr)->op == OP_DIV ) {
-                instr_push(expr, bc, BYTECODEOP_DIV);
-            } else if ( EBIN(expr)->op == OP_LT ) {
-                instr_push(expr, bc, BYTECODEOP_CMP_LT);
-            } else if ( EBIN(expr)->op == OP_GT ) {
-                instr_push(expr, bc, BYTECODEOP_CMP_GT);
-            } else if ( EBIN(expr)->op == OP_EQ ) {
-                instr_push(expr, bc, BYTECODEOP_CMP_EQ);
+            vm_expr(EBIN(expr)->left);
+            vm_emit(vm_instr(expr, OP_POP, operand_rdi(EBIN(expr)->left->type->size)));
+
+            if ( EBIN(expr)->op == BIN_ADD ) {
+                vm_emit(vm_instr(expr, OP_ADD, operand_rax(expr->type->size), operand_rdi(expr->type->size)));
+            } else if ( EBIN(expr)->op == BIN_SUB ) {
+                vm_emit(vm_instr(expr, OP_SUB, operand_rax(expr->type->size), operand_rdi(expr->type->size)));
+            } else if ( EBIN(expr)->op == BIN_MUL ) {
+                vm_emit(vm_instr(expr, OP_IMUL, operand_rax(expr->type->size), operand_rdi(expr->type->size)));
+            } else if ( EBIN(expr)->op == BIN_DIV ) {
+                if ( EBIN(expr)->right->type->is_signed ) {
+                    vm_emit(vm_instr(expr, OP_DIV, operand_rdi(expr->type->size)));
+                } else {
+                    vm_emit(vm_instr(expr, OP_IDIV, operand_rdi(expr->type->size)));
+                }
+            } else if ( EBIN(expr)->op == BIN_LT ) {
+                vm_emit(vm_instr(expr, OP_CMP, operand_rax(expr->type->size), operand_rdi(expr->type->size)));
+                vm_emit(vm_instr(expr, OP_SETL, operand_rax(expr->type->size)));
+            } else if ( EBIN(expr)->op == BIN_LTE ) {
+                vm_emit(vm_instr(expr, OP_CMP, operand_rax(expr->type->size), operand_rdi(expr->type->size)));
+                vm_emit(vm_instr(expr, OP_SETLE, operand_rax(expr->type->size)));
+            } else if ( EBIN(expr)->op == BIN_EQ ) {
+                vm_emit(vm_instr(expr, OP_CMP, operand_rax(expr->type->size), operand_rdi(expr->type->size)));
+                vm_emit(vm_instr(expr, OP_SETE, operand_rax(expr->type->size)));
+            } else if ( EBIN(expr)->op == BIN_GTE ) {
+                vm_emit(vm_instr(expr, OP_CMP, operand_rax(expr->type->size), operand_rdi(expr->type->size)));
+                vm_emit(vm_instr(expr, OP_SETGE, operand_rax(expr->type->size)));
+            } else if ( EBIN(expr)->op == BIN_GT ) {
+                vm_emit(vm_instr(expr, OP_CMP, operand_rax(expr->type->size), operand_rdi(expr->type->size)));
+                vm_emit(vm_instr(expr, OP_SETG, operand_rax(expr->type->size)));
+            } else if ( EBIN(expr)->op == BIN_AND ) {
+                assert(0);
             } else {
-                report_error(expr, "unbekannter operator");
+                assert(0);
             }
         } break;
 
-        case EXPR_AT: {
-            bytecode_expr(bc, EAT(expr)->expr);
-            instr_push(expr, bc, BYTECODEOP_ADDR);
+        case EXPR_PAREN: {
+            vm_expr(EPAREN(expr)->expr);
         } break;
 
-        case EXPR_INDEX: {
-            bytecode_expr(bc, EINDEX(expr)->base);
-            bytecode_expr(bc, EINDEX(expr)->index);
-            instr_push(expr, bc, BYTECODEOP_SUBSCRIPT);
-        } break;
+        case EXPR_CALL: {
+            for ( int i = (int32_t)ECALL(expr)->num_args; i > 0; --i ) {
+                Expr *arg = ECALL(expr)->args[i-1];
 
-        default: {
-            report_error(expr, "unbekannter ausdruck");
-        } break;
-    }
-}
-
-void
-bytecode_aggr(Bytecode *bc, Aggr_Fields fields, uint32_t num_fields) {
-    for ( uint32_t i = 0; i < num_fields; ++i ) {
-        Aggr_Field *field = fields[i];
-
-        // feldnamen generieren {
-            Value field_val = val_aggr_field(field->name);
-            int32_t field_index = bytecode_push_constant(bc, field_val);
-            instr_push(field, bc, BYTECODEOP_PUSH, field_index);
-        // }
-
-        if ( field->typespec ) {
-            bytecode_typespec(bc, field->typespec);
-        } else {
-            instr_push(field, bc, BYTECODEOP_NONE);
-        }
-
-        // feldwert generieren {
-            if ( field->value ) {
-                bytecode_expr(bc, field->value);
-            } else {
-                instr_push(field, bc, BYTECODEOP_NONE);
+                vm_expr(arg);
+                vm_emit(vm_instr(expr, OP_PUSH, operand_rax(arg->type->size)));
             }
-        // }
 
-        instr_push(field, bc, BYTECODEOP_AGGR_FIELD);
-    }
-}
+            for ( int i = 0; i < ECALL(expr)->num_args; ++i ) {
+                /* @INFO: die ersten 4 argumente werden in die register gepackt. die übrigen werden auf
+                 *        dem stack gelassen
+                 */
+                if ( i == 4 ) {
+                    break;
+                }
 
-void
-bytecode_typespec(Bytecode *bc, Typespec *typespec) {
-    assert(typespec);
+                Expr *arg = ECALL(expr)->args[i];
+                vm_emit(vm_instr(expr, OP_POP, operand_args(arg->type->size, i)));
+            }
 
-    switch ( typespec->kind ) {
-        case TYPESPEC_NAME: {
-            int32_t index = bytecode_push_constant(bc, val_str(TSNAME(typespec)->name));
-            instr_push(typespec, bc, BYTECODEOP_PUSH_TYPEVAL, index);
-        } break;
-
-        case TYPESPEC_PTR: {
-            int32_t index = bytecode_push_constant(bc, val_ptr(NULL));
-            instr_push(typespec, bc, BYTECODEOP_CONST, index);
-        } break;
-
-        case TYPESPEC_ARRAY: {
-            int32_t index = bytecode_push_constant(bc, val_array(NULL, 0));
-            instr_push(typespec, bc, BYTECODEOP_CONST, index);
-        } break;
-
-        case TYPESPEC_UNION: {
-            bytecode_aggr(bc, TSUNION(typespec)->fields, TSUNION(typespec)->num_fields);
-            instr_push(typespec, bc, BYTECODEOP_UNION);
+            vm_expr(ECALL(expr)->base);
+            vm_emit(vm_instr(expr, OP_CALL, operand_reg(REG_RAX)));
         } break;
 
         default: {
-            report_error(typespec, "unbekannter typespec");
+            assert(0);
         } break;
     }
 }
 
 void
-bytecode_global_decl(Bytecode *bc, Stmt *stmt) {
-    Decl *decl = SDECL(stmt)->decl;
-}
-
-void
-bytecode_decl(Bytecode *bc, Decl *decl) {
+vm_decl(Decl *decl) {
     switch ( decl->kind ) {
         case DECL_VAR: {
-            if ( DVAR(decl)->expr ) {
-                bytecode_expr(bc, DVAR(decl)->expr);
+            if ( decl->is_global ) {
+                assert(0);
             } else {
-                instr_push(decl, bc, BYTECODEOP_NONE);
+                if ( DVAR(decl)->expr ) {
+                    Expr *expr = DVAR(decl)->expr;
+
+                    vm_expr(expr);
+                    vm_emit(vm_instr(decl, OP_MOV, operand_rbp(expr->type->size, decl->offset), operand_rax(expr->type->size)));
+                }
             }
-
-            int32_t index = bytecode_push_constant(bc, val_str(decl->name));
-
-            if ( DVAR(decl)->typespec ) {
-                bytecode_typespec(bc, DVAR(decl)->typespec);
-            } else {
-                instr_push(decl, bc, BYTECODEOP_NONE);
-            }
-
-            instr_push(decl, bc, BYTECODEOP_PUSH_DECL_SYM, index);
-        } break;
-
-        case DECL_CONST: {
-            if ( DCONST(decl)->expr ) {
-                bytecode_expr(bc, DCONST(decl)->expr);
-            } else {
-                instr_push(decl, bc, BYTECODEOP_NONE);
-            }
-
-            int32_t index = bytecode_push_constant(bc, val_str(decl->name));
-
-            if ( DCONST(decl)->typespec ) {
-                bytecode_typespec(bc, DCONST(decl)->typespec);
-            } else {
-                instr_push(decl, bc, BYTECODEOP_NONE);
-            }
-
-            instr_push(decl, bc, BYTECODEOP_PUSH_DECL_SYM, index);
         } break;
 
         case DECL_PROC: {
-            Value val = val_proc(decl->name, DPROC(decl)->sign->sys_call, DPROC(decl)->sign->sys_lib);
+            vm_emit(vm_instr(decl, OP_DATA, operand_name(value(".text"))));
+            vm_emit(vm_instr(decl, OP_DATA, operand_name(value(".global")), operand_name(value(decl->name))));
+            vm_emit(vm_instr(decl, OP_PUSH, operand_reg(REG_RBP), decl->name));
+            vm_emit(vm_instr(decl, OP_MOV, operand_reg(REG_RBP), operand_reg(REG_RSP)));
 
-            int32_t index = bytecode_push_constant(bc, val);
-            instr_push(decl, bc, BYTECODEOP_CONST, index);
-
-            if ( decl->name == intern_str(entry_point) ) {
-                entry_point_index = index;
+            if ( DPROC(decl)->scope->frame_size ) {
+                vm_emit(vm_instr(decl, OP_SUB, operand_reg(REG_RSP), operand_imm(value((uint64_t)DPROC(decl)->scope->frame_size))));
             }
 
-            index = bytecode_push_constant(bc, val_str(decl->name));
-            instr_push(decl, bc, BYTECODEOP_PUSH_SYM, index);
+            uint8_t reg = 0;
+            for ( uint32_t i = 0; i < DPROC(decl)->sign->num_params; ++i ) {
+                Decl_Var *param = DPROC(decl)->sign->params[i];
 
-            Obj_Proc *proc = as_proc(val);
-            proc->name = obj_string(decl->name);
-            proc->sign = DPROC(decl)->sign;
-            proc->scope->name = decl->name;
-            proc->num_params = (uint32_t)DPROC(decl)->sign->num_params;
-
-            for ( int32_t i = DPROC(decl)->sign->num_params-1; i >= 0; --i ) {
-                Proc_Param *param = DPROC(decl)->sign->params[i];
-
-                index = bytecode_push_constant(proc->bc, val_str(param->name));
-
-                instr_push(param, proc->bc, BYTECODEOP_PUSH_SYM, index);
-            }
-
-            if ( !DPROC(decl)->sign->sys_call ) {
-                bytecode_stmt(proc->bc, DPROC(decl)->block);
-
-                if ( !DPROC(decl)->sign->num_rets ) {
-                    instr_push(decl, proc->bc, BYTECODEOP_RET);
+                if ( i < 4 ) {
+                    vm_emit(vm_instr(decl, OP_MOV, operand_rbp(param->type->size, param->offset), operand_args(param->type->size, reg++)));
+                } else {
+                    /* @INFO: andere argumente liegen auf dem stack und können direkt über ihren offset vom stack
+                     *        geholt werden
+                    vm_emit(vm_instr(decl, OP_POP, operand_rbp(param->type->size, param->offset)));
+                    */
                 }
             }
-        } break;
 
-        case DECL_ENUM: {
-            Value val = val_enum(decl->name);
+            vm_stmt(DPROC(decl)->block);
 
-            int32_t index      = bytecode_emit_const(decl, bc, val);
-            int32_t name_index = bytecode_push_constant(bc, val_str(decl->name));
+            char *label = NULL;
+            label = buf_printf(label, "%s.end", decl->name);
 
-            instr_push(decl, bc, BYTECODEOP_PUSH_SYM, name_index);
-            instr_push(decl, bc, BYTECODEOP_PUSH, index);
-
-            bytecode_aggr(bc, DENUM(decl)->fields, (uint32_t)DENUM(decl)->num_fields);
-            instr_push(decl, bc, BYTECODEOP_ENUM, (int32_t)DENUM(decl)->num_fields);
-        } break;
-
-        case DECL_STRUCT: {
-            Value val = val_struct(decl->name);
-
-            int32_t index      = bytecode_emit_const(decl, bc, val);
-            int32_t name_index = bytecode_push_constant(bc, val_str(decl->name));
-
-            instr_push(decl, bc, BYTECODEOP_PUSH_SYM, name_index);
-            instr_push(decl, bc, BYTECODEOP_PUSH, index);
-
-            bytecode_aggr(bc, DSTRUCT(decl)->fields, (uint32_t)DSTRUCT(decl)->num_fields);
-            instr_push(decl, bc, BYTECODEOP_STRUCT, (int32_t)DSTRUCT(decl)->num_fields);
-        } break;
-
-        case DECL_TYPE: {
-            int32_t index = bytecode_push_constant(bc, val_str(DTYPE(decl)->name));
-            bytecode_typespec(bc, DTYPE(decl)->typespec);
-            instr_push(decl, bc, BYTECODEOP_TYPEDEF, index);
+            vm_emit(vm_instr(decl, OP_MOV, operand_reg(REG_RSP), operand_reg(REG_RBP), label));
+            vm_emit(vm_instr(decl, OP_POP, operand_reg(REG_RBP)));
+            vm_emit(vm_instr(decl, OP_RET));
         } break;
 
         default: {
@@ -2294,495 +1048,40 @@ bytecode_decl(Bytecode *bc, Decl *decl) {
 }
 
 void
-bytecode_stmt(Bytecode *bc, Stmt *stmt) {
+vm_stmt(Stmt *stmt) {
     switch ( stmt->kind ) {
-        case STMT_ASSIGN: {
-            bytecode_expr(bc, SASSIGN(stmt)->rhs);
-
-            if ( SASSIGN(stmt)->op->kind == T_PLUS_ASSIGN ) {
-                bytecode_expr(bc, SASSIGN(stmt)->lhs);
-                instr_push(SASSIGN(stmt)->lhs, bc, BYTECODEOP_ADD);
-            }
-
-            bytecode_expr(bc, SASSIGN(stmt)->lhs, BYTECODEFLAG_ASSIGNABLE);
-            instr_push(stmt, bc, BYTECODEOP_SET_SYM);
-        } break;
-
         case STMT_BLOCK: {
-            Stmt_Defer **defer_stmts = NULL;
             for ( int i = 0; i < SBLOCK(stmt)->num_stmts; ++i ) {
-                Stmt *s = SBLOCK(stmt)->stmts[i];
-
-                if ( s->kind != STMT_DEFER ) {
-                    bytecode_stmt(bc, SBLOCK(stmt)->stmts[i]);
-                } else {
-                    buf_push(defer_stmts, SDEFER(s));
-                }
+                vm_stmt(SBLOCK(stmt)->stmts[i]);
             }
-
-            for ( int i = buf_len(defer_stmts); i > 0; --i ) {
-                bytecode_stmt(bc, defer_stmts[i-1]);
-            }
-        } break;
-
-        case STMT_FOR: {
-            /* @INFO: platziert einen wert auf dem stack */
-            bytecode_expr(bc, SFOR(stmt)->cond);
-
-            char *it = NULL;
-            if ( SFOR(stmt)->it ) {
-                it = EIDENT(SFOR(stmt)->it)->val;
-            } else {
-                it = "it";
-            }
-
-            uint32_t it_len = utf8_str_size(it);
-
-            /* @INFO: platziert den namen der laufvariable */
-            int32_t index = bytecode_push_constant(bc, val_str(it));
-
-            instr_push(stmt, bc, BYTECODEOP_SCOPE_ENTER);
-
-            /* @INFO: anweisung holt sich den namen der laufvariable und den wert */
-            Instr *instr = instr_push(stmt, bc, BYTECODEOP_INIT_LOOP, index);
-
-            uint32_t loop_addr = bc->size;
-            instr_push(stmt, bc, BYTECODEOP_JMP_FALSE);
-            int32_t exit_instr = bc->curr;
-
-            /* @INFO: den eigentlichen code der schleife generieren */
-            bytecode_stmt(bc, SFOR(stmt)->block);
-
-            /* @INFO: die schleifenvariable inkrementieren und den boolischen wert für
-             *        die spätere JMP_FALSE operation auf den stack laden
-             */
-            instr_push(stmt, bc, BYTECODEOP_INC_LOOP, index);
-
-            /* @INFO: bedingungsloser sprung zu der JMP_FALSE operation */
-            instr_push(stmt, bc, BYTECODEOP_JMP, loop_addr);
-            instr_push(stmt, bc, BYTECODEOP_SCOPE_LEAVE);
-            int32_t exit_addr = bc->curr;
-
-            if ( SFOR(stmt)->stmt_else ) {
-                instr_push(SFOR(stmt)->stmt_else, bc, BYTECODEOP_SCOPE_LEAVE);
-                instr_push(SFOR(stmt)->stmt_else, bc, BYTECODEOP_SCOPE_ENTER);
-                instr->op2 = bc->curr;
-                bytecode_stmt(bc, SFOR(stmt)->stmt_else);
-                instr_push(SFOR(stmt)->stmt_else, bc, BYTECODEOP_SCOPE_LEAVE);
-                exit_addr = bc->curr;
-            } else {
-                /* @INFO: nur zur sicherheit patchen wir auch op2 zu ausstiegsadresse */
-                instr->op2 = exit_addr;
-            }
-
-            instr_patch(bc, exit_instr, exit_addr);
-        } break;
-
-        case STMT_MATCH: {
-            int32_t *exit_addrs = NULL;
-            for ( int i = 0; i < SMATCH(stmt)->num_lines; ++i ) {
-                Match_Line *line = SMATCH(stmt)->lines[i];
-
-                /* @INFO: den anfangswert auf den stack holen */
-                bytecode_expr(bc, SMATCH(stmt)->expr);
-
-                /* @INFO: den case wert auf den stack holen */
-                bytecode_expr(bc, line->resolution);
-
-                /* @INFO: die beiden werte vergleichen */
-                instr_push(stmt, bc, BYTECODEOP_MATCH_CASE);
-                /* @INFO: platzhalter für die sprungadresse schreiben */
-                int32_t addr = bc->curr;
-
-                /* @INFO: die case anweisungen kodieren */
-                bytecode_stmt(bc, line->stmt);
-
-                /* @INFO: zum schluß ans ende der gesamten match anweisung springen */
-                instr_push(stmt, bc, BYTECODEOP_JMP);
-                buf_push(exit_addrs, bc->curr);
-
-                /* @INFO: die adresse für MATCH_CASE patchen für den fall, daß die anweisung
-                 *        nicht zutrifft und zum nächsten case gesprungen werden muß
-                 */
-                instr_patch(bc, addr, bc->size);
-            }
-
-            for ( int i = 0; i < buf_len(exit_addrs); ++i ) {
-                instr_patch(bc, exit_addrs[i], bc->size);
-            }
-        } break;
-
-        case STMT_WHILE: {
-            instr_push(stmt, bc, BYTECODEOP_SCOPE_ENTER);
-
-            /* @INFO: platziert den entscheidungswert auf dem stack */
-            uint32_t loop_addr = bc->size;
-            bytecode_expr(bc, SWHILE(stmt)->cond);
-
-            instr_push(stmt, bc, BYTECODEOP_JMP_FALSE);
-            int32_t exit_instr = bc->curr;
-
-            /* @INFO: den eigentlichen code der schleife generieren */
-            bytecode_stmt(bc, SWHILE(stmt)->block);
-
-            /* @INFO: bedingungsloser sprung zu der JMP_FALSE operation */
-            instr_push(stmt, bc, BYTECODEOP_JMP, loop_addr);
-            int32_t exit_addr = bc->size;
-
-            instr_push(stmt, bc, BYTECODEOP_SCOPE_LEAVE);
-            instr_patch(bc, exit_instr, (int32_t)exit_addr);
-        } break;
-
-        case STMT_DECL: {
-            bytecode_decl(bc, SDECL(stmt)->decl);
-        } break;
-
-        case STMT_IF: {
-            bytecode_expr(bc, SIF(stmt)->cond);
-
-            int32_t addr = bytecode_emit_jmp_false(stmt, bc);
-            instr_push(stmt, bc, BYTECODEOP_SCOPE_ENTER);
-            bytecode_stmt(bc, SIF(stmt)->stmt);
-            instr_push(stmt, bc, BYTECODEOP_SCOPE_LEAVE);
-            int32_t exit_addr = bytecode_emit_jmp(stmt, bc);
-            instr_patch(bc, addr, (int32_t)bc->size);
-
-            if ( SIF(stmt)->stmt_else ) {
-                bytecode_stmt(bc, SIF(stmt)->stmt_else);
-            }
-
-            instr_patch(bc, exit_addr, (int32_t)bc->size);
-        } break;
-
-        case STMT_RET: {
-            for ( uint32_t i = 0; i < SRET(stmt)->num_exprs; ++i ) {
-                bytecode_expr(bc, SRET(stmt)->exprs[i]);
-            }
-
-            instr_push(stmt, bc, BYTECODEOP_RET, (int32_t)SRET(stmt)->num_exprs);
         } break;
 
         case STMT_EXPR: {
-            bytecode_expr(bc, SEXPR(stmt)->expr);
+            vm_expr(SEXPR(stmt)->expr);
         } break;
 
-        case STMT_USING: {
-            bytecode_expr(bc, SUSING(stmt)->expr);
-            instr_push(stmt, bc, BYTECODEOP_IMPORT_SYMS);
+        case STMT_DECL: {
+            vm_decl(SDECL(stmt)->decl);
         } break;
 
-        case STMT_DEFER: {
-            bytecode_stmt(bc, SDEFER(stmt)->stmt);
-        } break;
+        case STMT_IF: {
+            static uint32_t loop_count = 0;
+            char *label = NULL;
+            label = buf_printf(label, "if.%d", loop_count++);
 
-        default: {
-            report_error(stmt, "unbekannte anweisung: %s", to_str(stmt));
-        } break;
-    }
-}
+            vm_expr(SIF(stmt)->cond);
+            vm_emit(vm_instr(stmt, OP_CMP, operand_rax(SIF(stmt)->cond->type->size), operand_imm(value((uint64_t)1))));
+            int32_t jmpz_instr = vm_emit(vm_instr(stmt, OP_JZ, operand_addr(0), label));
+            vm_stmt(SIF(stmt)->stmt);
+            int32_t jmp_instr = vm_emit(vm_instr(stmt, OP_JMP, operand_addr(0)));
 
-char *
-to_str(Obj_String *str) {
-    return str->ptr;
-}
+            vm_instr_patch(jmpz_instr, buf_len(vm_instrs));
 
-Obj_Proc *
-as_proc(Value val) {
-    Obj_Proc *result = (Obj_Proc *)val.o;
-
-    return result;
-}
-
-Obj_Iter *
-as_iter(Value val) {
-    Obj_Iter *result = (Obj_Iter *)val.o;
-
-    return result;
-}
-
-Obj_Struct *
-as_struct(Value val) {
-    Obj_Struct *result = (Obj_Struct *)val.o;
-
-    return result;
-}
-
-Obj *
-as_obj(Value val) {
-    assert(val.kind == VAL_OBJ);
-
-    Obj *result = val.o;
-
-    return result;
-}
-
-int32_t
-as_int(Value val) {
-    int32_t result = (int32_t)val.i64;
-
-    return result;
-}
-
-void
-call_sys_proc(Vm *vm, Value val, uint32_t num_args) {
-    DCCallVM *call_vm = dcNewCallVM(1024);
-    dcMode(call_vm, DC_CALL_C_DEFAULT);
-
-    Obj_Proc *proc = as_proc(val);
-
-    auto lib = LoadLibrary(proc->lib);
-    assert(lib);
-    auto proc_ptr = GetProcAddress(lib, to_str(proc->name));
-    assert(proc_ptr);
-
-    Values args = NULL;
-    for ( int32_t i = num_args; i > 0; --i ) {
-        buf_push(args, stack_pop(vm));
-    }
-
-    for ( int32_t i = num_args; i > 0; --i ) {
-        Value arg = args[i-1];
-
-        switch ( arg.kind ) {
-            case VAL_INT: {
-                dcArgLong(call_vm, (DClong)arg.i64);
-            } break;
-
-            case VAL_FLOAT: {
-                dcArgFloat(call_vm, arg.f32);
-            } break;
-
-            case VAL_BOOL: {
-                dcArgBool(call_vm, arg.b);
-            } break;
-
-            case VAL_OBJ: {
-                switch ( arg.o->kind ) {
-                    case OBJ_STRING: {
-                        dcArgPointer(call_vm, ((Obj_String *)arg.o)->ptr);
-                    } break;
-
-                    case OBJ_PTR: {
-                        dcArgPointer(call_vm, ((Obj_Ptr *)arg.o)->ptr);
-                    } break;
-
-                    default: {
-                        assert(!"unbekanntes objekt");
-                    } break;
-                }
-            } break;
-
-            default: {
-                assert(!"unbekannter wert");
-            } break;
-        }
-    }
-
-    if ( proc->sign->num_rets ) {
-        Type *type = proc->sign->rets[0]->type;
-
-        switch ( type->kind ) {
-            case TYPE_BOOL: {
-                auto result = dcCallBool(call_vm , proc_ptr);
-            } break;
-
-            case TYPE_U8:
-            case TYPE_S8: {
-                auto result = dcCallChar(call_vm , proc_ptr);
-            } break;
-
-            case TYPE_U16:
-            case TYPE_S16: {
-                auto result = dcCallShort(call_vm , proc_ptr);
-            } break;
-
-            case TYPE_U32:
-            case TYPE_S32: {
-                auto result = dcCallInt(call_vm , proc_ptr);
-            } break;
-
-            case TYPE_U64:
-            case TYPE_S64: {
-                auto result = dcCallLong(call_vm , proc_ptr);
-            } break;
-
-            case TYPE_F32:
-            case TYPE_F64: {
-                auto result = dcCallFloat(call_vm , proc_ptr);
-            } break;
-
-            case TYPE_PTR: {
-                auto *result = dcCallPointer(call_vm , proc_ptr);
-                stack_push(vm, val_ptr(result));
-            } break;
-
-            default: {
-                assert(!"");
-            } break;
-        }
-    } else {
-        dcCallVoid(call_vm , proc_ptr);
-    }
-}
-
-void
-call_proc(Vm *vm, Value val, uint32_t num_args) {
-    assert(vm->frame_num < MAX_FRAME_NUM);
-
-    Call_Frame *prev_frame = vm_curr_frame(vm);
-    Call_Frame *frame = vm->frames + vm->frame_num++;
-
-    assert(IS_VPROC(val));
-    Obj_Proc *proc = as_proc(val);
-
-    frame->proc = proc;
-    frame->pc   = 0;
-    frame->sp   = prev_frame->sp;
-    frame->prev_scope = curr_scope;
-
-    curr_scope = proc->scope;
-}
-
-void
-namespace_enter(Vm *vm, Obj_Namespace *ns) {
-    assert(vm->frame_num < MAX_FRAME_NUM);
-
-    Call_Frame *prev_frame = vm_curr_frame(vm);
-    Call_Frame *frame = vm->frames + vm->frame_num++;
-
-    Obj_Proc *proc = ns->proc;
-
-    frame->proc = proc;
-    frame->pc   = 0;
-    frame->sp   = prev_frame->sp;
-
-    ns->prev_scope = curr_scope;
-    curr_scope = ns->scope;
-}
-
-void
-namespace_leave(Vm *vm, Obj_Namespace *ns) {
-    assert(vm->frame_num > 0);
-
-    vm->frame_num--;
-
-    curr_scope = ns->prev_scope;
-    Scope *prev_scope = curr_scope;
-
-    if ( ns->scope_name ) {
-        Obj_Namespace *new_ns = obj_namespace(ns->scope_name, ns->scope_name);
-        bytecode_sym_set(new_ns->name, val_namespace(new_ns));
-        new_ns->scope->parent = NULL;
-        curr_scope = new_ns->scope;
-    }
-
-    for ( int i = 0; i < buf_len(ns->scope->export_syms.ordered_entries); ++i ) {
-        Table_Entry *entry = ns->scope->export_syms.ordered_entries[i];
-
-        bytecode_sym_set(entry->key, entry->val);
-    }
-
-    if ( ns->scope_name ) {
-        curr_scope = prev_scope;
-    }
-}
-
-bool
-bytecode_sym_get(Obj_String *key, Value *val) {
-    Scope *it = curr_scope;
-
-    while ( it ) {
-        if ( table_get(&it->syms, key, val) ) {
-            return true;
-        }
-
-        it = it->parent;
-    }
-
-    return false;
-}
-
-Value *
-bytecode_sym_get_ref(Obj_String *key) {
-    Scope *it = curr_scope;
-    Value *result = NULL;
-
-    while ( it ) {
-        result = table_get_ref(&it->syms, key);
-
-        if ( result ) {
-            return result;
-        }
-
-        it = it->parent;
-    }
-
-    return result;
-}
-
-bool
-bytecode_sym_set(Obj_String *key, Value val, Scope *scope, uint32_t flags = BYTECODEFLAG_NONE) {
-    if ( flags & BYTECODEFLAG_SET_EXISTING ) {
-        Scope *it = scope;
-
-        while ( it ) {
-            Value v;
-            if ( table_get(&it->syms, key, &v) ) {
-                table_set(&it->syms, key, val);
-
-                return true;
+            if ( SIF(stmt)->stmt_else ) {
+                vm_stmt(SIF(stmt)->stmt_else);
             }
 
-            it = it->parent;
-        }
-    } else {
-        return table_set(&scope->syms, key, val);
-    }
-
-    return false;
-}
-
-bool
-bytecode_sym_set(Obj_String *key, Value val, uint32_t flags) {
-    bool result = bytecode_sym_set(key, val, curr_scope, flags);
-
-    return result;
-}
-
-void
-bytecode_directive(Bytecode *bc, Directive *dir) {
-    switch ( dir->kind ) {
-        case DIRECTIVE_IMPORT: {
-            Obj_Namespace *ns = obj_namespace(dir->file, DIRIMPORT(dir)->scope_name);
-            Value ns_val = val_namespace(ns);
-
-            bytecode_build_file(ns->proc->bc, DIRIMPORT(dir)->parsed_file);
-
-            bytecode_emit_const(dir, ns->proc->bc, ns_val);
-            instr_push(dir, ns->proc->bc, BYTECODEOP_NAMESPACE_LEAVE);
-
-            bytecode_emit_const(dir, bc, ns_val);
-            instr_push(dir, bc, BYTECODEOP_NAMESPACE_ENTER);
-        } break;
-
-        case DIRECTIVE_EXPORT: {
-            for ( int i = 0; i < DIREXPORT(dir)->num_syms; ++i ) {
-                Module_Sym *sym = DIREXPORT(dir)->syms[i];
-
-                bytecode_emit_const(dir, bc, val_str(sym->name));
-
-                if ( sym->alias ) {
-                    bytecode_emit_const(dir, bc, val_str(sym->alias));
-                } else {
-                    instr_push(dir, bc, BYTECODEOP_NONE);
-                }
-
-                instr_push(dir, bc, BYTECODEOP_EXPORT_SYM);
-            }
-        } break;
-
-        case DIRECTIVE_LOAD: {
-            bytecode_build_file(bc, DIRLOAD(dir)->parsed_file);
+            vm_instr_patch(jmp_instr, buf_len(vm_instrs));
         } break;
 
         default: {
@@ -2791,558 +1090,342 @@ bytecode_directive(Bytecode *bc, Directive *dir) {
     }
 }
 
-bool
-step(Vm *vm) {
-    Call_Frame *frame = vm_curr_frame(vm);
+void
+compile_procs(Stmts stmts) {
+    for ( int i = 0; i < buf_len(stmts); ++i ) {
+        Stmt *stmt = stmts[i];
 
-    if ( frame->pc >= frame->proc->bc->size ) {
+        if ( stmt->kind == STMT_DECL && SDECL(stmt)->decl->kind == DECL_PROC ) {
+            vm_stmt(stmt);
+        }
+    }
+}
+
+bool
+operand_is_reg(Operand op) {
+    bool result = op.kind >= OPERAND_REG64 && op.kind <= OPERAND_REG8H;
+
+    return result;
+}
+
+bool
+step(Cpu *cpu) {
+    if ( cpu->num_instrs <= reg_read(cpu, REG_RIP) ) {
         return false;
     }
 
-    Instr *instr = instr_fetch(vm);
-#if BYTECODE_DEBUG
-    bytecode_debug(vm, instr);
-#endif
+    Instr *instr = vm_instr_fetch(cpu);
 
-    switch ( instr->opcode ) {
-        case BYTECODEOP_NONE: {
-            stack_push(vm, val_none());
-        } break;
+    switch ( instr->op ) {
+        case OP_ADD: {
+            uint64_t operand1 = 0;
+            uint64_t operand2 = 0;
 
-        case BYTECODEOP_ADD: {
-            Value right = stack_pop(vm);
-            Value left  = stack_pop(vm);
-
-            stack_push(vm, left + right);
-        } break;
-
-        case BYTECODEOP_SUB: {
-            Value right = stack_pop(vm);
-            Value left  = stack_pop(vm);
-
-            stack_push(vm, left - right);
-        } break;
-
-        case BYTECODEOP_SUBSCRIPT: {
-            Value index = stack_pop(vm);
-            Value base  = stack_pop(vm);
-
-            if ( IS_VCMPND(base) ) {
-                base = val_array(VCMPND(base)->elems, VCMPND(base)->num_elems);
-            }
-
-            if ( IS_VARRAY(base) ) {
-                Obj_Array *arr = VARRAY(base);
-
-                if ( index.i64 >= arr->num_elems ) {
-                    report_error(instr, "index liegt außerhalb der array grenzen");
-                }
-
-                stack_push(vm, arr->elems[index.i64]);
+            if ( operand_is_reg(instr->operand1) ) {
+                operand1 = reg_read(cpu, instr->operand1);
+            } else if ( instr->operand1.kind == OPERAND_IMM ) {
+                operand1 = instr->operand1.val.u64;
             } else {
-                assert(IS_VSTR(base));
-
-                Obj_String *str = VSTR(base);
-
-                if ( index.i64 >= str->size ) {
-                    report_error(instr, "index liegt außerhalb der string grenzen");
-                }
-
-                stack_push(vm, val_char(str->ptr[index.i64]));
-            }
-        } break;
-
-        case BYTECODEOP_MUL: {
-            Value right = stack_pop(vm);
-            Value left  = stack_pop(vm);
-
-            stack_push(vm, left * right);
-        } break;
-
-        case BYTECODEOP_DIV: {
-            Value right = stack_pop(vm);
-            Value left  = stack_pop(vm);
-
-            stack_push(vm, left / right);
-        } break;
-
-        case BYTECODEOP_CONST: {
-            int32_t index = instr->op1;
-            Value val = value_get(&frame->proc->bc->constants, index);
-
-            stack_push(vm, val);
-        } break;
-
-        case BYTECODEOP_PUSH_SYSSYM: {
-            Scope *prev_scope = curr_scope;
-            curr_scope = &sys_scope;
-
-            Obj_String *name = VSTR(value_get(&frame->proc->bc->constants, instr->op1));
-            Value val = stack_pop(vm);
-
-            if ( !bytecode_sym_set(name, val) ) {
-                assert(!"symbol konnte nicht gesetzt werden");
+                assert(0);
             }
 
-            curr_scope = prev_scope;
-        } break;
-
-        case BYTECODEOP_EXPORT_SYM: {
-            Value alias = stack_pop(vm);
-            Value name  = stack_pop(vm);
-
-            Value val;
-            if ( !bytecode_sym_get(VSTR(name), &val) ) {
-                assert(!"symbol nicht gefunden");
-            }
-
-            Value new_name = alias.kind == VAL_NONE ? name : alias;
-            table_set(&curr_scope->export_syms, VSTR(new_name), val);
-        } break;
-
-        case BYTECODEOP_NAMESPACE_ENTER: {
-            Value ns = stack_pop(vm);
-
-            namespace_enter(vm, AS_NAMESPACE(ns));
-        } break;
-
-        case BYTECODEOP_NAMESPACE_LEAVE: {
-            Value ns = stack_pop(vm);
-
-            namespace_leave(vm, AS_NAMESPACE(ns));
-        } break;
-
-        case BYTECODEOP_PUSH_SYM: {
-            Obj_String *name = VSTR(value_get(&frame->proc->bc->constants, instr->op1));
-
-            Value val = stack_pop(vm);
-            bytecode_sym_set(name, val);
-
-            if ( IS_VPROC(val) ) {
-                as_proc(val)->scope->parent = curr_scope;
-            }
-        } break;
-
-        case BYTECODEOP_PUSH_DECL_SYM: {
-            Obj_String *name = VSTR(value_get(&frame->proc->bc->constants, instr->op1));
-
-            Value type_val = stack_pop(vm);
-            Value expr_val = stack_pop(vm);
-
-            Value val = (expr_val.kind == VAL_NONE) ? type_val : expr_val;
-
-            if ( IS_VCMPND(expr_val) ) {
-                if ( IS_VSTRUCT(type_val) ) {
-                    Value structure = val_struct(VSTRUCT(type_val)->name);
-
-                    int32_t num_elems = buf_len(VSTRUCT(type_val)->fieldnames_ordered);
-
-                    for ( int i = 0; i < num_elems; ++i ) {
-                        Obj_String *field_name = VSTRUCT(type_val)->fieldnames_ordered[i];
-                        Value field_val = VCMPND(expr_val)->elems[i];
-
-                        table_set(VSTRUCT(structure)->fields, field_name, field_val);
-                        buf_push(VSTRUCT(structure)->fieldnames_ordered, field_name);
-                    }
-
-                    val = structure;
-                } else if ( IS_VARRAY(type_val) ) {
-                    val = val_array(VCMPND(val)->elems, VCMPND(val)->num_elems);
-                }
-            }
-
-            bytecode_sym_set(name, val);
-            if ( IS_VPROC(val) ) {
-                as_proc(val)->scope->parent = curr_scope;
-            }
-        } break;
-
-        case BYTECODEOP_INIT_LOOP: {
-            Obj_String *name = VSTR(value_get(&frame->proc->bc->constants, instr->op1));
-            Value iter = stack_pop(vm);
-
-            if ( IS_VCMPND(iter) ) {
-                iter = val_array(VCMPND(iter)->elems, VCMPND(iter)->num_elems);
-            }
-
-            if ( IS_VRANGE(iter) ) {
-                Value diff = VRANGE(iter)->right - VRANGE(iter)->left;
-                if ( diff <= (int64_t)0 ) {
-                    frame->pc = instr->op2;
-                }
-
-                bytecode_sym_set(name, val_iter_range(VRANGE(iter), VRANGE(iter)->left));
-                stack_push(vm, val_bool(VRANGE(iter)->left < VRANGE(iter)->right));
+            if ( operand_is_reg(instr->operand2) ) {
+                operand2 = reg_read(cpu, instr->operand2);
+            } else if ( instr->operand2.kind == OPERAND_IMM ) {
+                operand2 = instr->operand2.val.u64;
             } else {
-                assert(IS_VARRAY(iter));
+                assert(0);
+            }
 
-                if ( VARRAY(iter)->num_elems == 0 ) {
-                    frame->pc = instr->op2;
+            reg_write(cpu, REG_RAX, operand1 + operand2);
+        } break;
+
+        case OP_CALL: {
+            stack_push(cpu, reg_read(cpu, REG_RIP));
+            stack_push(cpu, reg_read(cpu, REG_RBX));
+            stack_push(cpu, reg_read(cpu, REG_RCX));
+            stack_push(cpu, reg_read(cpu, REG_RDX));
+            stack_push(cpu, reg_read(cpu, REG_RDI));
+            stack_push(cpu, reg_read(cpu, REG_R12));
+            stack_push(cpu, reg_read(cpu, REG_R13));
+            stack_push(cpu, reg_read(cpu, REG_R14));
+            stack_push(cpu, reg_read(cpu, REG_R15));
+
+            if ( operand_is_reg(instr->operand1) ) {
+                reg_write(cpu, REG_RIP, reg_read(cpu, instr->operand1));
+            } else if ( instr->operand1.kind == OPERAND_NAME ) {
+                reg_write(cpu, REG_RIP, addr_lookup(instr->operand1.val));
+            } else {
+                assert(0);
+            }
+        } break;
+
+        case OP_CMP: {
+            uint64_t operand1 = 0;
+            uint64_t operand2 = 0;
+
+            if ( operand_is_reg(instr->operand1) ) {
+                operand1 = reg_read(cpu, instr->operand1);
+            } else if ( instr->operand1.kind == OPERAND_IMM ) {
+                operand1 = instr->operand1.val.u64;
+            } else {
+                assert(0);
+            }
+
+            if ( operand_is_reg(instr->operand2) ) {
+                operand2 = reg_read(cpu, instr->operand2);
+            } else if ( instr->operand2.kind == OPERAND_IMM ) {
+                operand2 = instr->operand2.val.u64;
+            } else {
+                assert(0);
+            }
+
+            if ( operand2 > operand1 ) {
+                flags_set(cpu, RFLAG_OF);
+            } else if ( operand1 == operand2 ) {
+                flags_set(cpu, RFLAG_ZF);
+            } else {
+                flags_clear(cpu, RFLAG_OF | RFLAG_ZF);
+            }
+        } break;
+
+        case OP_DATA: {
+            //
+        } break;
+
+        case OP_IDIV: {
+            uint64_t dividend = reg_read(cpu, REG_RAX);
+            uint64_t divisor = 0;
+
+            if ( operand_is_reg(instr->operand1) ) {
+                divisor = reg_read(cpu, instr->operand1);
+            } else if ( instr->operand1.kind == OPERAND_IMM ) {
+                divisor = instr->operand1.val.u64;
+            } else {
+                assert(0);
+            }
+
+            uint64_t quotient  = (uint64_t)(dividend / divisor);
+            uint64_t remainder = dividend % divisor;
+
+            reg_write(cpu, REG_RAX, quotient);
+            reg_write(cpu, REG_RDX, remainder);
+        } break;
+
+        case OP_IMUL: {
+            uint64_t operand1 = 0;
+            uint64_t operand2 = 0;
+
+            if ( operand_is_reg(instr->operand1) ) {
+                operand1 = reg_read(cpu, instr->operand1);
+            } else if ( instr->operand1.kind == OPERAND_IMM ) {
+                operand1 = instr->operand1.val.u64;
+            } else {
+                assert(0);
+            }
+
+            if ( operand_is_reg(instr->operand2) ) {
+                operand2 = reg_read(cpu, instr->operand2);
+            } else if ( instr->operand2.kind == OPERAND_IMM ) {
+                operand2 = instr->operand2.val.u64;
+            } else {
+                assert(0);
+            }
+
+            reg_write(cpu, REG_RAX, operand1 * operand2);
+
+            if ( reg_read(cpu, REG_RAX) == 0 ) {
+                flags_set(cpu, RFLAG_ZF);
+            } else {
+                flags_clear(cpu, RFLAG_ZF);
+            }
+        } break;
+
+        case OP_JMP: {
+            if ( instr->operand1.kind == OPERAND_ADDR ) {
+                reg_write(cpu, REG_RIP, instr->operand1.addr);
+            } else {
+                assert(0);
+            }
+        } break;
+
+        case OP_JZ: {
+            if ( flag_state(cpu, RFLAG_ZF) ) {
+                if ( instr->operand1.kind == OPERAND_ADDR ) {
+                    reg_write(cpu, REG_RIP, instr->operand1.addr);
                 } else {
-                    bytecode_sym_set(name, val_iter_array(VARRAY(iter), VARRAY(iter)->elems[0]));
-                    stack_push(vm, val_bool(0 < VARRAY(iter)->num_elems));
+                    assert(0);
                 }
             }
         } break;
 
-        case BYTECODEOP_INC_LOOP: {
-            int32_t index = instr->op1;
-            Obj_String *name = VSTR(value_get(&frame->proc->bc->constants, index));
-
-            Value val;
-            if ( !bytecode_sym_get(name, &val) ) {
-                assert(!"symbol nicht gefunden");
-            }
-
-            bytecode_sym_set(name, val + 1);
-            Obj_Iter *iter = ((Obj_Iter *)val.obj_val);
-
-            if ( iter->iter_kind == ITER_RANGE ) {
-                Obj_Iter_Range *iter_range = OITERRNG(iter);
-
-                Value cond = val_bool(iter_range->iter < iter_range->range->right);
-                stack_push(vm, cond);
+        case OP_LEA: {
+            if ( operand_is_reg(instr->dst) ) {
+                if ( operand_is_reg(instr->src) ) {
+                    if ( instr->src.with_displacement ) {
+                        reg_write(cpu, instr->dst, mem_read64(cpu->mem, (uint32_t)(reg_read(cpu, instr->src) + instr->src.displacement)));
+                    } else {
+                        reg_write(cpu, instr->dst, reg_read(cpu, instr->src));
+                    }
+                } else if ( instr->src.kind == OPERAND_NAME ) {
+                    reg_write(cpu, instr->dst, addr_lookup(instr->src.val));
+                } else {
+                    assert(0);
+                }
             } else {
-                assert(IS_OITERARRAY(iter));
-
-                Obj_Iter_Array *iter_array = OITERARRAY(iter);
-
-                Value cond = val_bool(iter_array->curr_index < iter_array->array->num_elems);
-                stack_push(vm, cond);
+                assert(0);
             }
         } break;
 
-        case BYTECODEOP_LOAD_SYM: {
-            Obj_String *name = VSTR(value_get(&frame->proc->bc->constants, instr->op1));
-            Value val;
-
-            if ( !bytecode_sym_get(name, &val) ) {
-                assert(!"symbol nicht gefunden");
-            }
-
-            if ( IS_VOBJ(val) && IS_OITER(val.o)) {
-                stack_push(vm, OITER(val.o)->iter);
+        case OP_MOV: {
+            if ( operand_is_reg(instr->dst) ) {
+                if ( instr->dst.with_displacement ) {
+                    if ( instr->src.kind == OPERAND_IMM ) {
+                        mem_write(cpu->mem, reg_read(cpu, instr->dst) + instr->dst.displacement, instr->src.val.u64);
+                    } else if ( operand_is_reg(instr->src) ) {
+                        if ( instr->src.kind == OPERAND_REG8L ) {
+                            mem_write(cpu->mem, reg_read(cpu, instr->dst) + instr->dst.displacement, reg_read(cpu, instr->src.reg8l));
+                        } else if ( instr->src.kind == OPERAND_REG8H ) {
+                            mem_write(cpu->mem, reg_read(cpu, instr->dst) + instr->dst.displacement, reg_read(cpu, instr->src.reg8h));
+                        } else if ( instr->src.kind == OPERAND_REG16 ) {
+                            mem_write(cpu->mem, reg_read(cpu, instr->dst) + instr->dst.displacement, reg_read(cpu, instr->src.reg16));
+                        } else if ( instr->src.kind == OPERAND_REG32 ) {
+                            mem_write(cpu->mem, reg_read(cpu, instr->dst) + instr->dst.displacement, reg_read(cpu, instr->src.reg32));
+                        } else if ( instr->src.kind == OPERAND_REG64 ) {
+                            mem_write(cpu->mem, reg_read(cpu, instr->dst) + instr->dst.displacement, reg_read(cpu, instr->src.reg64));
+                        }
+                    } else {
+                        assert(0);
+                    }
+                } else {
+                    if ( instr->src.kind == OPERAND_IMM ) {
+                        reg_write(cpu, instr->dst, instr->src.val.u64);
+                    } else if ( operand_is_reg(instr->src) ) {
+                        reg_write(cpu, instr->dst, reg_read(cpu, instr->src));
+                    } else {
+                        assert(0);
+                    }
+                }
             } else {
-                stack_push(vm, val);
+                assert(0);
             }
         } break;
 
-        case BYTECODEOP_LOAD_SYMREF: {
-            Value name = value_get(&frame->proc->bc->constants, instr->op1);
-            stack_push(vm, val_ptr(bytecode_sym_get_ref(VSTR(name))));
-        } break;
-
-        case BYTECODEOP_LOAD_TYPEINFO: {
-            Value val = stack_pop(vm);
-            stack_push(vm, val_type(obj_types[val.i64]));
-        } break;
-
-        case BYTECODEOP_LOAD_TYPEOF: {
-            stack_push(vm, val_int(instr->op1));
-        } break;
-
-        case BYTECODEOP_LOAD_STRUCT_FIELD_ASSIGNABLE: {
-            Value field = value_get(&frame->proc->bc->constants, instr->op1);
-            Value val = stack_pop(vm);
-
-            assert( IS_VSTRUCT(val) );
-
-            Obj_Struct *structure = ((Obj_Struct *)val.o);
-            Value *field_val = table_get_ref(structure->fields, VSTR(field));
-
-            stack_push(vm, val_ptr(field_val));
-        } break;
-
-        case BYTECODEOP_LOAD_STRUCT_FIELD: {
-            Value field = value_get(&frame->proc->bc->constants, instr->op1);
-            Value val = stack_pop(vm);
-
-            if ( IS_VSTRUCT(val) ) {
-                Obj_Struct *structure = ((Obj_Struct *)val.o);
-
-                Value field_val;
-                if ( !table_get(structure->fields, VSTR(field), &field_val) ) {
-                    assert(!"feld konnte nicht gefunden werden");
+        case OP_PUSH: {
+            if ( operand_is_reg(instr->operand1) ) {
+                if ( instr->src.kind == OPERAND_REG8L ) {
+                    stack_push(cpu, reg_read(cpu, instr->operand1.reg8l));
+                } else if ( instr->operand1.kind == OPERAND_REG8H ) {
+                    stack_push(cpu, reg_read(cpu, instr->operand1.reg8h));
+                } else if ( instr->operand1.kind == OPERAND_REG16 ) {
+                    stack_push(cpu, reg_read(cpu, instr->operand1.reg16));
+                } else if ( instr->operand1.kind == OPERAND_REG32 ) {
+                    stack_push(cpu, reg_read(cpu, instr->operand1.reg32));
+                } else if ( instr->operand1.kind == OPERAND_REG64 ) {
+                    stack_push(cpu, reg_read(cpu, instr->operand1.reg64));
                 }
-
-                stack_push(vm, field_val);
-            } else if ( IS_VENUM(val) ) {
-                Obj_Enum *enumeration = ((Obj_Enum *)val.o);
-
-                Value field_val;
-                if ( !table_get(enumeration->fields, VSTR(field), &field_val) ) {
-                    assert(!"feld konnte nicht gefunden werden");
-                }
-
-                stack_push(vm, field_val);
-            } else if ( IS_VOBJ(val) ) {
-                Obj *obj = val.o;
-
-                Value field_val;
-                if ( !table_get(&obj->scope->syms, VSTR(field), &field_val) ) {
-                    assert(!"feld konnte nicht gefunden werden");
-                }
-
-                stack_push(vm, field_val);
-            }
-        } break;
-
-        case BYTECODEOP_SET_SYM: {
-            Value var = stack_pop(vm);
-            Value val = stack_pop(vm);
-
-            assert(IS_VPTR(var));
-
-            *((Value *)VPTR(var)->ptr) = val;
-        } break;
-
-        case BYTECODEOP_CALL: {
-            Value val = stack_pop(vm);
-            int32_t num_args = instr->op1;
-
-            if ( as_proc(val)->sys_call ) {
-                call_sys_proc(vm, val, num_args);
             } else {
-                call_proc(vm, val, num_args);
+                assert(0);
             }
         } break;
 
-        case BYTECODEOP_JMP: {
-            int32_t addr = instr->op1;
-            frame->pc = addr;
-        } break;
-
-        case BYTECODEOP_JMP_FALSE: {
-            Value val = stack_pop(vm);
-            int32_t addr = instr->op1;
-
-            if ( val.b == false ) {
-                frame->pc = addr;
+        case OP_POP: {
+            if ( operand_is_reg(instr->dst) ) {
+                stack_pop(cpu, instr->dst);
+            } else {
+                assert(0);
             }
         } break;
 
-        case BYTECODEOP_CMP_LT: {
-            Value right = stack_pop(vm);
-            Value left  = stack_pop(vm);
-
-            stack_push(vm, val_bool(left < right));
+        case OP_RET: {
+            stack_pop(cpu, REG_R15);
+            stack_pop(cpu, REG_R14);
+            stack_pop(cpu, REG_R13);
+            stack_pop(cpu, REG_R12);
+            stack_pop(cpu, REG_RDI);
+            stack_pop(cpu, REG_RDX);
+            stack_pop(cpu, REG_RCX);
+            stack_pop(cpu, REG_RBX);
+            stack_pop(cpu, REG_RIP);
         } break;
 
-        case BYTECODEOP_CMP_GT: {
-            Value right = stack_pop(vm);
-            Value left  = stack_pop(vm);
+        case OP_SETL: {
+            assert(operand_is_reg(instr->dst));
 
-            stack_push(vm, val_bool(right < left));
+            // SF≠OF
+            reg_write(cpu, instr->dst, flag_state(cpu, RFLAG_SF) != flag_state(cpu, RFLAG_OF));
         } break;
 
-        case BYTECODEOP_CMP_EQ: {
-            Value right = stack_pop(vm);
-            Value left  = stack_pop(vm);
+        case OP_SETLE: {
+            assert(operand_is_reg(instr->dst));
 
-            stack_push(vm, val_bool(right == left));
+            // ZF=1 or SF≠OF
+            reg_write(cpu, instr->dst, flag_state(cpu, RFLAG_ZF) || (flag_state(cpu, RFLAG_SF) != flag_state(cpu, RFLAG_OF)));
         } break;
 
-        case BYTECODEOP_INC: {
-            int32_t index = instr->op1;
-            Value val = value_get(&frame->proc->bc->constants, index);
-            value_set(&frame->proc->bc->constants, index, val + 1);
+        case OP_SETE: {
+            assert(operand_is_reg(instr->dst));
+
+            // ZF=1
+            reg_write(cpu, instr->dst, flag_state(cpu, RFLAG_ZF));
         } break;
 
-        case BYTECODEOP_RANGE: {
-            Value right = stack_pop(vm);
-            Value left  = stack_pop(vm);
+        case OP_SETGE: {
+            assert(operand_is_reg(instr->dst));
 
-            stack_push(vm, val_range(left, right));
+            // SF=OF
+            reg_write(cpu, instr->dst, flag_state(cpu, RFLAG_SF) == flag_state(cpu, RFLAG_OF));
         } break;
 
-        case BYTECODEOP_COMPOUND: {
-            int32_t num_elems = instr->op1;
+        case OP_SETG: {
+            assert(operand_is_reg(instr->dst));
 
-            Values elems = NULL;
-            for ( int i = 0; i < num_elems; ++i ) {
-                buf_push(elems, stack_pop(vm));
+            // ZF=0 and SF≠OF
+            reg_write(cpu, instr->dst, !flag_state(cpu, RFLAG_ZF) && flag_state(cpu, RFLAG_SF) != flag_state(cpu, RFLAG_OF));
+        } break;
+
+        case OP_SETNE: {
+            assert(operand_is_reg(instr->dst));
+
+            // ZF=0
+            reg_write(cpu, instr->dst, !flag_state(cpu, RFLAG_ZF));
+        } break;
+
+        case OP_SUB: {
+            uint64_t operand1 = 0;
+            uint64_t operand2 = 0;
+
+            if ( operand_is_reg(instr->operand1) ) {
+                operand1 = reg_read(cpu, instr->operand1);
+            } else if ( instr->operand1.kind == OPERAND_IMM ) {
+                operand1 = instr->operand1.val.u64;
+            } else {
+                assert(0);
             }
 
-            stack_push(vm, val_compound(elems, num_elems));
-        } break;
-
-        case BYTECODEOP_HLT: {
-            return false;
-        } break;
-
-        case BYTECODEOP_PUSH: {
-            int32_t index = instr->op1;
-            Value val = value_get(&frame->proc->bc->constants, index);
-            stack_push(vm, val);
-        } break;
-
-        case BYTECODEOP_CAST: {
-            Value type_to_cast    = stack_pop(vm);
-            Value type_to_cast_to = stack_pop(vm);
-
-            type_to_cast.kind = type_to_cast_to.kind;
-
-            stack_push(vm, type_to_cast);
-        } break;
-
-        case BYTECODEOP_POP: {
-            stack_pop(vm);
-        } break;
-
-        case BYTECODEOP_RET: {
-            int32_t num_elems = instr->op1;
-
-            Values elems = NULL;
-            for ( int i = 0; i < num_elems; ++i ) {
-                Value val = stack_pop(vm);
-                buf_push(elems, val);
+            if ( operand_is_reg(instr->operand2) ) {
+                operand2 = reg_read(cpu, instr->operand2);
+            } else if ( instr->operand2.kind == OPERAND_IMM ) {
+                operand2 = instr->operand2.val.u64;
+            } else {
+                assert(0);
             }
 
-            vm->frame_num -= 1;
-
-            for ( int i = 0; i < num_elems; ++i ) {
-                stack_push(vm, elems[i]);
+            if ( operand_is_reg(instr->dst) ) {
+                reg_write(cpu, instr->dst, operand1 - operand2);
+            } else {
+                assert(0);
             }
 
-            curr_scope = frame->prev_scope;
-        } break;
-
-        case BYTECODEOP_SCOPE_ENTER: {
-            bytecode_scope_enter();
-        } break;
-
-        case BYTECODEOP_SCOPE_LEAVE: {
-            bytecode_scope_leave();
-        } break;
-
-        case BYTECODEOP_STRUCT: {
-            int32_t num_fields = instr->op1;
-
-            Values elems = NULL;
-            for ( int i = 0; i < num_fields; ++i ) {
-                buf_push(elems, stack_pop(vm));
+            if ( operand2 > operand1 ) {
+                flags_set(cpu, RFLAG_CF);
+                flags_clear(cpu, RFLAG_ZF);
+            } else if ( operand1 == operand2 ) {
+                flags_set(cpu, RFLAG_ZF);
+                flags_clear(cpu, RFLAG_CF);
+            } else {
+                flags_clear(cpu, RFLAG_CF | RFLAG_ZF);
             }
-
-            Value structure = stack_pop(vm);
-
-            for ( int i = 0; i < num_fields; ++i ) {
-                Obj_Aggr_Field *field = ((Obj_Aggr_Field *)elems[i].o);
-                table_set(((Obj_Struct *)structure.o)->fields, field->name, field->default_value);
-                buf_push(((Obj_Struct *)structure.o)->fieldnames_ordered, field->name);
-            }
-        } break;
-
-        case BYTECODEOP_UNION: {
-            int32_t num_fields = instr->op1;
-
-            Values elems = NULL;
-            for ( int i = 0; i < num_fields; ++i ) {
-                buf_push(elems, stack_pop(vm));
-            }
-
-            Value un = stack_pop(vm);
-
-            for ( int i = 0; i < num_fields; ++i ) {
-                Obj_Aggr_Field *field = ((Obj_Aggr_Field *)elems[i].o);
-                table_set(((Obj_Union *)un.o)->fields, field->name, field->default_value);
-                buf_push(((Obj_Union *)un.o)->fieldnames_ordered, field->name);
-            }
-        } break;
-
-        case BYTECODEOP_TYPEDEF: {
-            Value val = stack_pop(vm);
-            Value name = value_get(&frame->proc->bc->constants, instr->op1);
-
-            if ( !bytecode_sym_set(VSTR(name), val) ) {
-                report_error(instr, "registrierung des typnamen %s gescheitert", VSTR(name)->ptr);
-            }
-        } break;
-
-        case BYTECODEOP_ENUM: {
-            int32_t num_fields = instr->op1;
-
-            Values elems = NULL;
-            for ( int i = 0; i < num_fields; ++i ) {
-                buf_push(elems, stack_pop(vm));
-            }
-
-            Value enumeration = stack_pop(vm);
-
-            for ( int i = 0; i < num_fields; ++i ) {
-                Obj_Aggr_Field *field = ((Obj_Aggr_Field *)elems[i].o);
-                table_set(((Obj_Enum *)enumeration.o)->fields, field->name, field->default_value);
-                buf_push(((Obj_Enum *)enumeration.o)->fieldnames_ordered, field->name);
-            }
-        } break;
-
-        case BYTECODEOP_PUSH_TYPEVAL: {
-            int32_t index = instr->op1;
-            Value val = value_get(&frame->proc->bc->constants, index);
-
-            Value type_val;
-            if ( !bytecode_sym_get(VSTR(val), &type_val) ) {
-                assert(!"unbekannter datentyp");
-            }
-
-            stack_push(vm, type_val);
-        } break;
-
-        case BYTECODEOP_MATCH_CASE: {
-            Value   resolution = stack_pop(vm);
-            Value   expr       = stack_pop(vm);
-            int32_t addr       = instr->op1;
-
-            if ( expr != resolution ) {
-                frame->pc = addr;
-            }
-        } break;
-
-        case BYTECODEOP_NEG: {
-            Value val = stack_pop(vm);
-            stack_push(vm, -val);
-        } break;
-
-        case BYTECODEOP_ALLOC: {
-            stack_push(vm, val_to_ptr(stack_pop(vm)));
-        } break;
-
-        case BYTECODEOP_ADDR: {
-            stack_push(vm, val_to_ptr(stack_pop(vm)));
-        } break;
-
-        case BYTECODEOP_IMPORT_SYMS: {
-            Value val = stack_pop(vm);
-            assert(IS_VNS(val));
-
-            for ( int i = 0; i < buf_len(AS_NAMESPACE(val)->scope->syms.ordered_entries); ++i ) {
-                Table_Entry *sym = AS_NAMESPACE(val)->scope->syms.ordered_entries[i];
-                bytecode_sym_set(sym->key, sym->val);
-            }
-        } break;
-
-        case BYTECODEOP_AGGR_FIELD: {
-            Value default_val = stack_pop(vm);
-            Value type_val = stack_pop(vm);
-            Value field = stack_pop(vm);
-
-            Value val     = (default_val.kind == VAL_NONE) ? type_val : default_val;
-            Value new_val = val;
-
-            if ( val.kind == VAL_OBJ && val.o->kind == OBJ_COMPOUND ) {
-                Obj_Compound * compound  = ((Obj_Compound *)val.o);
-
-                assert(type_val.o->kind == OBJ_STRUCT);
-                Obj_Struct   * structure = (Obj_Struct *)type_val.o;
-                               new_val   = val_struct(((Obj_String *)structure->name)->ptr);
-
-                for ( int i = 0; i < compound->num_elems; ++i ) {
-                    Value compound_val = compound->elems[i];
-                    table_set(((Obj_Struct *)new_val.o)->fields, structure->fieldnames_ordered[i], compound_val);
-                }
-            }
-
-            VAGGRFIELD(field)->default_value = new_val;
-            stack_push(vm, field);
         } break;
 
         default: {
@@ -3353,308 +1436,32 @@ step(Vm *vm) {
     return true;
 }
 
-Obj_Type *
-obj_type_from_type(Type *type) {
-    Obj_Type *result = NULL;
+Instrs
+compile(Parsed_File *file) {
+    compile_procs(file->stmts);
 
-    switch ( type->kind ) {
-        case TYPE_VOID: {
-            result = obj_type(type->id, "void", type->size);
-        } break;
+    for ( int i = 0; i < buf_len(file->stmts); ++i ) {
+        Stmt *stmt = file->stmts[i];
 
-        case TYPE_CHAR: {
-            result = obj_type(type->id, "char", type->size);
-        } break;
-
-        case TYPE_U8: {
-            result = obj_type(type->id, "u8", type->size);
-        } break;
-
-        case TYPE_U16: {
-            result = obj_type(type->id, "u16", type->size);
-        } break;
-
-        case TYPE_U32: {
-            result = obj_type(type->id, "u32", type->size);
-        } break;
-
-        case TYPE_U64: {
-            result = obj_type(type->id, "u64", type->size);
-        } break;
-
-        case TYPE_S8: {
-            result = obj_type(type->id, "s8", type->size);
-        } break;
-
-        case TYPE_S16: {
-            result = obj_type(type->id, "s16", type->size);
-        } break;
-
-        case TYPE_S32: {
-            result = obj_type(type->id, "s32", type->size);
-        } break;
-
-        case TYPE_S64: {
-            result = obj_type(type->id, "s64", type->size);
-        } break;
-
-        case TYPE_F32: {
-            result = obj_type(type->id, "f32", type->size);
-        } break;
-
-        case TYPE_F64: {
-            result = obj_type(type->id, "f64", type->size);
-        } break;
-
-        case TYPE_STRING: {
-            result = obj_type(type->id, "string", type->size);
-        } break;
-
-        case TYPE_BOOL: {
-            result = obj_type(type->id, "bool", type->size);
-        } break;
-
-        case TYPE_PTR: {
-            result = obj_type(type->id, NULL, type->size);
-
-            result->base = obj_type_from_type(TPTR(type)->base);
-        } break;
-
-        case TYPE_STRUCT: {
-            uint32_t num_fields = (uint32_t)TSTRUCT(type)->num_fields;
-            Values fields = (Values)urq_alloc(sizeof(Value)*num_fields);
-
-            for ( uint32_t i = 0; i < num_fields; ++i ) {
-                Aggr_Field *field = TSTRUCT(type)->fields[i];
-
-                fields[i] = val_type_field(field->type->id, field->name);
-            }
-
-            result = obj_type(type->id, TSTRUCT(type)->sym->name, type->size, fields, num_fields);
-        } break;
-
-        case TYPE_ENUM: {
-            uint32_t num_fields = (uint32_t)TENUM(type)->num_fields;
-            Values fields = (Values)urq_alloc(sizeof(Value)*num_fields);
-
-            for ( uint32_t i = 0; i < num_fields; ++i ) {
-                Aggr_Field *field = TENUM(type)->fields[i];
-
-                fields[i] = val_type_field(field->type->id, field->name);
-            }
-
-            result = obj_type(type->id, TENUM(type)->sym->name, type->size, fields, num_fields);
-        } break;
-
-        case TYPE_PROC: {
-            uint32_t num_params = (uint32_t)TPROC(type)->num_params;
-            Values params = (Values)urq_alloc(sizeof(Value)*num_params);
-
-            for ( uint32_t i = 0; i < num_params; ++i ) {
-                Proc_Param *param = TPROC(type)->params[i];
-
-                params[i] = val_type_field(param->type->id, param->name);
-            }
-
-            uint32_t num_rets = (uint32_t)TPROC(type)->num_rets;
-            Values rets = (Values)urq_alloc(sizeof(Value)*num_rets);
-
-            for ( uint32_t i = 0; i < num_rets; ++i ) {
-                Proc_Param *ret = TPROC(type)->rets[i];
-
-                rets[i] = val_type_field(ret->type->id, ret->name);
-            }
-
-            result = obj_type(type->id, TPROC(type)->sym->name, type->size, params, num_params, rets, num_rets);
-        } break;
-
-        case TYPE_ARRAY: {
-            result = obj_type(type->id, NULL, type->size);
-
-            result->base = obj_type_from_type(TARRAY(type)->base);
-        } break;
-
-        case TYPE_NAMESPACE: {
-            result = obj_type(type->id, type->name, type->size);
-        } break;
-
-        case TYPE_COMPOUND: {
-            result = obj_type(type->id, NULL, type->size);
-
-            result->num_fields = (uint32_t)TCMPND(type)->num_elems;
-            result->fields = (Values)urq_alloc(sizeof(Value)*result->num_fields);
-            for ( uint32_t i = 0; i < result->num_fields; ++i ) {
-                result->params[i] = val_type(obj_type_from_type(TCMPND(type)->elems[i]->type));
-            }
-        } break;
-
-        case TYPE_VARIADIC: {
-            result = obj_type(type->id, NULL, type->size);
-
-            result->num_fields = (uint32_t)TVARIADIC(type)->num_types;
-            result->fields = (Values)urq_alloc(sizeof(Value)*result->num_fields);
-            for ( uint32_t i = 0; i < result->num_fields; ++i ) {
-                result->params[i] = val_type(obj_type_from_type(TVARIADIC(type)->types[i]));
-            }
-        } break;
+        if ( stmt->kind != STMT_DECL || SDECL(stmt)->decl->kind != DECL_PROC ) {
+            vm_stmt(stmt);
+        }
     }
 
-    return result;
+    return vm_instrs;
 }
 
-void
-bytecode_gen_typeinfo() {
-    int32_t num_types = buf_len(types);
-    obj_types = (Obj_Type **)urq_alloc(sizeof(Obj_Type)*num_types);
+uint64_t
+eval(Instrs instrs) {
+    Cpu *cpu = cpu_new(instrs, 1024*1024, 55);
 
-    for ( int i = 0; i < num_types; ++i ) {
-        obj_types[types[i]->id] = obj_type_from_type(types[i]);
-    }
-}
-
-void
-bytecode_init(Bytecode *bc) {
-#define REGISTER_TYPE(Val, Name)                                       \
-    do {                                                                     \
-            Scope *prev_scope = curr_scope;                                  \
-            curr_scope = &sys_scope;                                         \
-            int32_t index = bytecode_push_constant(bc, val_str(Name)); \
-            Obj_String *name = VSTR(value_get(&bc->constants, index));     \
-            if ( !bytecode_sym_set(name, Val) ) {                            \
-                assert(!"symbol konnte nicht gesetzt werden");               \
-            }                                                                \
-            curr_scope = prev_scope;                                         \
-    } while(0)
-
-    REGISTER_TYPE(val_none(),      "void");
-    REGISTER_TYPE(val_char(0),     "char");
-    REGISTER_TYPE(val_int(0),      "u8");
-    REGISTER_TYPE(val_int(0),      "u16");
-    REGISTER_TYPE(val_int(0),      "u32");
-    REGISTER_TYPE(val_int(0),      "u64");
-    REGISTER_TYPE(val_int(0),      "s8");
-    REGISTER_TYPE(val_int(0),      "s16");
-    REGISTER_TYPE(val_int(0),      "s32");
-    REGISTER_TYPE(val_int(0),      "s64");
-    REGISTER_TYPE(val_float(0.0f), "f32");
-    REGISTER_TYPE(val_float(0.0f), "f64");
-    REGISTER_TYPE(val_bool(false), "bool");
-    REGISTER_TYPE(val_str(""),     "string");
-
-    bytecode_gen_typeinfo();
-#undef REGISTER_TYPE
-}
-
-void eval(Bytecode *bc) {
-    Vm *vm = vm_new(bc);
-
-    for ( ;; ) {
-#if BYTECODE_DEBUG
-        vm_debug(vm);
-        getchar();
-#endif
-        bool keep_running = step(vm);
-
-        if ( !keep_running ) {
+    for (;;) {
+        if ( !step(cpu) ) {
             break;
         }
     }
-}
 
-Bytecode *
-optimize(Bytecode *bc) {
-    Basic_Block **bbs = NULL;
-    Instrs instrs = NULL;
-
-    Value val = value_get(&bc->constants, entry_point_index);
-    assert(IS_VPROC(val));
-    Obj_Proc *proc = VPROC(val);
-    Bytecode *code = proc->bc;
-
-    for ( int i = 0; i < code->size; ++i ) {
-        Instr *instr = code->instructions[i];
-
-        if (instr->opcode == BYTECODEOP_JMP_FALSE ||
-            instr->opcode == BYTECODEOP_JMP       ||
-            instr->opcode == BYTECODEOP_CALL      ||
-            instr->opcode == BYTECODEOP_RET        )
-        {
-            buf_push(instrs, instr);
-
-            if ( buf_len(instrs) > 0 ) {
-                buf_push(bbs, basic_block(buf_len(bbs), instrs));
-            }
-
-            instrs = NULL;
-
-            if ( instr->opcode == BYTECODEOP_CALL ) {
-            }
-        } else if ( instr->opcode == BYTECODEOP_NAMESPACE_ENTER ) {
-            // später gucken was hier gemacht werden kann
-        } else {
-            buf_push(instrs, instr);
-        }
-    }
-
-    return bc;
-}
-
-void
-bytecode_build_import_directives(Bytecode *bc, Directives dirs) {
-    for ( int i = 0; i < buf_len(dirs); ++i ) {
-        Directive *dir = dirs[i];
-
-        if ( dir->kind == DIRECTIVE_IMPORT ) {
-            bytecode_directive(bc, dir);
-        }
-    }
-}
-
-void
-bytecode_build_export_directives(Bytecode *bc, Directives dirs) {
-    for ( int i = 0; i < buf_len(dirs); ++i ) {
-        Directive *dir = dirs[i];
-
-        if ( dir->kind == DIRECTIVE_EXPORT ) {
-            bytecode_directive(bc, dir);
-        }
-    }
-}
-
-void
-bytecode_build_load_directives(Bytecode *bc, Directives dirs) {
-    for ( int i = 0; i < buf_len(dirs); ++i ) {
-        Directive *dir = dirs[i];
-
-        if ( dir->kind == DIRECTIVE_LOAD ) {
-            bytecode_directive(bc, dir);
-        }
-    }
-}
-
-void
-bytecode_build_stmts(Bytecode *bc, Stmts stmts) {
-    for ( int i = 0; i < buf_len(stmts); ++i ) {
-        bytecode_stmt(bc, stmts[i]);
-    }
-}
-
-void
-bytecode_build_file(Bytecode *bc, Parsed_File *file) {
-    bytecode_build_import_directives(bc, file->directives);
-    bytecode_build_load_directives(bc, file->directives);
-    bytecode_build_stmts(bc, file->stmts);
-    bytecode_build_export_directives(bc, file->directives);
-}
-
-Bytecode *
-build(Parsed_File *file) {
-    Bytecode *bc = bytecode_new();
-
-    bytecode_init(bc);
-    bytecode_build_file(bc, file);
-
-    return bc;
+    return reg_read(cpu, REG_RAX);
 }
 
 }

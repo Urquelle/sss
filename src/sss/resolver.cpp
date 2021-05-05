@@ -1761,8 +1761,11 @@ resolve_proc(Sym *sym) {
 
         param->sym = sym_push_var(param, param->name, type);
         param->sym->decl = param;
-        decl->scope->frame_size += param->type->size;
-        param->offset = -decl->scope->frame_size;
+
+        if ( i < 4 ) {
+            decl->scope->frame_size += param->type->size;
+            param->offset = -decl->scope->frame_size;
+        }
 
         if ( param->has_using ) {
             if ( type->kind != TYPE_STRUCT ) {
@@ -1775,6 +1778,15 @@ resolve_proc(Sym *sym) {
                 sym_push_var(field, field->name, field->type);
             }
         }
+    }
+
+    int32_t stack_offset = 0;
+    for ( int i = sign->num_params; i > 4; --i ) {
+        Decl_Var *param = sign->params[i-1];
+
+        /* @INFO: 10 register, die auf den stack gepusht werden beim OP_CALL, die jeweils 8 byte groß sind. */
+        param->offset = 10 * 8 + stack_offset;
+        stack_offset += param->type->size;
     }
 
     Types ret_types = NULL;

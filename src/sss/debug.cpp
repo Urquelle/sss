@@ -1,4 +1,4 @@
-using namespace Urq::Sss::Vm2;
+using namespace Urq::Sss::Vm;
 
 char *regs64_dbg[] = {
     "rax",
@@ -29,6 +29,9 @@ char *regs32_dbg[] = {
     "ebp",
     "esi",
     "edi",
+    "esp",
+    "r8d",
+    "r9d",
 };
 
 char *regs16_dbg[] = {
@@ -39,6 +42,9 @@ char *regs16_dbg[] = {
     "bp",
     "si",
     "di",
+    "sp",
+    "r8w",
+    "r9w",
 };
 
 char *regs8l[] = {
@@ -46,6 +52,12 @@ char *regs8l[] = {
     "bl",
     "cl",
     "dl",
+    "",
+    "",
+    "",
+    "spl",
+    "r8b",
+    "r9b",
 };
 
 char *regs8h[] = {
@@ -56,31 +68,31 @@ char *regs8h[] = {
 };
 
 char *
-to_str(Urq::Sss::Vm2::Value val) {
+to_str(Urq::Sss::Vm::Value val) {
     char *result = NULL;
 
     switch (val.kind) {
-        case Urq::Sss::Vm2::VAL_BOOL: {
+        case Urq::Sss::Vm::VAL_BOOL: {
             result = buf_printf(result, "%d", val.b ? 1 : 0);
         } break;
 
-        case Urq::Sss::Vm2::VAL_CHAR: {
+        case Urq::Sss::Vm::VAL_CHAR: {
             result = buf_printf(result, "%c", val.c);
         } break;
 
-        case Urq::Sss::Vm2::VAL_U64: {
+        case Urq::Sss::Vm::VAL_U64: {
             result = buf_printf(result, "%u", val.u64);
         } break;
 
-        case Urq::Sss::Vm2::VAL_S64: {
+        case Urq::Sss::Vm::VAL_S64: {
             result = buf_printf(result, "%d", val.s64);
         } break;
 
-        case Urq::Sss::Vm2::VAL_F32: {
+        case Urq::Sss::Vm::VAL_F32: {
             result = buf_printf(result, "%f", val.f32);
         } break;
 
-        case Urq::Sss::Vm2::VAL_STR: {
+        case Urq::Sss::Vm::VAL_STR: {
             result = buf_printf(result, "%s", val.str);
         } break;
     }
@@ -89,10 +101,14 @@ to_str(Urq::Sss::Vm2::Value val) {
 }
 
 char *
-to_str(Urq::Sss::Vm2::Operand op) {
+to_str(Urq::Sss::Vm::Operand op) {
     char *result = NULL;
 
     switch ( op.kind ) {
+        case OPERAND_ADDR: {
+            result = buf_printf(result, "@%d", op.addr);
+        } break;
+
         case OPERAND_IMM: {
             result = buf_printf(result, "%%%%%d", op.val.u64);
         } break;
@@ -169,11 +185,39 @@ to_str(Instr *instr) {
     }
 
     switch ( instr->op ) {
+        case OP_ADD: {
+            output = buf_printf(output, to_str_binop("add", instr));
+        } break;
+
+        case OP_CALL: {
+            output = buf_printf(output, "call %s", to_str(instr->operand1));
+        } break;
+
+        case OP_CMP: {
+            output = buf_printf(output, to_str_binop("cmp", instr));
+        } break;
+
         case OP_DATA: {
             output = buf_printf(output, "%s", to_str(instr->operand1));
             if ( instr->operand2.kind != OPERAND_NONE ) {
                 output = buf_printf(output, " %s", to_str(instr->operand2));
             }
+        } break;
+
+        case OP_IDIV: {
+            output = buf_printf(output, "idiv %s", to_str(instr->dst));
+        } break;
+
+        case OP_IMUL: {
+            output = buf_printf(output, to_str_binop("imul", instr));
+        } break;
+
+        case OP_JMP: {
+            output = buf_printf(output, "jmp %s", to_str(instr->operand1));
+        } break;
+
+        case OP_JZ: {
+            output = buf_printf(output, "jz %s", to_str(instr->operand1));
         } break;
 
         case OP_LEA: {
@@ -192,24 +236,8 @@ to_str(Instr *instr) {
             output = buf_printf(output, "pop %s", to_str(instr->operand1));
         } break;
 
-        case OP_ADD: {
-            output = buf_printf(output, to_str_binop("add", instr));
-        } break;
-
         case OP_SUB: {
             output = buf_printf(output, to_str_binop("sub", instr));
-        } break;
-
-        case OP_IMUL: {
-            output = buf_printf(output, to_str_binop("imul", instr));
-        } break;
-
-        case OP_IDIV: {
-            output = buf_printf(output, "idiv %s", to_str(instr->dst));
-        } break;
-
-        case OP_CMP: {
-            output = buf_printf(output, to_str_binop("cmp", instr));
         } break;
 
         case OP_SETL: {
@@ -238,10 +266,6 @@ to_str(Instr *instr) {
 
         case OP_RET: {
             output = buf_printf(output, "ret");
-        } break;
-
-        case OP_CALL: {
-            output = buf_printf(output, "call %s", to_str(instr->operand1));
         } break;
 
         default: {
