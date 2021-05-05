@@ -3,7 +3,7 @@ namespace Vm {
 struct Cpu;
 
 void rip_inc(Cpu *cpu);
-void vm_stmt(Stmt *stmt);
+void vm_stmt(Stmt *stmt, char *proc_name = NULL);
 
 enum Vm_Op {
     OP_HLT,
@@ -765,6 +765,7 @@ vm_emit(Instr *instr) {
     instr->addr = result;
 
     if ( instr->label ) {
+        instr->label = intern_str(instr->label);
         buf_push(vm_instrs_labeled, instr);
     }
 
@@ -1023,18 +1024,13 @@ vm_decl(Decl *decl) {
 
                 if ( i < 4 ) {
                     vm_emit(vm_instr(decl, OP_MOV, operand_rbp(param->type->size, param->offset), operand_args(param->type->size, reg++)));
-                } else {
-                    /* @INFO: andere argumente liegen auf dem stack und können direkt über ihren offset vom stack
-                     *        geholt werden
-                    vm_emit(vm_instr(decl, OP_POP, operand_rbp(param->type->size, param->offset)));
-                    */
                 }
             }
 
-            vm_stmt(DPROC(decl)->block);
-
             char *label = NULL;
             label = buf_printf(label, "%s.end", decl->name);
+
+            vm_stmt(DPROC(decl)->block, decl->name);
 
             vm_emit(vm_instr(decl, OP_MOV, operand_reg(REG_RSP), operand_reg(REG_RBP), label));
             vm_emit(vm_instr(decl, OP_POP, operand_reg(REG_RBP)));
@@ -1048,11 +1044,11 @@ vm_decl(Decl *decl) {
 }
 
 void
-vm_stmt(Stmt *stmt) {
+vm_stmt(Stmt *stmt, char *proc_name) {
     switch ( stmt->kind ) {
         case STMT_BLOCK: {
             for ( int i = 0; i < SBLOCK(stmt)->num_stmts; ++i ) {
-                vm_stmt(SBLOCK(stmt)->stmts[i]);
+                vm_stmt(SBLOCK(stmt)->stmts[i], proc_name);
             }
         } break;
 
@@ -1072,16 +1068,27 @@ vm_stmt(Stmt *stmt) {
             vm_expr(SIF(stmt)->cond);
             vm_emit(vm_instr(stmt, OP_CMP, operand_rax(SIF(stmt)->cond->type->size), operand_imm(value((uint64_t)1))));
             int32_t jmpz_instr = vm_emit(vm_instr(stmt, OP_JZ, operand_addr(0), label));
-            vm_stmt(SIF(stmt)->stmt);
+            vm_stmt(SIF(stmt)->stmt, proc_name);
             int32_t jmp_instr = vm_emit(vm_instr(stmt, OP_JMP, operand_addr(0)));
 
             vm_instr_patch(jmpz_instr, buf_len(vm_instrs));
 
             if ( SIF(stmt)->stmt_else ) {
-                vm_stmt(SIF(stmt)->stmt_else);
+                vm_stmt(SIF(stmt)->stmt_else, proc_name);
             }
 
             vm_instr_patch(jmp_instr, buf_len(vm_instrs));
+        } break;
+
+        case STMT_RET: {
+            if ( SRET(stmt)->num_exprs ) {
+                vm_expr(SRET(stmt)->exprs[0]);
+            }
+
+            assert(proc_name);
+            char *label = NULL;
+            label = buf_printf(label, "%s.end", proc_name);
+            vm_emit(vm_instr(stmt, OP_JMP, operand_name(value(label)), NULL, "res"));
         } break;
 
         default: {
@@ -1244,6 +1251,8 @@ step(Cpu *cpu) {
         case OP_JMP: {
             if ( instr->operand1.kind == OPERAND_ADDR ) {
                 reg_write(cpu, REG_RIP, instr->operand1.addr);
+            } else if ( instr->operand1.kind == OPERAND_NAME ) {
+                reg_write(cpu, REG_RIP, addr_lookup(instr->operand1.val));
             } else {
                 assert(0);
             }
@@ -1453,7 +1462,7 @@ compile(Parsed_File *file) {
 
 uint64_t
 eval(Instrs instrs) {
-    Cpu *cpu = cpu_new(instrs, 1024*1024, 55);
+    Cpu *cpu = cpu_new(instrs, 1024*1024, 57);
 
     for (;;) {
         if ( !step(cpu) ) {
