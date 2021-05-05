@@ -29,6 +29,7 @@ enum Vm_Op {
     OP_SETNE,
 
     OP_JMP,
+    OP_JNZ,
     OP_JZ,
 
     OP_CALL,
@@ -1076,6 +1077,30 @@ vm_stmt(Stmt *stmt, char *proc_name) {
             vm_expr(SEXPR(stmt)->expr);
         } break;
 
+        case STMT_FOR: {
+            static int for_count = 0;
+
+            char *label = NULL;
+            label = buf_printf(label, "for.%d.start", for_count++);
+
+            vm_stmt(SFOR(stmt)->init, proc_name);
+            int32_t loop_start = vm_emit(vm_instr(stmt, OP_NOP, label, "wird für die jmp anweisung benötigt"));
+            vm_expr(SFOR(stmt)->cond);
+            vm_emit(vm_instr(stmt, OP_CMP, operand_rax(SFOR(stmt)->cond->type->size), operand_imm(value((uint64_t)1))));
+            int32_t jmpnz_instr = vm_emit(vm_instr(stmt, OP_JNZ, operand_addr(0)));
+            vm_stmt(SFOR(stmt)->block, proc_name);
+            vm_stmt(SFOR(stmt)->step, proc_name);
+            vm_emit(vm_instr(stmt, OP_JMP, operand_name(value(label))));
+
+            /* @AUFGABE: sonst zweig für schleife */
+#if 0
+            if ( SFOR(stmt)->stmt_else ) {
+            }
+#endif
+
+            vm_instr_patch(jmpnz_instr, buf_len(vm_instrs));
+        } break;
+
         case STMT_IF: {
             static uint32_t loop_count = 0;
             char *label = NULL;
@@ -1289,6 +1314,16 @@ step(Cpu *cpu) {
             }
         } break;
 
+        case OP_JNZ: {
+            if ( !flag_state(cpu, RFLAG_ZF) ) {
+                if ( instr->operand1.kind == OPERAND_ADDR ) {
+                    reg_write(cpu, REG_RIP, instr->operand1.addr);
+                } else {
+                    assert(0);
+                }
+            }
+        } break;
+
         case OP_JZ: {
             if ( flag_state(cpu, RFLAG_ZF) ) {
                 if ( instr->operand1.kind == OPERAND_ADDR ) {
@@ -1497,7 +1532,7 @@ compile(Parsed_File *file) {
 
 uint64_t
 eval(Instrs instrs) {
-    Cpu *cpu = cpu_new(instrs, 1024*1024, 68);
+    Cpu *cpu = cpu_new(instrs, 1024*1024, 94);
 
     for (;;) {
         if ( !step(cpu) ) {

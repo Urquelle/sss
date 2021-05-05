@@ -216,6 +216,10 @@ to_str(Instr *instr) {
             output = buf_printf(output, "jmp %s", to_str(instr->operand1));
         } break;
 
+        case OP_JNZ: {
+            output = buf_printf(output, "jnz %s", to_str(instr->operand1));
+        } break;
+
         case OP_JZ: {
             output = buf_printf(output, "jz %s", to_str(instr->operand1));
         } break;

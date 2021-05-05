@@ -1987,10 +1987,10 @@ parse_stmt_for(Token_List *tokens) {
 
     if ( cond->kind == EXPR_RANGE ) {
         DVAR(SDECL(init)->decl)->expr = ERNG(cond)->left;
-        cond = expr_bin(curr, BIN_LT, DVAR(SDECL(init)->decl)->expr, ERNG(cond)->right);
+        cond = expr_bin(curr, BIN_LT, expr_ident(init, SDECL(init)->decl->name), ERNG(cond)->right);
     }
 
-    Expr *iter      = DVAR(SDECL(init)->decl)->expr;
+    Expr *iter      = expr_ident(init, SDECL(init)->decl->name);
     Expr *step_expr = expr_bin(curr, BIN_ADD, iter, expr_int(curr, 1));
     step = stmt_assign(curr, iter, token_new(T_EQL_ASSIGN, "", 0, 0), step_expr);
 
