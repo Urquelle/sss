@@ -7,6 +7,7 @@ void vm_stmt(Stmt *stmt, char *proc_name = NULL);
 
 enum Vm_Op {
     OP_HLT,
+    OP_NOP,
     OP_DATA,
 
     OP_ADD,
@@ -879,8 +880,10 @@ stack_pop(Cpu *cpu, Operand op) {
     }
 }
 
-void
-vm_expr(Expr *expr) {
+Operand
+vm_expr(Expr *expr, bool assignment = false) {
+    Operand result = {};
+
     switch ( expr->kind ) {
         case EXPR_INT: {
             vm_emit(vm_instr(expr, OP_MOV, operand_rax(expr->type->size), operand_imm(value(EINT(expr)->val))));
@@ -913,7 +916,11 @@ vm_expr(Expr *expr) {
             if (sym->decl->is_global) {
                 vm_emit(vm_instr(expr, OP_LEA, operand_reg(REG_RAX), operand_name(value(EIDENT(expr)->val))));
             } else {
-                vm_emit(vm_instr(expr, OP_LEA, operand_rax(expr->type->size), operand_rbp(expr->type->size, sym->decl->offset)));
+                if ( assignment ) {
+                    result = operand_rbp(expr->type->size, sym->decl->offset);
+                } else {
+                    vm_emit(vm_instr(expr, OP_LEA, operand_rax(expr->type->size), operand_rbp(expr->type->size, sym->decl->offset)));
+                }
             }
         } break;
 
@@ -990,6 +997,8 @@ vm_expr(Expr *expr) {
             assert(0);
         } break;
     }
+
+    return result;
 }
 
 void
@@ -1046,18 +1055,25 @@ vm_decl(Decl *decl) {
 void
 vm_stmt(Stmt *stmt, char *proc_name) {
     switch ( stmt->kind ) {
+        case STMT_ASSIGN: {
+            Operand dst = vm_expr(SASSIGN(stmt)->lhs, true);
+            assert(dst.kind != OPERAND_NONE);
+            vm_expr(SASSIGN(stmt)->rhs);
+            vm_emit(vm_instr(stmt, OP_MOV, dst, operand_rax(SASSIGN(stmt)->rhs->type->size)));
+        } break;
+
         case STMT_BLOCK: {
             for ( int i = 0; i < SBLOCK(stmt)->num_stmts; ++i ) {
                 vm_stmt(SBLOCK(stmt)->stmts[i], proc_name);
             }
         } break;
 
-        case STMT_EXPR: {
-            vm_expr(SEXPR(stmt)->expr);
-        } break;
-
         case STMT_DECL: {
             vm_decl(SDECL(stmt)->decl);
+        } break;
+
+        case STMT_EXPR: {
+            vm_expr(SEXPR(stmt)->expr);
         } break;
 
         case STMT_IF: {
@@ -1089,6 +1105,21 @@ vm_stmt(Stmt *stmt, char *proc_name) {
             char *label = NULL;
             label = buf_printf(label, "%s.end", proc_name);
             vm_emit(vm_instr(stmt, OP_JMP, operand_name(value(label)), NULL, "res"));
+        } break;
+
+        case STMT_WHILE: {
+            static int while_count = 0;
+
+            char *label = NULL;
+            label = buf_printf(label, "while.%d.start", while_count++);
+
+            int32_t loop_start = vm_emit(vm_instr(stmt, OP_NOP, label, "wird für die jmp anweisung benötigt"));
+            vm_expr(SWHILE(stmt)->cond);
+            int32_t jmpz_instr = vm_emit(vm_instr(stmt, OP_JZ, operand_addr(0), operand_imm(value((uint64_t)1))));
+            vm_stmt(SWHILE(stmt)->block, proc_name);
+            vm_emit(vm_instr(stmt, OP_JMP, operand_addr(loop_start)));
+
+            vm_instr_patch(jmpz_instr, buf_len(vm_instrs));
         } break;
 
         default: {
@@ -1320,6 +1351,10 @@ step(Cpu *cpu) {
             }
         } break;
 
+        case OP_NOP: {
+            //
+        } break;
+
         case OP_PUSH: {
             if ( operand_is_reg(instr->operand1) ) {
                 if ( instr->src.kind == OPERAND_REG8L ) {
@@ -1462,7 +1497,7 @@ compile(Parsed_File *file) {
 
 uint64_t
 eval(Instrs instrs) {
-    Cpu *cpu = cpu_new(instrs, 1024*1024, 57);
+    Cpu *cpu = cpu_new(instrs, 1024*1024, 68);
 
     for (;;) {
         if ( !step(cpu) ) {

@@ -110,7 +110,7 @@ to_str(Urq::Sss::Vm::Operand op) {
         } break;
 
         case OPERAND_IMM: {
-            result = buf_printf(result, "%%%%%d", op.val.u64);
+            result = buf_printf(result, "$%d", op.val.u64);
         } break;
 
         case OPERAND_REG64: {
@@ -226,6 +226,10 @@ to_str(Instr *instr) {
 
         case OP_MOV: {
             output = buf_printf(output, to_str_binop("mov", instr));
+        } break;
+
+        case OP_NOP: {
+            output = buf_printf(output, "nop");
         } break;
 
         case OP_PUSH: {
