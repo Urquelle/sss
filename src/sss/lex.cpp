@@ -17,6 +17,7 @@ enum Token_Kind {
     T_BANG,
     T_SEMICOLON,
     T_NOTE,
+    T_NOT,
 
     T_LPAREN,
     T_RPAREN,
@@ -248,6 +249,9 @@ recurse:
         } else if ( AT(0) == ',' ) {
             NEXT();
             token_push(&result, token_str(T_COMMA, ",", 1, file, line, col));
+        } else if ( AT(0) == '!' ) {
+            NEXT();
+            token_push(&result, token_str(T_NOT, "!", 1, file, line, col));
         } else if ( AT(0) == '\'' ) {
             NEXT();
 

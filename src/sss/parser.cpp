@@ -41,6 +41,32 @@ char *keyword_while;
     result->kind = Kind; \
     loc_copy(loc, result)
 
+#define MEMDUP(x) memdup(x, num_##x * sizeof(*x))
+
+enum Bin_Kind {
+    BIN_NONE,
+
+    BIN_ADD,
+    BIN_MATH_START = BIN_ADD,
+    BIN_SUB,
+    BIN_MUL,
+    BIN_DIV,
+    BIN_MATH_END = BIN_DIV,
+
+    BIN_LT,
+    BIN_CMP_START = BIN_LT,
+    BIN_LTE,
+    BIN_EQ,
+    BIN_GTE,
+    BIN_GT,
+    BIN_CMP_END = BIN_GT,
+
+    BIN_AND,
+    BIN_LOGIC_START = BIN_AND,
+    BIN_OR,
+    BIN_LOGIC_END = BIN_OR,
+};
+
 void *
 memdup(void *src, size_t size) {
     if (size == 0) {
@@ -53,8 +79,6 @@ memdup(void *src, size_t size) {
     return ptr;
 }
 
-#define MEMDUP(x) memdup(x, num_##x * sizeof(*x))
-
 struct Note : Ast_Elem {
     Exprs  exprs;
     size_t num_exprs;
@@ -63,35 +87,37 @@ struct Note : Ast_Elem {
 #define EXPRS        \
     X(EXPR_NONE)     \
     X(EXPR_AT)       \
-    X(EXPR_STR)      \
-    X(EXPR_CHAR)     \
-    X(EXPR_INT)      \
-    X(EXPR_FLOAT)    \
-    X(EXPR_BOOL)     \
-    X(EXPR_IDENT)    \
-    X(EXPR_NEW)      \
-    X(EXPR_RUN)      \
-    X(EXPR_KEYWORD)  \
-    X(EXPR_UNARY)    \
-    X(EXPR_CAST)     \
     X(EXPR_BIN)      \
-    X(EXPR_FIELD)    \
-    X(EXPR_INDEX)    \
-    X(EXPR_PAREN)    \
+    X(EXPR_BOOL)     \
     X(EXPR_CALL)     \
+    X(EXPR_CAST)     \
+    X(EXPR_CHAR)     \
+    X(EXPR_COMPOUND) \
+    X(EXPR_FIELD)    \
+    X(EXPR_FLOAT)    \
+    X(EXPR_IDENT)    \
+    X(EXPR_INDEX)    \
+    X(EXPR_INT)      \
+    X(EXPR_KEYWORD)  \
+    X(EXPR_NEW)      \
+    X(EXPR_NOT)      \
+    X(EXPR_PAREN)    \
     X(EXPR_RANGE)    \
+    X(EXPR_RUN)      \
     X(EXPR_SIZEOF)   \
+    X(EXPR_STMT)     \
+    X(EXPR_STR)      \
     X(EXPR_TUPLE)    \
     X(EXPR_TYPEINFO) \
     X(EXPR_TYPEOF)   \
-    X(EXPR_COMPOUND) \
-    X(EXPR_STMT)     \
+    X(EXPR_UNARY)    \
 
 enum Expr_Kind {
 #define X(Elem) Elem,
     EXPRS
 #undef X
 };
+
 struct Expr : Ast_Elem {
     Expr_Kind   kind;
     Type      * type;
@@ -130,6 +156,10 @@ struct Expr_New : Expr {
     Expr *expr;
 };
 
+struct Expr_Not : Expr {
+    Expr *expr;
+};
+
 struct Expr_Run : Expr {
     Expr *expr;
 };
@@ -156,29 +186,6 @@ struct Expr_Typeof : Expr {
     Expr * expr;
 };
 
-enum Bin_Kind {
-    BIN_NONE,
-
-    BIN_ADD,
-    BIN_MATH_START = BIN_ADD,
-    BIN_SUB,
-    BIN_MUL,
-    BIN_DIV,
-    BIN_MATH_END = BIN_DIV,
-
-    BIN_LT,
-    BIN_CMP_START = BIN_LT,
-    BIN_LTE,
-    BIN_EQ,
-    BIN_GTE,
-    BIN_GT,
-    BIN_CMP_END = BIN_GT,
-
-    BIN_AND,
-    BIN_LOGIC_START = BIN_AND,
-    BIN_OR,
-    BIN_LOGIC_END = BIN_OR,
-};
 struct Expr_Bin : Expr {
     Bin_Kind op;
     Expr * left;
@@ -795,6 +802,15 @@ expr_new(Ast_Elem *loc, Expr *expr) {
     return result;
 }
 
+Expr_Not *
+expr_not(Ast_Elem *loc, Expr *expr) {
+    STRUCTK(Expr_Not, EXPR_NOT);
+
+    result->expr = expr;
+
+    return result;
+}
+
 Expr_Run *
 expr_run(Ast_Elem *loc, Expr *expr) {
     STRUCTK(Expr_Run, EXPR_RUN);
@@ -1047,6 +1063,8 @@ parse_expr_base(Token_List *tokens) {
     } else if ( token_is(tokens, T_FLOAT) ) {
         Token *t = token_read(tokens);
         result = expr_float(curr, t->val_float);
+    } else if ( token_match(tokens, T_NOT) ) {
+        result = expr_not(curr, parse_expr(tokens));
     } else if ( token_is(tokens, T_MINUS) ) {
         while ( token_match(tokens, T_MINUS) ) {
             /* - */
@@ -1968,7 +1986,7 @@ parse_stmt_if(Token_List *tokens) {
 
 Stmt_For *
 parse_stmt_for(Token_List *tokens) {
-    /* @TODO: umstellen auf init, cond, step! auch wenn range als cond im code steht */
+    /* @AUFGABE: umstellen auf init, cond, step! auch wenn range als cond im code steht */
 
     Token *curr = token_get(tokens);
 
@@ -2038,29 +2056,11 @@ parse_stmt_match(Token_List *tokens) {
 
     if ( !token_is(tokens, T_RBRACE) ) {
         do {
-#if 0
-            Token *ident = token_read(tokens);
-            assert(ident->kind == T_IDENT);
-
-            Expr *resolution = NULL;
-            if ( token_is(tokens, T_LPAREN) ) {
-                resolution = parse_expr_tuple(tokens);
-            } else if ( !token_is(tokens, T_COLON) ) {
-                resolution = parse_expr(tokens);
-            }
-
-            token_expect(tokens, T_COLON);
-            Stmt *stmt = parse_stmt_block(tokens);
-            buf_push(lines, match_line(ident, ident->val_str, resolution, stmt));
-
-            token_match(tokens, T_COMMA);
-#else
             Expr *resolution = parse_expr(tokens);
             token_expect(tokens, T_FAT_ARROW);
             Stmt *stmt = parse_stmt(tokens);
 
             buf_push(lines, match_line(resolution, resolution, stmt));
-#endif
         } while ( !token_is(tokens, T_RBRACE) );
     }
 

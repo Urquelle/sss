@@ -24,6 +24,7 @@ enum Vm_Op {
     OP_MOV,
     OP_MUL,
     OP_NOP,
+    OP_NOT,
     OP_POP,
     OP_PUSH,
     OP_RET,
@@ -913,43 +914,8 @@ vm_expr(Expr *expr, bool assignment = false) {
     Operand result = {};
 
     switch ( expr->kind ) {
-        case EXPR_INT: {
-            vm_emit(vm_instr(expr, OP_MOV, operand_rax(expr->type->size), operand_imm(value(EINT(expr)->val))));
-        } break;
-
-        case EXPR_FLOAT: {
-            vm_emit(vm_instr(expr, OP_MOV, operand_reg(REG_RAX), operand_imm(value(EFLOAT(expr)->val))));
-        } break;
-
         case EXPR_BOOL: {
             vm_emit(vm_instr(expr, OP_MOV, operand_rax(expr->type->size), operand_imm(value(EBOOL(expr)->val))));
-        } break;
-
-        case EXPR_STR: {
-            static uint32_t string_num = 0;
-
-            char *name = NULL;
-            name = buf_printf(name, ".string.%d", string_num);
-
-            vm_emit(vm_instr(expr, OP_DATA, operand_name(value(".string")), operand_imm(value(ESTR(expr)->val)), name));
-            vm_emit(vm_instr(expr, OP_LEA, operand_name(value(name)), operand_rax(expr->type->size)));
-
-            string_num++;
-        } break;
-
-        case EXPR_IDENT: {
-            assert(EIDENT(expr)->sym);
-            Sym *sym = EIDENT(expr)->sym;
-
-            if (sym->decl->is_global) {
-                vm_emit(vm_instr(expr, OP_LEA, operand_reg(REG_RAX), operand_name(value(EIDENT(expr)->val))));
-            } else {
-                if ( assignment ) {
-                    result = operand_rbp(expr->type->size, sym->decl->offset);
-                } else {
-                    vm_emit(vm_instr(expr, OP_LEA, operand_rax(expr->type->size), operand_rbp(expr->type->size, sym->decl->offset)));
-                }
-            }
         } break;
 
         case EXPR_BIN: {
@@ -1011,10 +977,6 @@ vm_expr(Expr *expr, bool assignment = false) {
             }
         } break;
 
-        case EXPR_PAREN: {
-            vm_expr(EPAREN(expr)->expr);
-        } break;
-
         case EXPR_CALL: {
             for ( int i = (int32_t)ECALL(expr)->num_args; i > 0; --i ) {
                 Expr *arg = ECALL(expr)->args[i-1];
@@ -1037,6 +999,50 @@ vm_expr(Expr *expr, bool assignment = false) {
 
             vm_expr(ECALL(expr)->base);
             vm_emit(vm_instr(expr, OP_CALL, operand_reg(REG_RAX)));
+        } break;
+
+        case EXPR_FLOAT: {
+            vm_emit(vm_instr(expr, OP_MOV, operand_reg(REG_RAX), operand_imm(value(EFLOAT(expr)->val))));
+        } break;
+
+        case EXPR_IDENT: {
+            assert(EIDENT(expr)->sym);
+            Sym *sym = EIDENT(expr)->sym;
+
+            if (sym->decl->is_global) {
+                vm_emit(vm_instr(expr, OP_LEA, operand_reg(REG_RAX), operand_name(value(EIDENT(expr)->val))));
+            } else {
+                if ( assignment ) {
+                    result = operand_rbp(expr->type->size, sym->decl->offset);
+                } else {
+                    vm_emit(vm_instr(expr, OP_LEA, operand_rax(expr->type->size), operand_rbp(expr->type->size, sym->decl->offset)));
+                }
+            }
+        } break;
+
+        case EXPR_INT: {
+            vm_emit(vm_instr(expr, OP_MOV, operand_rax(expr->type->size), operand_imm(value(EINT(expr)->val))));
+        } break;
+
+        case EXPR_NOT: {
+            vm_expr(ENOT(expr)->expr);
+            vm_emit(vm_instr(expr, OP_NOT, operand_rax(expr->type->size)));
+        } break;
+
+        case EXPR_PAREN: {
+            vm_expr(EPAREN(expr)->expr, assignment);
+        } break;
+
+        case EXPR_STR: {
+            static uint32_t string_num = 0;
+
+            char *name = NULL;
+            name = buf_printf(name, ".string.%d", string_num);
+
+            vm_emit(vm_instr(expr, OP_DATA, operand_name(value(".string")), operand_imm(value(ESTR(expr)->val)), name));
+            vm_emit(vm_instr(expr, OP_LEA, operand_name(value(name)), operand_rax(expr->type->size)));
+
+            string_num++;
         } break;
 
         default: {
@@ -1446,6 +1452,15 @@ step(Cpu *cpu) {
             //
         } break;
 
+        case OP_NOT: {
+            if ( operand_is_reg(instr->operand1) ) {
+                auto val = reg_read(cpu, instr->operand1);
+                reg_write(cpu, instr->operand1, ~val);
+            } else {
+                assert(0);
+            }
+        } break;
+
         case OP_PUSH: {
             if ( operand_is_reg(instr->operand1) ) {
                 if ( instr->src.kind == OPERAND_REG8L ) {
@@ -1579,7 +1594,7 @@ compile(Parsed_File *file) {
 
 uint64_t
 eval(Instrs instrs) {
-    Cpu *cpu = cpu_new(instrs, 1024*1024, 79);
+    Cpu *cpu = cpu_new(instrs, 1024*1024, 80);
 
     for (;;) {
         if ( !step(cpu) ) {

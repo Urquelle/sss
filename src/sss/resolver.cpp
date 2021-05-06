@@ -849,6 +849,17 @@ resolve_expr(Expr *expr, Type *given_type = NULL) {
             result = operand(type_ptr(op->type));
         } break;
 
+        case EXPR_NOT: {
+            Operand *op = resolve_expr(ENOT(expr)->expr);
+
+            assert(op->type);
+            if ( op->type->kind != TYPE_BOOL ) {
+                report_error(ENOT(expr)->expr, "boolischen ausdruck erwartet");
+            }
+
+            result = operand(type_bool);
+        } break;
+
         case EXPR_CAST: {
             Type *type_to_cast_to = resolve_typespec(ECAST(expr)->typespec);
             Operand *type_to_cast = resolve_expr(ECAST(expr)->expr);

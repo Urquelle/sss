@@ -244,6 +244,10 @@ to_str(Instr *instr) {
             output = buf_printf(output, "nop");
         } break;
 
+        case OP_NOT: {
+            output = buf_printf(output, "not %s", to_str(instr->operand1));
+        } break;
+
         case OP_PUSH: {
             output = buf_printf(output, "push %s", to_str(instr->operand1));
         } break;
