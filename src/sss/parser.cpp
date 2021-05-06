@@ -1956,7 +1956,7 @@ parse_stmt_if(Token_List *tokens) {
 
     curr = token_get(tokens);
     if ( keyword_matches(tokens, keyword_else) ) {
-        if ( keyword_matches(tokens, keyword_if ) ) {
+        if ( !token_is(tokens, T_LBRACE) ) {
             stmt_else = parse_stmt_if(tokens);
         } else {
             stmt_else = stmt_if(curr, expr_bool(curr, true), parse_stmt_block(tokens), NULL);
@@ -2310,7 +2310,7 @@ parse(Token_List *tokens) {
     KEYWORD(const);
     KEYWORD_K(defer, defer);
     KEYWORD(enum);
-    KEYWORD_K(sonst, else);
+    KEYWORD_K(oder, else);
     KEYWORD(export);
     KEYWORD_K(falsch, false);
     KEYWORD_K(iter, for);

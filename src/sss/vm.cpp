@@ -1570,7 +1570,7 @@ compile(Parsed_File *file) {
 
 uint64_t
 eval(Instrs instrs) {
-    Cpu *cpu = cpu_new(instrs, 1024*1024, 38);
+    Cpu *cpu = cpu_new(instrs, 1024*1024, 79);
 
     for (;;) {
         if ( !step(cpu) ) {

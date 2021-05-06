@@ -497,7 +497,7 @@ recurse:
             }
 
             /* @AUFGABE: fließkomma parsen */
-            if ( AT(0) == ',' ) {
+            if ( AT(0) == '.' && AT(1) != '.' ) {
                 NEXT();
 
                 float fracture = 0.0f;
