@@ -962,6 +962,15 @@ vm_expr(Expr *expr, bool assignment = false) {
                 vm_emit(vm_instr(expr, OP_CMP, operand_rax(expr->type->size), operand_imm(value1)));
 
                 vm_instr_patch(jmp1_instr, buf_len(vm_instrs));
+            } else if ( EBIN(expr)->op == BIN_OR ) {
+                vm_expr(EBIN(expr)->left);
+                vm_emit(vm_instr(expr, OP_CMP, operand_rax(expr->type->size), operand_imm(value1)));
+                int32_t jmp1_instr = vm_emit(vm_instr(expr, OP_JE, operand_addr(0)));
+
+                vm_expr(EBIN(expr)->right);
+                vm_emit(vm_instr(expr, OP_CMP, operand_rax(expr->type->size), operand_imm(value1)));
+
+                vm_instr_patch(jmp1_instr, buf_len(vm_instrs));
             } else {
                 vm_expr(EBIN(expr)->right);
                 vm_emit(vm_instr(expr, OP_PUSH, operand_rax(EBIN(expr)->right->type->size)));
