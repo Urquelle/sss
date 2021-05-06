@@ -985,14 +985,11 @@ vm_expr(Expr *expr, bool assignment = false) {
                 vm_emit(vm_instr(expr, OP_PUSH, operand_rax(arg->type->size)));
             }
 
-            for ( int i = 0; i < ECALL(expr)->num_args; ++i ) {
-                /* @INFO: die ersten 4 argumente werden in die register gepackt. die übrigen werden auf
-                 *        dem stack gelassen
-                 */
-                if ( i == 4 ) {
-                    break;
-                }
-
+            /* @INFO: die ersten 4 argumente werden in die register gepackt. die übrigen werden auf
+                *        dem stack gelassen
+                */
+            int32_t num_args = (int32_t)MIN(ECALL(expr)->num_args, 4);
+            for ( int i = 0; i < num_args; ++i ) {
                 Expr *arg = ECALL(expr)->args[i];
                 vm_emit(vm_instr(expr, OP_POP, operand_args(arg->type->size, i)));
             }
@@ -1035,9 +1032,7 @@ vm_expr(Expr *expr, bool assignment = false) {
 
         case EXPR_STR: {
             static uint32_t string_num = 0;
-
-            char *name = NULL;
-            name = buf_printf(name, ".string.%d", string_num);
+            char *name = make_label(".string.%d", string_num);
 
             vm_emit(vm_instr(expr, OP_DATA, operand_name(value(".string")), operand_imm(value(ESTR(expr)->val)), name));
             vm_emit(vm_instr(expr, OP_LEA, operand_name(value(name)), operand_rax(expr->type->size)));

@@ -1577,10 +1577,6 @@ resolve_directive(Directive *dir) {
             curr_scope->num_export_syms = DIREXPORT(dir)->num_syms;
         } break;
 
-        case DIRECTIVE_LOAD: {
-            resolve_file(DIRLOAD(dir)->parsed_file);
-        } break;
-
         default: {
             report_error(dir, "unbekannte direktive");
         } break;

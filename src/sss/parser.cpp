@@ -2355,11 +2355,24 @@ parse(Token_List *tokens) {
         }
 
         if ( dir ) {
-            buf_push(directives, dir);
+            if ( dir->kind == DIRECTIVE_LOAD ) {
+                for ( int i = 0; i < buf_len(DIRLOAD(dir)->parsed_file->stmts); ++i ) {
+                    buf_push(stmts, DIRLOAD(dir)->parsed_file->stmts[i]);
+                }
+            } else {
+                buf_push(directives, dir);
+            }
         }
 
         if ( token_match(tokens, T_HASH) ) {
             dir = parse_directive(tokens);
+
+            if ( dir->kind == DIRECTIVE_LOAD ) {
+                for ( int i = 0; i < buf_len(DIRLOAD(dir)->parsed_file->stmts); ++i ) {
+                    buf_push(stmts, DIRLOAD(dir)->parsed_file->stmts[i]);
+                }
+            }
+
             stmt = NULL;
         } else {
             stmt = parse_stmt(tokens);
