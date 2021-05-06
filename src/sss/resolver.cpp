@@ -912,6 +912,14 @@ resolve_expr(Expr *expr, Type *given_type = NULL) {
                 } else {
                     result = operand(left->type);
                 }
+            } else if ( EBIN(expr)->op >= BIN_LOGIC_START && EBIN(expr)->op <= BIN_LOGIC_END ) {
+                if ( left->is_const && right->is_const ) {
+                    result = operand_const(type_bool);
+                } else {
+                    result = operand(type_bool);
+                }
+            } else {
+                assert(0);
             }
 
             result->is_const = left->is_const && right->is_const;
@@ -1352,8 +1360,8 @@ resolve_stmt(Stmt *stmt, Types rets, uint32_t num_rets) {
         case STMT_FOR: {
             scope_enter("for-loop");
 
-            resolve_stmt(SFOR(stmt)->init);
-            resolve_stmt(SFOR(stmt)->step);
+            resolve_stmt(SFOR(stmt)->init, rets, num_rets);
+            resolve_stmt(SFOR(stmt)->step, rets, num_rets);
 
             Operand *cond = resolve_expr(SFOR(stmt)->cond);
             Type *type = cond->type;
@@ -1362,12 +1370,12 @@ resolve_stmt(Stmt *stmt, Types rets, uint32_t num_rets) {
                 type = TARRAY(type)->base;
             }
 
-            resolve_stmt(SFOR(stmt)->block);
+            resolve_stmt(SFOR(stmt)->block, rets, num_rets);
             scope_leave();
 
             if ( SFOR(stmt)->stmt_else ) {
                 scope_enter("for-else");
-                resolve_stmt(SFOR(stmt)->stmt_else);
+                resolve_stmt(SFOR(stmt)->stmt_else, rets, num_rets);
                 scope_leave();
             }
         } break;
@@ -1380,18 +1388,18 @@ resolve_stmt(Stmt *stmt, Types rets, uint32_t num_rets) {
             }
 
             scope_enter();
-            resolve_stmt(SIF(stmt)->stmt);
+            resolve_stmt(SIF(stmt)->stmt, rets, num_rets);
             scope_leave();
 
             if ( SIF(stmt)->stmt_else ) {
-                resolve_stmt(SIF(stmt)->stmt_else);
+                resolve_stmt(SIF(stmt)->stmt_else, rets, num_rets);
             }
         } break;
 
         case STMT_WHILE: {
             Operand *cond = resolve_expr(SWHILE(stmt)->cond);
             assert(cond->type->kind == TYPE_BOOL);
-            resolve_stmt(SWHILE(stmt)->block);
+            resolve_stmt(SWHILE(stmt)->block, rets, num_rets);
         } break;
 
         case STMT_MATCH: {
@@ -1408,7 +1416,7 @@ resolve_stmt(Stmt *stmt, Types rets, uint32_t num_rets) {
                     report_error(line->resolution, "datentyp erwartet %s, bekommen %s", res_op->type->name, op->type->name);
                 }
 
-                resolve_stmt(line->stmt);
+                resolve_stmt(line->stmt, rets, num_rets);
             }
         } break;
 
@@ -1418,6 +1426,11 @@ resolve_stmt(Stmt *stmt, Types rets, uint32_t num_rets) {
             }
 
             if ( SRET(stmt)->num_exprs < num_rets ) {
+                report_error(stmt, "rückgabewerte erwartet %d, übergeben bekommen %d",
+                        num_rets, SRET(stmt)->num_exprs);
+            }
+
+            if ( SRET(stmt)->num_exprs > num_rets ) {
                 report_error(stmt, "rückgabewerte erwartet %d, übergeben bekommen %d",
                         num_rets, SRET(stmt)->num_exprs);
             }
@@ -1451,7 +1464,7 @@ resolve_stmt(Stmt *stmt, Types rets, uint32_t num_rets) {
                 report_error(stmt, "defer kann nicht im globalen bereich verwendet werden");
             }
 
-            resolve_stmt(SDEFER(stmt)->stmt);
+            resolve_stmt(SDEFER(stmt)->stmt, rets, num_rets);
         } break;
 
         default: {

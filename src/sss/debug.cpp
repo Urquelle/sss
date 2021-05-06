@@ -212,8 +212,16 @@ to_str(Instr *instr) {
             output = buf_printf(output, to_str_binop("imul", instr));
         } break;
 
+        case OP_JE: {
+            output = buf_printf(output, "je %s", to_str(instr->operand1));
+        } break;
+
         case OP_JMP: {
             output = buf_printf(output, "jmp %s", to_str(instr->operand1));
+        } break;
+
+        case OP_JNE: {
+            output = buf_printf(output, "jne %s", to_str(instr->operand1));
         } break;
 
         case OP_JNZ: {

@@ -7,33 +7,35 @@ void vm_stmt(Stmt *stmt, char *proc_name = NULL);
 
 enum Vm_Op {
     OP_HLT,
-    OP_NOP,
     OP_DATA,
 
     OP_ADD,
-    OP_SUB,
-    OP_MUL,
-    OP_DIV,
-    OP_IMUL,
-    OP_IDIV,
+    OP_CALL,
     OP_CMP,
-    OP_MOV,
-    OP_LEA,
-    OP_PUSH,
-    OP_POP,
-    OP_SETE,
-    OP_SETL,
-    OP_SETLE,
-    OP_SETG,
-    OP_SETGE,
-    OP_SETNE,
-
+    OP_DIV,
+    OP_IDIV,
+    OP_IMUL,
+    OP_JE,
     OP_JMP,
+    OP_JNE,
     OP_JNZ,
     OP_JZ,
-
-    OP_CALL,
+    OP_LEA,
+    OP_MOV,
+    OP_MUL,
+    OP_NOP,
+    OP_POP,
+    OP_PUSH,
     OP_RET,
+    OP_SETE,
+    OP_SETG,
+    OP_SETGE,
+    OP_SETL,
+    OP_SETLE,
+    OP_SETNE,
+    OP_SUB,
+
+    OP_COUNT,
 };
 
 enum Vm_Reg64 {
@@ -103,14 +105,14 @@ enum Vm_Reg8l {
 };
 
 enum Vm_Rflag {
-    RFLAG_CF = 0,
-    RFLAG_PF = 2,
-    RFLAG_AF = 4,
-    RFLAG_ZF = 6,
-    RFLAG_SF = 7,
-    RFLAG_OF = 11,
-    RFLAG_DF = 10,
-    RFLAG_ID = 21,
+    RFLAG_CF = 1<<0,
+    RFLAG_PF = 1<<1,
+    RFLAG_AF = 1<<2,
+    RFLAG_ZF = 1<<3,
+    RFLAG_SF = 1<<4,
+    RFLAG_OF = 1<<5,
+    RFLAG_DF = 1<<6,
+    RFLAG_ID = 1<<7,
 };
 
 enum Value_Kind {
@@ -123,7 +125,6 @@ enum Value_Kind {
 };
 struct Value {
     Value_Kind kind;
-    uint32_t   size;
 
     union {
         bool       b;
@@ -163,6 +164,9 @@ struct Operand {
         Value     val;
     };
 };
+
+Value value0 = { VAL_U64, 0 };
+Value value1 = { VAL_U64, 1 };
 
 struct Instr : Loc {
     char    * label;
@@ -208,6 +212,24 @@ Vm_Reg64 regs64[] = { REG_RCX, REG_RDX, REG_R8,  REG_R9  };
 Vm_Reg32 regs32[] = { REG_ECX, REG_EDX, REG_R8D, REG_R9D };
 Vm_Reg16 regs16[] = { REG_CX,  REG_DX,  REG_R8W, REG_R9W };
 Vm_Reg8l  regs8[] = { REG_CL,  REG_DL,  REG_R8B, REG_R9B };
+
+char *
+make_label(char *fmt, uint32_t num) {
+    char *result = NULL;
+
+    result = buf_printf(result, fmt, num);
+
+    return result;
+}
+
+char *
+make_label(char *fmt, char *str) {
+    char *result = NULL;
+
+    result = buf_printf(result, fmt, str);
+
+    return result;
+}
 
 uint32_t
 addr_lookup(Value val) {
@@ -343,6 +365,11 @@ reg_write(Cpu *cpu, Operand op, uint64_t val) {
 void
 flags_set(Cpu *cpu, uint32_t flags) {
     reg_write(cpu, REG_RFLAGS, reg_read(cpu, REG_RFLAGS) | flags);
+}
+
+void
+flags_clear(Cpu *cpu) {
+    reg_write(cpu, REG_RFLAGS, 0);
 }
 
 void
@@ -823,28 +850,28 @@ stack_push(Cpu *cpu, uint8_t val) {
 
 void
 stack_pop(Cpu *cpu, Vm_Reg64 reg) {
-    assert(cpu->mem->size > reg_read(cpu, REG_RSP) + 8);
+    assert(cpu->mem->size >= reg_read(cpu, REG_RSP) + 8);
     reg_write(cpu, reg, mem_read64(cpu->mem, (uint32_t)reg_read(cpu, REG_RSP)));
     rsp_inc(cpu, 8);
 }
 
 void
 stack_pop(Cpu *cpu, Vm_Reg32 reg) {
-    assert(cpu->mem->size > reg_read(cpu, REG_RSP) + 4);
+    assert(cpu->mem->size >= reg_read(cpu, REG_RSP) + 4);
     reg_write(cpu, reg, mem_read32(cpu->mem, (uint32_t)reg_read(cpu, REG_ESP)));
     rsp_inc(cpu, 4);
 }
 
 void
 stack_pop(Cpu *cpu, Vm_Reg16 reg) {
-    assert(cpu->mem->size > reg_read(cpu, REG_RSP) + 2);
+    assert(cpu->mem->size >= reg_read(cpu, REG_RSP) + 2);
     reg_write(cpu, reg, mem_read16(cpu->mem, (uint32_t)reg_read(cpu, REG_SP)));
     rsp_inc(cpu, 2);
 }
 
 void
 stack_pop(Cpu *cpu, Vm_Reg8l reg) {
-    assert(cpu->mem->size > reg_read(cpu, REG_RSP) + 1);
+    assert(cpu->mem->size >= reg_read(cpu, REG_RSP) + 1);
     reg_write(cpu, reg, mem_read8(cpu->mem, (uint32_t)reg_read(cpu, REG_SPL)));
     rsp_inc(cpu, 1);
 }
@@ -926,43 +953,52 @@ vm_expr(Expr *expr, bool assignment = false) {
         } break;
 
         case EXPR_BIN: {
-            vm_expr(EBIN(expr)->right);
-            vm_emit(vm_instr(expr, OP_PUSH, operand_rax(EBIN(expr)->right->type->size)));
+            if ( EBIN(expr)->op == BIN_AND ) {
+                vm_expr(EBIN(expr)->left);
+                vm_emit(vm_instr(expr, OP_CMP, operand_rax(expr->type->size), operand_imm(value1)));
+                int32_t jmp1_instr = vm_emit(vm_instr(expr, OP_JNE, operand_addr(0)));
 
-            vm_expr(EBIN(expr)->left);
-            vm_emit(vm_instr(expr, OP_POP, operand_rdi(EBIN(expr)->left->type->size)));
+                vm_expr(EBIN(expr)->right);
+                vm_emit(vm_instr(expr, OP_CMP, operand_rax(expr->type->size), operand_imm(value1)));
 
-            if ( EBIN(expr)->op == BIN_ADD ) {
-                vm_emit(vm_instr(expr, OP_ADD, operand_rax(expr->type->size), operand_rdi(expr->type->size)));
-            } else if ( EBIN(expr)->op == BIN_SUB ) {
-                vm_emit(vm_instr(expr, OP_SUB, operand_rax(expr->type->size), operand_rdi(expr->type->size)));
-            } else if ( EBIN(expr)->op == BIN_MUL ) {
-                vm_emit(vm_instr(expr, OP_IMUL, operand_rax(expr->type->size), operand_rdi(expr->type->size)));
-            } else if ( EBIN(expr)->op == BIN_DIV ) {
-                if ( EBIN(expr)->right->type->is_signed ) {
-                    vm_emit(vm_instr(expr, OP_DIV, operand_rdi(expr->type->size)));
-                } else {
-                    vm_emit(vm_instr(expr, OP_IDIV, operand_rdi(expr->type->size)));
-                }
-            } else if ( EBIN(expr)->op == BIN_LT ) {
-                vm_emit(vm_instr(expr, OP_CMP, operand_rax(expr->type->size), operand_rdi(expr->type->size)));
-                vm_emit(vm_instr(expr, OP_SETL, operand_rax(expr->type->size)));
-            } else if ( EBIN(expr)->op == BIN_LTE ) {
-                vm_emit(vm_instr(expr, OP_CMP, operand_rax(expr->type->size), operand_rdi(expr->type->size)));
-                vm_emit(vm_instr(expr, OP_SETLE, operand_rax(expr->type->size)));
-            } else if ( EBIN(expr)->op == BIN_EQ ) {
-                vm_emit(vm_instr(expr, OP_CMP, operand_rax(expr->type->size), operand_rdi(expr->type->size)));
-                vm_emit(vm_instr(expr, OP_SETE, operand_rax(expr->type->size)));
-            } else if ( EBIN(expr)->op == BIN_GTE ) {
-                vm_emit(vm_instr(expr, OP_CMP, operand_rax(expr->type->size), operand_rdi(expr->type->size)));
-                vm_emit(vm_instr(expr, OP_SETGE, operand_rax(expr->type->size)));
-            } else if ( EBIN(expr)->op == BIN_GT ) {
-                vm_emit(vm_instr(expr, OP_CMP, operand_rax(expr->type->size), operand_rdi(expr->type->size)));
-                vm_emit(vm_instr(expr, OP_SETG, operand_rax(expr->type->size)));
-            } else if ( EBIN(expr)->op == BIN_AND ) {
-                assert(0);
+                vm_instr_patch(jmp1_instr, buf_len(vm_instrs));
             } else {
-                assert(0);
+                vm_expr(EBIN(expr)->right);
+                vm_emit(vm_instr(expr, OP_PUSH, operand_rax(EBIN(expr)->right->type->size)));
+
+                vm_expr(EBIN(expr)->left);
+                vm_emit(vm_instr(expr, OP_POP, operand_rdi(EBIN(expr)->left->type->size)));
+
+                if ( EBIN(expr)->op == BIN_ADD ) {
+                    vm_emit(vm_instr(expr, OP_ADD, operand_rax(expr->type->size), operand_rdi(expr->type->size)));
+                } else if ( EBIN(expr)->op == BIN_SUB ) {
+                    vm_emit(vm_instr(expr, OP_SUB, operand_rax(expr->type->size), operand_rdi(expr->type->size)));
+                } else if ( EBIN(expr)->op == BIN_MUL ) {
+                    vm_emit(vm_instr(expr, OP_IMUL, operand_rax(expr->type->size), operand_rdi(expr->type->size)));
+                } else if ( EBIN(expr)->op == BIN_DIV ) {
+                    if ( EBIN(expr)->right->type->is_signed ) {
+                        vm_emit(vm_instr(expr, OP_DIV, operand_rdi(expr->type->size)));
+                    } else {
+                        vm_emit(vm_instr(expr, OP_IDIV, operand_rdi(expr->type->size)));
+                    }
+                } else if ( EBIN(expr)->op == BIN_LT ) {
+                    vm_emit(vm_instr(expr, OP_CMP, operand_rax(expr->type->size), operand_rdi(expr->type->size)));
+                    vm_emit(vm_instr(expr, OP_SETL, operand_rax(expr->type->size)));
+                } else if ( EBIN(expr)->op == BIN_LTE ) {
+                    vm_emit(vm_instr(expr, OP_CMP, operand_rax(expr->type->size), operand_rdi(expr->type->size)));
+                    vm_emit(vm_instr(expr, OP_SETLE, operand_rax(expr->type->size)));
+                } else if ( EBIN(expr)->op == BIN_EQ ) {
+                    vm_emit(vm_instr(expr, OP_CMP, operand_rax(expr->type->size), operand_rdi(expr->type->size)));
+                    vm_emit(vm_instr(expr, OP_SETE, operand_rax(expr->type->size)));
+                } else if ( EBIN(expr)->op == BIN_GTE ) {
+                    vm_emit(vm_instr(expr, OP_CMP, operand_rax(expr->type->size), operand_rdi(expr->type->size)));
+                    vm_emit(vm_instr(expr, OP_SETGE, operand_rax(expr->type->size)));
+                } else if ( EBIN(expr)->op == BIN_GT ) {
+                    vm_emit(vm_instr(expr, OP_CMP, operand_rax(expr->type->size), operand_rdi(expr->type->size)));
+                    vm_emit(vm_instr(expr, OP_SETG, operand_rax(expr->type->size)));
+                } else {
+                    assert(0);
+                }
             }
         } break;
 
@@ -1037,12 +1073,9 @@ vm_decl(Decl *decl) {
                 }
             }
 
-            char *label = NULL;
-            label = buf_printf(label, "%s.end", decl->name);
-
             vm_stmt(DPROC(decl)->block, decl->name);
 
-            vm_emit(vm_instr(decl, OP_MOV, operand_reg(REG_RSP), operand_reg(REG_RBP), label));
+            vm_emit(vm_instr(decl, OP_MOV, operand_reg(REG_RSP), operand_reg(REG_RBP), make_label("%s.end", decl->name)));
             vm_emit(vm_instr(decl, OP_POP, operand_reg(REG_RBP)));
             vm_emit(vm_instr(decl, OP_RET));
         } break;
@@ -1079,14 +1112,12 @@ vm_stmt(Stmt *stmt, char *proc_name) {
 
         case STMT_FOR: {
             static int for_count = 0;
-
-            char *label = NULL;
-            label = buf_printf(label, "for.%d.start", for_count++);
+            char *label = make_label("for.%d.start", for_count++);
 
             vm_stmt(SFOR(stmt)->init, proc_name);
             int32_t loop_start = vm_emit(vm_instr(stmt, OP_NOP, label, "wird für die jmp anweisung benötigt"));
             vm_expr(SFOR(stmt)->cond);
-            vm_emit(vm_instr(stmt, OP_CMP, operand_rax(SFOR(stmt)->cond->type->size), operand_imm(value((uint64_t)1))));
+            vm_emit(vm_instr(stmt, OP_CMP, operand_rax(SFOR(stmt)->cond->type->size), operand_imm(value1)));
             int32_t jmpnz_instr = vm_emit(vm_instr(stmt, OP_JNZ, operand_addr(0)));
             vm_stmt(SFOR(stmt)->block, proc_name);
             vm_stmt(SFOR(stmt)->step, proc_name);
@@ -1103,22 +1134,21 @@ vm_stmt(Stmt *stmt, char *proc_name) {
 
         case STMT_IF: {
             static uint32_t loop_count = 0;
-            char *label = NULL;
-            label = buf_printf(label, "if.%d", loop_count++);
+            char *label = make_label("if.%d", loop_count++);
 
             vm_expr(SIF(stmt)->cond);
-            vm_emit(vm_instr(stmt, OP_CMP, operand_rax(SIF(stmt)->cond->type->size), operand_imm(value((uint64_t)1))));
-            int32_t jmpz_instr = vm_emit(vm_instr(stmt, OP_JZ, operand_addr(0), label));
+            vm_emit(vm_instr(stmt, OP_CMP, operand_rax(SIF(stmt)->cond->type->size), operand_imm(value1)));
+            int32_t jmp1_instr = vm_emit(vm_instr(stmt, OP_JNE, operand_addr(0), label));
             vm_stmt(SIF(stmt)->stmt, proc_name);
-            int32_t jmp_instr = vm_emit(vm_instr(stmt, OP_JMP, operand_addr(0)));
+            int32_t jmp2_instr = vm_emit(vm_instr(stmt, OP_JMP, operand_addr(0)));
 
-            vm_instr_patch(jmpz_instr, buf_len(vm_instrs));
+            vm_instr_patch(jmp1_instr, buf_len(vm_instrs));
 
             if ( SIF(stmt)->stmt_else ) {
                 vm_stmt(SIF(stmt)->stmt_else, proc_name);
             }
 
-            vm_instr_patch(jmp_instr, buf_len(vm_instrs));
+            vm_instr_patch(jmp2_instr, buf_len(vm_instrs));
         } break;
 
         case STMT_RET: {
@@ -1127,16 +1157,13 @@ vm_stmt(Stmt *stmt, char *proc_name) {
             }
 
             assert(proc_name);
-            char *label = NULL;
-            label = buf_printf(label, "%s.end", proc_name);
+            char *label = make_label("%s.end", proc_name);
             vm_emit(vm_instr(stmt, OP_JMP, operand_name(value(label)), NULL, "res"));
         } break;
 
         case STMT_WHILE: {
             static int while_count = 0;
-
-            char *label = NULL;
-            label = buf_printf(label, "while.%d.start", while_count++);
+            char *label = make_label("while.%d.start", while_count++);
 
             int32_t loop_start = vm_emit(vm_instr(stmt, OP_NOP, label, "wird für die jmp anweisung benötigt"));
             vm_expr(SWHILE(stmt)->cond);
@@ -1243,12 +1270,11 @@ step(Cpu *cpu) {
                 assert(0);
             }
 
-            if ( operand2 > operand1 ) {
-                flags_set(cpu, RFLAG_OF);
+            flags_clear(cpu);
+            if ( operand1 < operand2 ) {
+                flags_set(cpu, RFLAG_CF);
             } else if ( operand1 == operand2 ) {
                 flags_set(cpu, RFLAG_ZF);
-            } else {
-                flags_clear(cpu, RFLAG_OF | RFLAG_ZF);
             }
         } break;
 
@@ -1297,10 +1323,21 @@ step(Cpu *cpu) {
 
             reg_write(cpu, REG_RAX, operand1 * operand2);
 
+            flags_clear(cpu);
             if ( reg_read(cpu, REG_RAX) == 0 ) {
                 flags_set(cpu, RFLAG_ZF);
-            } else {
-                flags_clear(cpu, RFLAG_ZF);
+            }
+        } break;
+
+        case OP_JE: {
+            if ( flag_state(cpu, RFLAG_ZF) ) {
+                if ( instr->operand1.kind == OPERAND_ADDR ) {
+                    reg_write(cpu, REG_RIP, instr->operand1.addr);
+                } else if ( instr->operand1.kind == OPERAND_NAME ) {
+                    reg_write(cpu, REG_RIP, addr_lookup(instr->operand1.val));
+                } else {
+                    assert(0);
+                }
             }
         } break;
 
@@ -1311,6 +1348,16 @@ step(Cpu *cpu) {
                 reg_write(cpu, REG_RIP, addr_lookup(instr->operand1.val));
             } else {
                 assert(0);
+            }
+        } break;
+
+        case OP_JNE: {
+            if ( !flag_state(cpu, RFLAG_ZF) ) {
+                if ( instr->operand1.kind == OPERAND_ADDR ) {
+                    reg_write(cpu, REG_RIP, instr->operand1.addr);
+                } else {
+                    assert(0);
+                }
             }
         } break;
 
@@ -1431,42 +1478,36 @@ step(Cpu *cpu) {
         case OP_SETL: {
             assert(operand_is_reg(instr->dst));
 
-            // SF≠OF
-            reg_write(cpu, instr->dst, flag_state(cpu, RFLAG_SF) != flag_state(cpu, RFLAG_OF));
+            reg_write(cpu, instr->dst, flag_state(cpu, RFLAG_CF));
         } break;
 
         case OP_SETLE: {
             assert(operand_is_reg(instr->dst));
 
-            // ZF=1 or SF≠OF
-            reg_write(cpu, instr->dst, flag_state(cpu, RFLAG_ZF) || (flag_state(cpu, RFLAG_SF) != flag_state(cpu, RFLAG_OF)));
+            reg_write(cpu, instr->dst, flag_state(cpu, RFLAG_ZF) || (flag_state(cpu, RFLAG_CF)));
         } break;
 
         case OP_SETE: {
             assert(operand_is_reg(instr->dst));
 
-            // ZF=1
             reg_write(cpu, instr->dst, flag_state(cpu, RFLAG_ZF));
         } break;
 
         case OP_SETGE: {
             assert(operand_is_reg(instr->dst));
 
-            // SF=OF
-            reg_write(cpu, instr->dst, flag_state(cpu, RFLAG_SF) == flag_state(cpu, RFLAG_OF));
+            reg_write(cpu, instr->dst, flag_state(cpu, RFLAG_ZF) || !flag_state(cpu, RFLAG_CF));
         } break;
 
         case OP_SETG: {
             assert(operand_is_reg(instr->dst));
 
-            // ZF=0 and SF≠OF
-            reg_write(cpu, instr->dst, !flag_state(cpu, RFLAG_ZF) && flag_state(cpu, RFLAG_SF) != flag_state(cpu, RFLAG_OF));
+            reg_write(cpu, instr->dst, !flag_state(cpu, RFLAG_ZF) && !flag_state(cpu, RFLAG_CF));
         } break;
 
         case OP_SETNE: {
             assert(operand_is_reg(instr->dst));
 
-            // ZF=0
             reg_write(cpu, instr->dst, !flag_state(cpu, RFLAG_ZF));
         } break;
 
@@ -1496,14 +1537,11 @@ step(Cpu *cpu) {
                 assert(0);
             }
 
+            flags_clear(cpu);
             if ( operand2 > operand1 ) {
                 flags_set(cpu, RFLAG_CF);
-                flags_clear(cpu, RFLAG_ZF);
             } else if ( operand1 == operand2 ) {
                 flags_set(cpu, RFLAG_ZF);
-                flags_clear(cpu, RFLAG_CF);
-            } else {
-                flags_clear(cpu, RFLAG_CF | RFLAG_ZF);
             }
         } break;
 
@@ -1532,7 +1570,7 @@ compile(Parsed_File *file) {
 
 uint64_t
 eval(Instrs instrs) {
-    Cpu *cpu = cpu_new(instrs, 1024*1024, 94);
+    Cpu *cpu = cpu_new(instrs, 1024*1024, 38);
 
     for (;;) {
         if ( !step(cpu) ) {
