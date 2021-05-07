@@ -1,5 +1,7 @@
 namespace Vm {
 
+enum { STACK_SIZE = 1024 };
+
 struct Cpu;
 
 void rip_inc(Cpu *cpu);
@@ -119,8 +121,17 @@ enum Vm_Rflag {
 enum Value_Kind {
     VAL_BOOL,
     VAL_CHAR,
+
+    VAL_U8,
+    VAL_U16,
+    VAL_U32,
     VAL_U64,
+
+    VAL_S8,
+    VAL_S16,
+    VAL_S32,
     VAL_S64,
+
     VAL_F32,
     VAL_STR,
 };
@@ -130,8 +141,17 @@ struct Value {
     union {
         bool       b;
         char       c;
+
+        uint8_t    u8;
+        uint16_t   u16;
+        uint32_t   u32;
         uint64_t   u64;
+
+        int8_t     s8;
+        int16_t    s16;
+        int32_t    s32;
         int64_t    s64;
+
         float      f32;
         char     * str;
     };
@@ -165,9 +185,6 @@ struct Operand {
         Value     val;
     };
 };
-
-Value value0 = { VAL_U64, 0 };
-Value value1 = { VAL_U64, 1 };
 
 struct Instr : Loc {
     char    * label;
@@ -206,13 +223,23 @@ struct Cpu {
     uint32_t   stack_size;
 };
 
-Instrs   vm_instrs;
-Instrs   vm_instrs_labeled;
+struct Data {
+    char    * name;
+    int32_t   size;
+    int32_t   addr;
+};
+
+Instrs    vm_instrs;
+Instrs    vm_instrs_labeled;
+Data   ** vm_data;
 
 Vm_Reg64 regs64[] = { REG_RCX, REG_RDX, REG_R8,  REG_R9  };
 Vm_Reg32 regs32[] = { REG_ECX, REG_EDX, REG_R8D, REG_R9D };
 Vm_Reg16 regs16[] = { REG_CX,  REG_DX,  REG_R8W, REG_R9W };
 Vm_Reg8l  regs8[] = { REG_CL,  REG_DL,  REG_R8B, REG_R9B };
+
+Value value0 = { VAL_U64, 0 };
+Value value1 = { VAL_U64, 1 };
 
 char *
 make_label(char *fmt, uint32_t num) {
@@ -228,6 +255,17 @@ make_label(char *fmt, char *str) {
     char *result = NULL;
 
     result = buf_printf(result, fmt, str);
+
+    return result;
+}
+
+Data *
+data(char *name, int32_t size, int32_t addr) {
+    Data *result = urq_allocs(Data);
+
+    result->name = name;
+    result->size = size;
+    result->addr = addr;
 
     return result;
 }
@@ -396,10 +434,12 @@ mem_new(uint32_t size) {
     return result;
 }
 
-uint32_t
+int32_t
 mem_alloc(Mem *mem, uint32_t size) {
     assert(mem->size > (mem->used + size));
-    uint32_t result = mem->used;
+    assert((mem->used + size) < (mem->size - STACK_SIZE));
+
+    int32_t result = mem->used;
 
     mem->used += size;
 
@@ -473,7 +513,7 @@ cpu_new(Instrs instrs, uint32_t mem_size, uint32_t start = 0) {
     result->instrs     = instrs;
     result->num_instrs = buf_len(instrs);
 
-    result->stack_size = 1024;
+    result->stack_size = STACK_SIZE;
     result->mem        = mem_new(mem_size);
 
     reg_write(result, REG_RIP, start);
@@ -503,11 +543,31 @@ value(char val) {
 }
 
 Value
-value(uint64_t val) {
+value(int8_t val) {
     Value result = {};
 
-    result.kind = VAL_U64;
-    result.u64  = val;
+    result.kind = VAL_S8;
+    result.s8   = val;
+
+    return result;
+}
+
+Value
+value(int16_t val) {
+    Value result = {};
+
+    result.kind = VAL_S16;
+    result.s16  = val;
+
+    return result;
+}
+
+Value
+value(int32_t val) {
+    Value result = {};
+
+    result.kind = VAL_S32;
+    result.s32  = val;
 
     return result;
 }
@@ -516,8 +576,48 @@ Value
 value(int64_t val) {
     Value result = {};
 
-    result.kind = VAL_U64;
+    result.kind = VAL_S64;
     result.s64  = val;
+
+    return result;
+}
+
+Value
+value(uint8_t val) {
+    Value result = {};
+
+    result.kind = VAL_U8;
+    result.u8   = val;
+
+    return result;
+}
+
+Value
+value(uint16_t val) {
+    Value result = {};
+
+    result.kind = VAL_U16;
+    result.u16  = val;
+
+    return result;
+}
+
+Value
+value(uint32_t val) {
+    Value result = {};
+
+    result.kind = VAL_U32;
+    result.u32  = val;
+
+    return result;
+}
+
+Value
+value(uint64_t val) {
+    Value result = {};
+
+    result.kind = VAL_U64;
+    result.u64  = val;
 
     return result;
 }
@@ -553,11 +653,12 @@ operand_imm(Value val) {
 }
 
 Operand
-operand_addr(uint32_t addr) {
+operand_addr(uint32_t addr, int32_t size = 0) {
     Operand result = {};
 
     result.kind = OPERAND_ADDR;
     result.addr = addr;
+    result.size = size;
 
     return result;
 }
@@ -1018,7 +1119,31 @@ vm_expr(Expr *expr, bool assignment = false) {
         } break;
 
         case EXPR_INT: {
-            vm_emit(vm_instr(expr, OP_MOV, operand_rax(expr->type->size), operand_imm(value(EINT(expr)->val))));
+            if ( expr->type->is_signed ) {
+                if ( expr->type->size == 1 ) {
+                    vm_emit(vm_instr(expr, OP_MOV, operand_rax(expr->type->size), operand_imm(value((int8_t)EINT(expr)->val))));
+                } else if ( expr->type->size == 2 ) {
+                    vm_emit(vm_instr(expr, OP_MOV, operand_rax(expr->type->size), operand_imm(value((int16_t)EINT(expr)->val))));
+                } else if ( expr->type->size == 4 ) {
+                    vm_emit(vm_instr(expr, OP_MOV, operand_rax(expr->type->size), operand_imm(value((int32_t)EINT(expr)->val))));
+                } else if ( expr->type->size == 8 ) {
+                    vm_emit(vm_instr(expr, OP_MOV, operand_rax(expr->type->size), operand_imm(value((int64_t)EINT(expr)->val))));
+                } else {
+                    assert(0);
+                }
+            } else {
+                if ( expr->type->size == 1 ) {
+                    vm_emit(vm_instr(expr, OP_MOV, operand_rax(expr->type->size), operand_imm(value((uint8_t)EINT(expr)->val))));
+                } else if ( expr->type->size == 2 ) {
+                    vm_emit(vm_instr(expr, OP_MOV, operand_rax(expr->type->size), operand_imm(value((uint16_t)EINT(expr)->val))));
+                } else if ( expr->type->size == 4 ) {
+                    vm_emit(vm_instr(expr, OP_MOV, operand_rax(expr->type->size), operand_imm(value((uint32_t)EINT(expr)->val))));
+                } else if ( expr->type->size == 8 ) {
+                    vm_emit(vm_instr(expr, OP_MOV, operand_rax(expr->type->size), operand_imm(value((uint64_t)EINT(expr)->val))));
+                } else {
+                    assert(0);
+                }
+            }
         } break;
 
         case EXPR_NOT: {
@@ -1187,17 +1312,6 @@ vm_stmt(Stmt *stmt, char *proc_name) {
         default: {
             assert(0);
         } break;
-    }
-}
-
-void
-compile_procs(Stmts stmts) {
-    for ( int i = 0; i < buf_len(stmts); ++i ) {
-        Stmt *stmt = stmts[i];
-
-        if ( stmt->kind == STMT_DECL && SDECL(stmt)->decl->kind == DECL_PROC ) {
-            vm_stmt(stmt);
-        }
     }
 }
 
@@ -1402,7 +1516,15 @@ step(Cpu *cpu) {
                 } else if ( instr->src.kind == OPERAND_NAME ) {
                     reg_write(cpu, instr->dst, addr_lookup(instr->src.val));
                 } else {
-                    assert(0);
+                    if ( instr->src.size == 1 ) {
+                        reg_write(cpu, instr->dst, mem_read8(cpu->mem, (uint32_t)instr->src.addr));
+                    } else if ( instr->src.size == 2 ) {
+                        reg_write(cpu, instr->dst, mem_read16(cpu->mem, (uint32_t)instr->src.addr));
+                    } else if ( instr->src.size == 4 ) {
+                        reg_write(cpu, instr->dst, mem_read32(cpu->mem, (uint32_t)instr->src.addr));
+                    } else if ( instr->src.size == 8 ) {
+                        reg_write(cpu, instr->dst, mem_read64(cpu->mem, (uint32_t)instr->src.addr));
+                    }
                 }
             } else {
                 assert(0);
@@ -1572,6 +1694,17 @@ step(Cpu *cpu) {
     return true;
 }
 
+void
+compile_procs(Stmts stmts) {
+    for ( int i = 0; i < buf_len(stmts); ++i ) {
+        Stmt *stmt = stmts[i];
+
+        if ( stmt->kind == STMT_DECL && SDECL(stmt)->decl->kind == DECL_PROC ) {
+            vm_stmt(stmt);
+        }
+    }
+}
+
 Instrs
 compile(Parsed_File *file) {
     compile_procs(file->stmts);
@@ -1579,7 +1712,7 @@ compile(Parsed_File *file) {
     for ( int i = 0; i < buf_len(file->stmts); ++i ) {
         Stmt *stmt = file->stmts[i];
 
-        if ( stmt->kind != STMT_DECL || SDECL(stmt)->decl->kind != DECL_PROC ) {
+        if ( stmt->kind != STMT_DECL && SDECL(stmt)->decl->kind != DECL_PROC ) {
             vm_stmt(stmt);
         }
     }
@@ -1589,7 +1722,7 @@ compile(Parsed_File *file) {
 
 uint64_t
 eval(Instrs instrs) {
-    Cpu *cpu = cpu_new(instrs, 1024*1024, 80);
+    Cpu *cpu = cpu_new(instrs, 1024*1024, 85);
 
     for (;;) {
         if ( !step(cpu) ) {

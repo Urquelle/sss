@@ -51,6 +51,7 @@ enum Bin_Kind {
     BIN_SUB,
     BIN_MUL,
     BIN_DIV,
+    BIN_MOD,
     BIN_MATH_END = BIN_DIV,
 
     BIN_LT,
@@ -1959,7 +1960,24 @@ parse_stmt_decl(Token_List *tokens, char *name) {
 Stmt_Assign *
 parse_stmt_assign(Token_List *tokens, Token *op, Expr *expr) {
     Token *curr = token_get(tokens);
-    Stmt_Assign *result = stmt_assign(curr, expr, op, parse_expr(tokens, true));
+
+    Stmt_Assign *result = NULL;
+    Token *assign = token_str(T_EQL_ASSIGN, "=", 1, curr->file, curr->line, curr->col);
+
+    if ( op->kind == T_EQL_ASSIGN ) {
+        result = stmt_assign(curr, expr, op, parse_expr(tokens, true));
+    } else if ( op->kind == T_PLUS_ASSIGN ) {
+        result = stmt_assign(curr, expr, assign, expr_bin(curr, BIN_ADD, expr, parse_expr(tokens, true)));
+    } else if ( op->kind == T_MINUS_ASSIGN ) {
+        result = stmt_assign(curr, expr, assign, expr_bin(curr, BIN_SUB, expr, parse_expr(tokens, true)));
+    } else if ( op->kind == T_ASTERISK_ASSIGN ) {
+        result = stmt_assign(curr, expr, assign, expr_bin(curr, BIN_MUL, expr, parse_expr(tokens, true)));
+    } else if ( op->kind == T_SLASH_ASSIGN ) {
+        result = stmt_assign(curr, expr, assign, expr_bin(curr, BIN_DIV, expr, parse_expr(tokens, true)));
+    } else if ( op->kind == T_MODULO_ASSIGN ) {
+        result = stmt_assign(curr, expr, assign, expr_bin(curr, BIN_MOD, expr, parse_expr(tokens, true)));
+    }
+
     token_expect(tokens, T_SEMICOLON);
 
     return result;

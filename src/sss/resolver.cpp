@@ -158,6 +158,7 @@ struct Type_Variadic : Type {
 
 enum { PTR_SIZE = 8 };
 uint16_t global_type_id = 1;
+int32_t  mem_offset = 0;
 
 Type *type_void;
 Type *type_char;
@@ -809,7 +810,7 @@ resolve_expr(Expr *expr, Type *given_type = NULL) {
         } break;
 
         case EXPR_INT: {
-            result = operand_const(type_u32, val_int((int32_t)EINT(expr)->val));
+            result = operand_const(type_s32, val_int((int32_t)EINT(expr)->val));
         } break;
 
         case EXPR_FLOAT: {
@@ -1271,6 +1272,8 @@ resolve_decl_var(Decl *decl) {
         }
     }
 
+    type_complete(type);
+
     if ( curr_scope != global_scope ) {
         Scope *scope = curr_scope;
 
@@ -1284,9 +1287,9 @@ resolve_decl_var(Decl *decl) {
         }
     } else {
         decl->is_global = true;
+        decl->offset = mem_offset;
+        mem_offset = type->size;
     }
-
-    type_complete(type);
 
     return type;
 }
@@ -1344,7 +1347,7 @@ resolve_stmt(Stmt *stmt, Types rets, uint32_t num_rets) {
 
         case STMT_BLOCK: {
             for ( int i = 0; i < SBLOCK(stmt)->num_stmts; ++i ) {
-                result = result || resolve_stmt(SBLOCK(stmt)->stmts[i], rets, num_rets);
+                result = resolve_stmt(SBLOCK(stmt)->stmts[i], rets, num_rets) || result;
             }
         } break;
 
@@ -1410,7 +1413,10 @@ resolve_stmt(Stmt *stmt, Types rets, uint32_t num_rets) {
         case STMT_WHILE: {
             Operand *cond = resolve_expr(SWHILE(stmt)->cond);
             assert(cond->type->kind == TYPE_BOOL);
+
+            scope_enter();
             resolve_stmt(SWHILE(stmt)->block, rets, num_rets);
+            scope_leave();
         } break;
 
         case STMT_MATCH: {
