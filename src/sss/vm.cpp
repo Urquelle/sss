@@ -1385,11 +1385,12 @@ vm_stmt(Stmt *stmt, char *proc_name) {
 
             int32_t loop_start = vm_emit(vm_instr(stmt, OP_NOP, label, "wird für die jmp anweisung benötigt"));
             vm_expr(SWHILE(stmt)->cond);
-            int32_t jmpz_instr = vm_emit(vm_instr(stmt, OP_JZ, operand_addr(0, SWHILE(stmt)->cond->type->size), operand_imm(value1, SWHILE(stmt)->cond->type->size)));
+            vm_emit(vm_instr(stmt, OP_CMP, operand_rax(SWHILE(stmt)->cond->type->size), operand_imm(value0, SWHILE(stmt)->cond->type->size)));
+            int32_t jmp_instr = vm_emit(vm_instr(stmt, OP_JZ, operand_addr(0, SWHILE(stmt)->cond->type->size), operand_imm(value1, SWHILE(stmt)->cond->type->size)));
             vm_stmt(SWHILE(stmt)->block, proc_name);
             vm_emit(vm_instr(stmt, OP_JMP, operand_addr(loop_start, SWHILE(stmt)->cond->type->size)));
 
-            vm_instr_patch(jmpz_instr, buf_len(vm_instrs));
+            vm_instr_patch(jmp_instr, buf_len(vm_instrs));
         } break;
 
         default: {
@@ -1806,7 +1807,7 @@ compile(Parsed_File *file) {
 
 uint64_t
 eval(Instrs instrs) {
-    Cpu *cpu = cpu_new(instrs, 1024*1024, 102);
+    Cpu *cpu = cpu_new(instrs, 1024*1024, 103);
 
     for (;;) {
         if ( !step(cpu) ) {
