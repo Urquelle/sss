@@ -645,7 +645,7 @@ value(char *val) {
 }
 
 Operand *
-operand_addr(uint32_t addr, int32_t size = 0) {
+operand_addr(uint32_t addr, int32_t size) {
     Operand *result = urq_allocs(Operand);
 
     result->kind = OPERAND_ADDR;
@@ -656,10 +656,11 @@ operand_addr(uint32_t addr, int32_t size = 0) {
 }
 
 Operand *
-operand_imm(Value val) {
+operand_imm(Value val, uint32_t size) {
     Operand *result = urq_allocs(Operand);
 
     result->kind = OPERAND_IMM;
+    result->size = size;
     result->val  = val;
 
     return result;
@@ -670,6 +671,7 @@ operand_ptr(Operand *op) {
     Operand *result = urq_allocs(Operand);
 
     result->kind = OPERAND_PTR;
+    result->size = 8;
     result->op   = op;
 
     return result;
@@ -680,6 +682,7 @@ operand_reg(Vm_Reg64 reg, int32_t displacement) {
     Operand *result = urq_allocs(Operand);
 
     result->kind              = OPERAND_REG64;
+    result->size              = 8;
     result->displacement      = displacement;
     result->with_displacement = true;
     result->reg64             = reg;
@@ -692,6 +695,7 @@ operand_reg(Vm_Reg64 reg) {
     Operand *result = urq_allocs(Operand);
 
     result->kind  = OPERAND_REG64;
+    result->size  = 8;
     result->reg64 = reg;
 
     return result;
@@ -702,6 +706,7 @@ operand_reg(Vm_Reg32 reg, int32_t displacement) {
     Operand *result = urq_allocs(Operand);
 
     result->kind              = OPERAND_REG32;
+    result->size              = 4;
     result->displacement      = displacement;
     result->with_displacement = true;
     result->reg32             = reg;
@@ -714,6 +719,7 @@ operand_reg(Vm_Reg32 reg) {
     Operand *result = urq_allocs(Operand);
 
     result->kind  = OPERAND_REG32;
+    result->size  = 4;
     result->reg32 = reg;
 
     return result;
@@ -724,6 +730,7 @@ operand_reg(Vm_Reg16 reg, int32_t displacement) {
     Operand *result = urq_allocs(Operand);
 
     result->kind              = OPERAND_REG16;
+    result->size              = 2;
     result->displacement      = displacement;
     result->with_displacement = true;
     result->reg16             = reg;
@@ -736,6 +743,7 @@ operand_reg(Vm_Reg16 reg) {
     Operand *result = urq_allocs(Operand);
 
     result->kind  = OPERAND_REG16;
+    result->size  = 2;
     result->reg16 = reg;
 
     return result;
@@ -746,6 +754,7 @@ operand_reg(Vm_Reg8l reg, int32_t displacement) {
     Operand *result = urq_allocs(Operand);
 
     result->kind              = OPERAND_REG8L;
+    result->size              = 1;
     result->displacement      = displacement;
     result->with_displacement = true;
     result->reg8l             = reg;
@@ -758,6 +767,7 @@ operand_reg(Vm_Reg8l reg) {
     Operand *result = urq_allocs(Operand);
 
     result->kind  = OPERAND_REG8L;
+    result->size  = 1;
     result->reg8l = reg;
 
     return result;
@@ -768,6 +778,7 @@ operand_reg(Vm_Reg8h reg, int32_t displacement) {
     Operand *result = urq_allocs(Operand);
 
     result->kind              = OPERAND_REG8H;
+    result->size              = 1;
     result->displacement      = displacement;
     result->with_displacement = true;
     result->reg8h             = reg;
@@ -780,6 +791,7 @@ operand_reg(Vm_Reg8h reg) {
     Operand *result = urq_allocs(Operand);
 
     result->kind  = OPERAND_REG8H;
+    result->size  = 1;
     result->reg8h = reg;
 
     return result;
@@ -947,6 +959,44 @@ rip_inc(Cpu *cpu) {
 }
 
 void
+stack_push(Cpu *cpu, uint64_t val, uint32_t size) {
+    switch ( size ) {
+        case 1: {
+            rsp_dec(cpu, size);
+            uint64_t addr = reg_read(cpu, REG_SPL);
+            assert(addr > cpu->stack_size);
+            mem_write(cpu->mem, addr, (uint8_t)val);
+        } break;
+
+        case 2: {
+            rsp_dec(cpu, size);
+            uint64_t addr = reg_read(cpu, REG_SP);
+            assert(addr > cpu->stack_size);
+            mem_write(cpu->mem, addr, (uint16_t)val);
+        } break;
+
+        case 4: {
+            rsp_dec(cpu, size);
+            uint64_t addr = reg_read(cpu, REG_ESP);
+            assert(addr > cpu->stack_size);
+            mem_write(cpu->mem, addr, (uint32_t)val);
+        } break;
+
+        case 8: {
+            rsp_dec(cpu, size);
+            uint64_t addr = reg_read(cpu, REG_RSP);
+            assert(addr > cpu->stack_size);
+            mem_write(cpu->mem, addr, val);
+        } break;
+
+        default: {
+            assert(0);
+        } break;
+    }
+}
+
+#if 0
+void
 stack_push(Cpu *cpu, uint64_t val) {
     rsp_dec(cpu, 8);
     uint64_t addr = reg_read(cpu, REG_RSP);
@@ -977,6 +1027,7 @@ stack_push(Cpu *cpu, uint8_t val) {
     assert(addr > cpu->stack_size);
     mem_write(cpu->mem, addr, val);
 }
+#endif
 
 void
 stack_pop(Cpu *cpu, Vm_Reg64 reg) {
@@ -1067,26 +1118,26 @@ vm_expr(Expr *expr, bool assignment = false) {
         } break;
 
         case EXPR_BOOL: {
-            vm_emit(vm_instr(expr, OP_MOV, operand_rax(expr->type->size), operand_imm(value(EBOOL(expr)->val))));
+            vm_emit(vm_instr(expr, OP_MOV, operand_rax(expr->type->size), operand_imm(value(EBOOL(expr)->val), expr->type->size)));
         } break;
 
         case EXPR_BIN: {
             if ( EBIN(expr)->op == BIN_AND ) {
                 vm_expr(EBIN(expr)->left);
-                vm_emit(vm_instr(expr, OP_CMP, operand_rax(expr->type->size), operand_imm(value1)));
-                int32_t jmp1_instr = vm_emit(vm_instr(expr, OP_JNE, operand_addr(0)));
+                vm_emit(vm_instr(expr, OP_CMP, operand_rax(expr->type->size), operand_imm(value1, expr->type->size)));
+                int32_t jmp1_instr = vm_emit(vm_instr(expr, OP_JNE, operand_addr(0, expr->type->size)));
 
                 vm_expr(EBIN(expr)->right);
-                vm_emit(vm_instr(expr, OP_CMP, operand_rax(expr->type->size), operand_imm(value1)));
+                vm_emit(vm_instr(expr, OP_CMP, operand_rax(expr->type->size), operand_imm(value1, expr->type->size)));
 
                 vm_instr_patch(jmp1_instr, buf_len(vm_instrs));
             } else if ( EBIN(expr)->op == BIN_OR ) {
                 vm_expr(EBIN(expr)->left);
-                vm_emit(vm_instr(expr, OP_CMP, operand_rax(expr->type->size), operand_imm(value1)));
-                int32_t jmp1_instr = vm_emit(vm_instr(expr, OP_JE, operand_addr(0)));
+                vm_emit(vm_instr(expr, OP_CMP, operand_rax(expr->type->size), operand_imm(value1, expr->type->size)));
+                int32_t jmp1_instr = vm_emit(vm_instr(expr, OP_JE, operand_addr(0, expr->type->size)));
 
                 vm_expr(EBIN(expr)->right);
-                vm_emit(vm_instr(expr, OP_CMP, operand_rax(expr->type->size), operand_imm(value1)));
+                vm_emit(vm_instr(expr, OP_CMP, operand_rax(expr->type->size), operand_imm(value1, expr->type->size)));
 
                 vm_instr_patch(jmp1_instr, buf_len(vm_instrs));
             } else {
@@ -1151,7 +1202,7 @@ vm_expr(Expr *expr, bool assignment = false) {
         } break;
 
         case EXPR_FLOAT: {
-            vm_emit(vm_instr(expr, OP_MOV, operand_reg(REG_RAX), operand_imm(value(EFLOAT(expr)->val))));
+            vm_emit(vm_instr(expr, OP_MOV, operand_reg(REG_RAX), operand_imm(value(EFLOAT(expr)->val), expr->type->size)));
         } break;
 
         case EXPR_IDENT: {
@@ -1172,25 +1223,25 @@ vm_expr(Expr *expr, bool assignment = false) {
         case EXPR_INT: {
             if ( expr->type->is_signed ) {
                 if ( expr->type->size == 1 ) {
-                    vm_emit(vm_instr(expr, OP_MOV, operand_rax(expr->type->size), operand_imm(value((int8_t)EINT(expr)->val))));
+                    vm_emit(vm_instr(expr, OP_MOV, operand_rax(expr->type->size), operand_imm(value((int8_t)EINT(expr)->val), expr->type->size)));
                 } else if ( expr->type->size == 2 ) {
-                    vm_emit(vm_instr(expr, OP_MOV, operand_rax(expr->type->size), operand_imm(value((int16_t)EINT(expr)->val))));
+                    vm_emit(vm_instr(expr, OP_MOV, operand_rax(expr->type->size), operand_imm(value((int16_t)EINT(expr)->val), expr->type->size)));
                 } else if ( expr->type->size == 4 ) {
-                    vm_emit(vm_instr(expr, OP_MOV, operand_rax(expr->type->size), operand_imm(value((int32_t)EINT(expr)->val))));
+                    vm_emit(vm_instr(expr, OP_MOV, operand_rax(expr->type->size), operand_imm(value((int32_t)EINT(expr)->val), expr->type->size)));
                 } else if ( expr->type->size == 8 ) {
-                    vm_emit(vm_instr(expr, OP_MOV, operand_rax(expr->type->size), operand_imm(value((int64_t)EINT(expr)->val))));
+                    vm_emit(vm_instr(expr, OP_MOV, operand_rax(expr->type->size), operand_imm(value((int64_t)EINT(expr)->val), expr->type->size)));
                 } else {
                     assert(0);
                 }
             } else {
                 if ( expr->type->size == 1 ) {
-                    vm_emit(vm_instr(expr, OP_MOV, operand_rax(expr->type->size), operand_imm(value((uint8_t)EINT(expr)->val))));
+                    vm_emit(vm_instr(expr, OP_MOV, operand_rax(expr->type->size), operand_imm(value((uint8_t)EINT(expr)->val), expr->type->size)));
                 } else if ( expr->type->size == 2 ) {
-                    vm_emit(vm_instr(expr, OP_MOV, operand_rax(expr->type->size), operand_imm(value((uint16_t)EINT(expr)->val))));
+                    vm_emit(vm_instr(expr, OP_MOV, operand_rax(expr->type->size), operand_imm(value((uint16_t)EINT(expr)->val), expr->type->size)));
                 } else if ( expr->type->size == 4 ) {
-                    vm_emit(vm_instr(expr, OP_MOV, operand_rax(expr->type->size), operand_imm(value((uint32_t)EINT(expr)->val))));
+                    vm_emit(vm_instr(expr, OP_MOV, operand_rax(expr->type->size), operand_imm(value((uint32_t)EINT(expr)->val), expr->type->size)));
                 } else if ( expr->type->size == 8 ) {
-                    vm_emit(vm_instr(expr, OP_MOV, operand_rax(expr->type->size), operand_imm(value((uint64_t)EINT(expr)->val))));
+                    vm_emit(vm_instr(expr, OP_MOV, operand_rax(expr->type->size), operand_imm(value((uint64_t)EINT(expr)->val), expr->type->size)));
                 } else {
                     assert(0);
                 }
@@ -1210,7 +1261,7 @@ vm_expr(Expr *expr, bool assignment = false) {
             static uint32_t string_num = 0;
             char *name = make_label(".string.%d", string_num);
 
-            vm_emit(vm_instr(expr, OP_DATA, operand_name(value(".string")), operand_imm(value(ESTR(expr)->val)), name));
+            vm_emit(vm_instr(expr, OP_DATA, operand_name(value(".string")), operand_imm(value(ESTR(expr)->val), expr->type->size), name));
             vm_emit(vm_instr(expr, OP_LEA, operand_name(value(name)), operand_rax(expr->type->size)));
 
             string_num++;
@@ -1247,7 +1298,7 @@ vm_decl(Decl *decl) {
             vm_emit(vm_instr(decl, OP_MOV, operand_reg(REG_RBP), operand_reg(REG_RSP)));
 
             if ( DPROC(decl)->scope->frame_size ) {
-                vm_emit(vm_instr(decl, OP_SUB, operand_reg(REG_RSP), operand_imm(value((uint64_t)DPROC(decl)->scope->frame_size))));
+                vm_emit(vm_instr(decl, OP_SUB, operand_reg(REG_RSP), operand_imm(value((uint64_t)DPROC(decl)->scope->frame_size), 4)));
             }
 
             uint8_t reg = 0;
@@ -1304,8 +1355,8 @@ vm_stmt(Stmt *stmt, char *proc_name) {
             vm_stmt(SFOR(stmt)->init, proc_name);
             int32_t loop_start = vm_emit(vm_instr(stmt, OP_NOP, label, "wird für die jmp anweisung benötigt"));
             vm_expr(SFOR(stmt)->cond);
-            vm_emit(vm_instr(stmt, OP_CMP, operand_rax(SFOR(stmt)->cond->type->size), operand_imm(value1)));
-            int32_t jmpnz_instr = vm_emit(vm_instr(stmt, OP_JNZ, operand_addr(0)));
+            vm_emit(vm_instr(stmt, OP_CMP, operand_rax(SFOR(stmt)->cond->type->size), operand_imm(value1, SFOR(stmt)->cond->type->size)));
+            int32_t jmpnz_instr = vm_emit(vm_instr(stmt, OP_JNZ, operand_addr(0, SFOR(stmt)->cond->type->size)));
             vm_stmt(SFOR(stmt)->block, proc_name);
             vm_stmt(SFOR(stmt)->step, proc_name);
             vm_emit(vm_instr(stmt, OP_JMP, operand_name(value(label))));
@@ -1324,10 +1375,10 @@ vm_stmt(Stmt *stmt, char *proc_name) {
             char *label = make_label("if.%d", loop_count++);
 
             vm_expr(SIF(stmt)->cond);
-            vm_emit(vm_instr(stmt, OP_CMP, operand_rax(SIF(stmt)->cond->type->size), operand_imm(value1)));
-            int32_t jmp1_instr = vm_emit(vm_instr(stmt, OP_JNE, operand_addr(0), label));
+            vm_emit(vm_instr(stmt, OP_CMP, operand_rax(SIF(stmt)->cond->type->size), operand_imm(value1, SIF(stmt)->cond->type->size)));
+            int32_t jmp1_instr = vm_emit(vm_instr(stmt, OP_JNE, operand_addr(0, SIF(stmt)->cond->type->size), label));
             vm_stmt(SIF(stmt)->stmt, proc_name);
-            int32_t jmp2_instr = vm_emit(vm_instr(stmt, OP_JMP, operand_addr(0)));
+            int32_t jmp2_instr = vm_emit(vm_instr(stmt, OP_JMP, operand_addr(0, SIF(stmt)->cond->type->size)));
 
             vm_instr_patch(jmp1_instr, buf_len(vm_instrs));
 
@@ -1354,9 +1405,9 @@ vm_stmt(Stmt *stmt, char *proc_name) {
 
             int32_t loop_start = vm_emit(vm_instr(stmt, OP_NOP, label, "wird für die jmp anweisung benötigt"));
             vm_expr(SWHILE(stmt)->cond);
-            int32_t jmpz_instr = vm_emit(vm_instr(stmt, OP_JZ, operand_addr(0), operand_imm(value((uint64_t)1))));
+            int32_t jmpz_instr = vm_emit(vm_instr(stmt, OP_JZ, operand_addr(0, SWHILE(stmt)->cond->type->size), operand_imm(value1, SWHILE(stmt)->cond->type->size)));
             vm_stmt(SWHILE(stmt)->block, proc_name);
-            vm_emit(vm_instr(stmt, OP_JMP, operand_addr(loop_start)));
+            vm_emit(vm_instr(stmt, OP_JMP, operand_addr(loop_start, SWHILE(stmt)->cond->type->size)));
 
             vm_instr_patch(jmpz_instr, buf_len(vm_instrs));
         } break;
@@ -1407,15 +1458,15 @@ step(Cpu *cpu) {
         } break;
 
         case OP_CALL: {
-            stack_push(cpu, reg_read(cpu, REG_RIP));
-            stack_push(cpu, reg_read(cpu, REG_RBX));
-            stack_push(cpu, reg_read(cpu, REG_RCX));
-            stack_push(cpu, reg_read(cpu, REG_RDX));
-            stack_push(cpu, reg_read(cpu, REG_RDI));
-            stack_push(cpu, reg_read(cpu, REG_R12));
-            stack_push(cpu, reg_read(cpu, REG_R13));
-            stack_push(cpu, reg_read(cpu, REG_R14));
-            stack_push(cpu, reg_read(cpu, REG_R15));
+            stack_push(cpu, reg_read(cpu, REG_RIP), 8);
+            stack_push(cpu, reg_read(cpu, REG_RBX), 8);
+            stack_push(cpu, reg_read(cpu, REG_RCX), 8);
+            stack_push(cpu, reg_read(cpu, REG_RDX), 8);
+            stack_push(cpu, reg_read(cpu, REG_RDI), 8);
+            stack_push(cpu, reg_read(cpu, REG_R12), 8);
+            stack_push(cpu, reg_read(cpu, REG_R13), 8);
+            stack_push(cpu, reg_read(cpu, REG_R14), 8);
+            stack_push(cpu, reg_read(cpu, REG_R15), 8);
 
             if ( operand_is_reg(instr->operand1) ) {
                 reg_write(cpu, REG_RIP, reg_read(cpu, instr->operand1));
@@ -1682,6 +1733,9 @@ step(Cpu *cpu) {
 
         case OP_PUSH: {
             if ( operand_is_reg(instr->operand1) ) {
+#if 1
+                    stack_push(cpu, reg_read(cpu, instr->operand1), instr->operand1->size);
+#else
                 if ( instr->operand1->kind == OPERAND_REG8L ) {
                     stack_push(cpu, reg_read(cpu, instr->operand1->reg8l));
                 } else if ( instr->operand1->kind == OPERAND_REG8H ) {
@@ -1693,6 +1747,7 @@ step(Cpu *cpu) {
                 } else if ( instr->operand1->kind == OPERAND_REG64 ) {
                     stack_push(cpu, reg_read(cpu, instr->operand1->reg64));
                 }
+#endif
             } else {
                 assert(0);
             }
