@@ -449,6 +449,29 @@ mem_alloc(Mem *mem, uint32_t size) {
 }
 
 void
+mem_write(Mem *mem, uint64_t addr, uint64_t val, uint32_t size) {
+    assert(addr < mem->size);
+
+    switch ( size ) {
+        case 8: {
+            *(uint64_t *)(mem->mem + addr) = val;
+        } break;
+
+        case 4: {
+            *(uint32_t *)(mem->mem + addr) = (uint32_t)val;
+        } break;
+
+        case 2: {
+            *(uint16_t *)(mem->mem + addr) = (uint16_t)val;
+        } break;
+
+        case 1: {
+            *(uint8_t *)(mem->mem + addr) = (uint8_t)val;
+        } break;
+    }
+}
+
+void
 mem_write(Mem *mem, uint64_t addr, uint64_t val) {
     assert(addr < mem->size);
     *(uint64_t *)(mem->mem + addr) = val;
@@ -470,6 +493,31 @@ void
 mem_write(Mem *mem, uint64_t addr, uint8_t val) {
     assert(addr < mem->size);
     *(uint8_t *)(mem->mem + addr) = val;
+}
+
+uint64_t
+mem_read(Mem *mem, uint32_t addr, uint32_t size) {
+    uint64_t result = 0;
+
+    switch ( size ) {
+        case 8: {
+            result = *(uint64_t *)(mem->mem + addr);
+        } break;
+
+        case 4: {
+            result = *(uint32_t *)(mem->mem + addr);
+        } break;
+
+        case 2: {
+            result = *(uint16_t *)(mem->mem + addr);
+        } break;
+
+        case 1: {
+            result = *(uint8_t *)(mem->mem + addr);
+        } break;
+    }
+
+    return result;
 }
 
 uint8_t
@@ -545,81 +593,67 @@ value(char val) {
 }
 
 Value
-value(int8_t val) {
+value(int64_t val, uint32_t size) {
     Value result = {};
 
-    result.kind = VAL_S8;
-    result.s8   = val;
+    switch ( size ) {
+        case 8: {
+            result.kind = VAL_S64;
+            result.s64  = val;
+        } break;
+
+        case 4: {
+            result.kind = VAL_S32;
+            result.s32  = (int32_t)val;
+        } break;
+
+        case 2: {
+            result.kind = VAL_S16;
+            result.s16  = (int16_t)val;
+        } break;
+
+        case 1: {
+            result.kind = VAL_S8;
+            result.s8   = (int8_t)val;
+        } break;
+
+        default: {
+            assert(0);
+        } break;
+    }
 
     return result;
 }
 
 Value
-value(int16_t val) {
+value(uint64_t val, uint32_t size) {
     Value result = {};
 
-    result.kind = VAL_S16;
-    result.s16  = val;
+    switch ( size ) {
+        case 8: {
+            result.kind = VAL_U64;
+            result.u64  = val;
+        } break;
 
-    return result;
-}
+        case 4: {
+            result.kind = VAL_U32;
+            result.u32  = (uint32_t)val;
+        } break;
 
-Value
-value(int32_t val) {
-    Value result = {};
+        case 2: {
+            result.kind = VAL_U16;
+            result.u16  = (uint16_t)val;
+        } break;
 
-    result.kind = VAL_S32;
-    result.s32  = val;
+        case 1: {
+            result.kind = VAL_U8;
+            result.u8   = (uint8_t)val;
+        } break;
 
-    return result;
-}
-
-Value
-value(int64_t val) {
-    Value result = {};
-
-    result.kind = VAL_S64;
-    result.s64  = val;
-
-    return result;
-}
-
-Value
-value(uint8_t val) {
-    Value result = {};
-
-    result.kind = VAL_U8;
-    result.u8   = val;
-
-    return result;
-}
-
-Value
-value(uint16_t val) {
-    Value result = {};
-
-    result.kind = VAL_U16;
-    result.u16  = val;
-
-    return result;
-}
-
-Value
-value(uint32_t val) {
-    Value result = {};
-
-    result.kind = VAL_U32;
-    result.u32  = val;
-
-    return result;
-}
-
-Value
-value(uint64_t val) {
-    Value result = {};
-
-    result.kind = VAL_U64;
-    result.u64  = val;
+        default: {
+            assert(0);
+        } break;
+    }
 
     return result;
 }
@@ -995,40 +1029,6 @@ stack_push(Cpu *cpu, uint64_t val, uint32_t size) {
     }
 }
 
-#if 0
-void
-stack_push(Cpu *cpu, uint64_t val) {
-    rsp_dec(cpu, 8);
-    uint64_t addr = reg_read(cpu, REG_RSP);
-    assert(addr > cpu->stack_size);
-    mem_write(cpu->mem, addr, val);
-}
-
-void
-stack_push(Cpu *cpu, uint32_t val) {
-    rsp_dec(cpu, 4);
-    uint64_t addr = reg_read(cpu, REG_ESP);
-    assert(addr > cpu->stack_size);
-    mem_write(cpu->mem, addr, val);
-}
-
-void
-stack_push(Cpu *cpu, uint16_t val) {
-    rsp_dec(cpu, 2);
-    uint64_t addr = reg_read(cpu, REG_SP);
-    assert(addr > cpu->stack_size);
-    mem_write(cpu->mem, addr, val);
-}
-
-void
-stack_push(Cpu *cpu, uint8_t val) {
-    rsp_dec(cpu, 1);
-    uint64_t addr = reg_read(cpu, REG_SPL);
-    assert(addr > cpu->stack_size);
-    mem_write(cpu->mem, addr, val);
-}
-#endif
-
 void
 stack_pop(Cpu *cpu, Vm_Reg64 reg) {
     assert(cpu->mem->size >= reg_read(cpu, REG_RSP) + 8);
@@ -1222,29 +1222,9 @@ vm_expr(Expr *expr, bool assignment = false) {
 
         case EXPR_INT: {
             if ( expr->type->is_signed ) {
-                if ( expr->type->size == 1 ) {
-                    vm_emit(vm_instr(expr, OP_MOV, operand_rax(expr->type->size), operand_imm(value((int8_t)EINT(expr)->val), expr->type->size)));
-                } else if ( expr->type->size == 2 ) {
-                    vm_emit(vm_instr(expr, OP_MOV, operand_rax(expr->type->size), operand_imm(value((int16_t)EINT(expr)->val), expr->type->size)));
-                } else if ( expr->type->size == 4 ) {
-                    vm_emit(vm_instr(expr, OP_MOV, operand_rax(expr->type->size), operand_imm(value((int32_t)EINT(expr)->val), expr->type->size)));
-                } else if ( expr->type->size == 8 ) {
-                    vm_emit(vm_instr(expr, OP_MOV, operand_rax(expr->type->size), operand_imm(value((int64_t)EINT(expr)->val), expr->type->size)));
-                } else {
-                    assert(0);
-                }
+                vm_emit(vm_instr(expr, OP_MOV, operand_rax(expr->type->size), operand_imm(value((int64_t)EINT(expr)->val, expr->type->size), expr->type->size)));
             } else {
-                if ( expr->type->size == 1 ) {
-                    vm_emit(vm_instr(expr, OP_MOV, operand_rax(expr->type->size), operand_imm(value((uint8_t)EINT(expr)->val), expr->type->size)));
-                } else if ( expr->type->size == 2 ) {
-                    vm_emit(vm_instr(expr, OP_MOV, operand_rax(expr->type->size), operand_imm(value((uint16_t)EINT(expr)->val), expr->type->size)));
-                } else if ( expr->type->size == 4 ) {
-                    vm_emit(vm_instr(expr, OP_MOV, operand_rax(expr->type->size), operand_imm(value((uint32_t)EINT(expr)->val), expr->type->size)));
-                } else if ( expr->type->size == 8 ) {
-                    vm_emit(vm_instr(expr, OP_MOV, operand_rax(expr->type->size), operand_imm(value((uint64_t)EINT(expr)->val), expr->type->size)));
-                } else {
-                    assert(0);
-                }
+                vm_emit(vm_instr(expr, OP_MOV, operand_rax(expr->type->size), operand_imm(value((uint64_t)EINT(expr)->val, expr->type->size), expr->type->size)));
             }
         } break;
 
@@ -1298,7 +1278,7 @@ vm_decl(Decl *decl) {
             vm_emit(vm_instr(decl, OP_MOV, operand_reg(REG_RBP), operand_reg(REG_RSP)));
 
             if ( DPROC(decl)->scope->frame_size ) {
-                vm_emit(vm_instr(decl, OP_SUB, operand_reg(REG_RSP), operand_imm(value((uint64_t)DPROC(decl)->scope->frame_size), 4)));
+                vm_emit(vm_instr(decl, OP_SUB, operand_reg(REG_RSP), operand_imm(value((uint64_t)DPROC(decl)->scope->frame_size, 4), 4)));
             }
 
             uint8_t reg = 0;
@@ -1619,15 +1599,7 @@ step(Cpu *cpu) {
                 } else if ( instr->src->kind == OPERAND_NAME ) {
                     reg_write(cpu, instr->dst, addr_lookup(instr->src->val));
                 } else {
-                    if ( instr->src->size == 1 ) {
-                        reg_write(cpu, instr->dst, mem_read8(cpu->mem, (uint32_t)instr->src->addr));
-                    } else if ( instr->src->size == 2 ) {
-                        reg_write(cpu, instr->dst, mem_read16(cpu->mem, (uint32_t)instr->src->addr));
-                    } else if ( instr->src->size == 4 ) {
-                        reg_write(cpu, instr->dst, mem_read32(cpu->mem, (uint32_t)instr->src->addr));
-                    } else if ( instr->src->size == 8 ) {
-                        reg_write(cpu, instr->dst, mem_read64(cpu->mem, (uint32_t)instr->src->addr));
-                    }
+                    reg_write(cpu, instr->dst, mem_read(cpu->mem, (uint32_t)instr->src->addr, instr->src->size));
                 }
             } else {
                 assert(0);
@@ -1640,17 +1612,7 @@ step(Cpu *cpu) {
                     if ( instr->src->kind == OPERAND_IMM ) {
                         mem_write(cpu->mem, reg_read(cpu, instr->dst) + instr->dst->displacement, instr->src->val.u64);
                     } else if ( operand_is_reg(instr->src) ) {
-                        if ( instr->src->kind == OPERAND_REG8L ) {
-                            mem_write(cpu->mem, reg_read(cpu, instr->dst) + instr->dst->displacement, reg_read(cpu, instr->src->reg8l));
-                        } else if ( instr->src->kind == OPERAND_REG8H ) {
-                            mem_write(cpu->mem, reg_read(cpu, instr->dst) + instr->dst->displacement, reg_read(cpu, instr->src->reg8h));
-                        } else if ( instr->src->kind == OPERAND_REG16 ) {
-                            mem_write(cpu->mem, reg_read(cpu, instr->dst) + instr->dst->displacement, reg_read(cpu, instr->src->reg16));
-                        } else if ( instr->src->kind == OPERAND_REG32 ) {
-                            mem_write(cpu->mem, reg_read(cpu, instr->dst) + instr->dst->displacement, reg_read(cpu, instr->src->reg32));
-                        } else if ( instr->src->kind == OPERAND_REG64 ) {
-                            mem_write(cpu->mem, reg_read(cpu, instr->dst) + instr->dst->displacement, reg_read(cpu, instr->src->reg64));
-                        }
+                        mem_write(cpu->mem, reg_read(cpu, instr->dst) + instr->dst->displacement, reg_read(cpu, instr->src), instr->src->size);
                     } else {
                         assert(0);
                     }
@@ -1672,17 +1634,7 @@ step(Cpu *cpu) {
 
                         if ( operand_is_reg(op) ) {
                             if ( op->with_displacement ) {
-                                if ( op->kind == OPERAND_REG8L ) {
-                                    reg_write(cpu, instr->dst, reg_read(cpu, op->reg8l) + op->displacement);
-                                } else if ( op->kind == OPERAND_REG8H ) {
-                                    reg_write(cpu, instr->dst, reg_read(cpu, op->reg8h) + op->displacement);
-                                } else if ( op->kind == OPERAND_REG16 ) {
-                                    reg_write(cpu, instr->dst, reg_read(cpu, op->reg16) + op->displacement);
-                                } else if ( op->kind == OPERAND_REG32 ) {
-                                    reg_write(cpu, instr->dst, reg_read(cpu, op->reg32) + op->displacement);
-                                } else if ( op->kind == OPERAND_REG64 ) {
-                                    reg_write(cpu, instr->dst, reg_read(cpu, op->reg64) + op->displacement);
-                                }
+                                reg_write(cpu, instr->dst, reg_read(cpu, op) + op->displacement);
                             } else {
                                 assert(0);
                             }
@@ -1699,18 +1651,7 @@ step(Cpu *cpu) {
                         assert(0);
                     } else {
                         assert(operand_is_reg(instr->src));
-
-                        if ( op->kind == OPERAND_REG8L ) {
-                            mem_write(cpu->mem, (uint64_t)reg_read(cpu, op->reg8l), reg_read(cpu, instr->src->reg8l));
-                        } else if ( op->kind == OPERAND_REG8H ) {
-                            mem_write(cpu->mem, (uint64_t)reg_read(cpu, op->reg8h), reg_read(cpu, instr->src->reg8h));
-                        } else if ( op->kind == OPERAND_REG16 ) {
-                            mem_write(cpu->mem, (uint64_t)reg_read(cpu, op->reg16), reg_read(cpu, instr->src->reg16));
-                        } else if ( op->kind == OPERAND_REG32 ) {
-                            mem_write(cpu->mem, (uint64_t)reg_read(cpu, op->reg32), reg_read(cpu, instr->src->reg32));
-                        } else if ( op->kind == OPERAND_REG64 ) {
-                            mem_write(cpu->mem, (uint64_t)reg_read(cpu, op->reg64), reg_read(cpu, instr->src->reg64));
-                        }
+                        mem_write(cpu->mem, (uint64_t)reg_read(cpu, op), reg_read(cpu, instr->src), instr->src->size);
                     }
                 }
             } else {
@@ -1733,21 +1674,7 @@ step(Cpu *cpu) {
 
         case OP_PUSH: {
             if ( operand_is_reg(instr->operand1) ) {
-#if 1
-                    stack_push(cpu, reg_read(cpu, instr->operand1), instr->operand1->size);
-#else
-                if ( instr->operand1->kind == OPERAND_REG8L ) {
-                    stack_push(cpu, reg_read(cpu, instr->operand1->reg8l));
-                } else if ( instr->operand1->kind == OPERAND_REG8H ) {
-                    stack_push(cpu, reg_read(cpu, instr->operand1->reg8h));
-                } else if ( instr->operand1->kind == OPERAND_REG16 ) {
-                    stack_push(cpu, reg_read(cpu, instr->operand1->reg16));
-                } else if ( instr->operand1->kind == OPERAND_REG32 ) {
-                    stack_push(cpu, reg_read(cpu, instr->operand1->reg32));
-                } else if ( instr->operand1->kind == OPERAND_REG64 ) {
-                    stack_push(cpu, reg_read(cpu, instr->operand1->reg64));
-                }
-#endif
+                stack_push(cpu, reg_read(cpu, instr->operand1), instr->operand1->size);
             } else {
                 assert(0);
             }
