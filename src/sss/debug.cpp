@@ -101,60 +101,64 @@ to_str(Urq::Sss::Vm::Value val) {
 }
 
 char *
-to_str(Urq::Sss::Vm::Operand op) {
+to_str(Urq::Sss::Vm::Operand *op) {
     char *result = NULL;
 
-    switch ( op.kind ) {
+    switch ( op->kind ) {
         case OPERAND_ADDR: {
-            result = buf_printf(result, "@%d", op.addr);
+            result = buf_printf(result, "@%d", op->addr);
         } break;
 
         case OPERAND_IMM: {
-            result = buf_printf(result, "$%d", op.val.u64);
+            result = buf_printf(result, "$%d", op->val.u64);
+        } break;
+
+        case OPERAND_PTR: {
+            result = buf_printf(result, "ptr(%s)", to_str(op->op));
         } break;
 
         case OPERAND_REG64: {
-            if ( op.with_displacement ) {
-                result = buf_printf(result, "%%%%%d(%s)", op.displacement, regs64_dbg[op.reg64]);
+            if ( op->with_displacement ) {
+                result = buf_printf(result, "%%%%%d(%s)", op->displacement, regs64_dbg[op->reg64]);
             } else {
-                result = buf_printf(result, "%s", regs64_dbg[op.reg64]);
+                result = buf_printf(result, "%s", regs64_dbg[op->reg64]);
             }
         } break;
 
         case OPERAND_REG32: {
-            if ( op.with_displacement ) {
-                result = buf_printf(result, "%%%%%d(%s)", op.displacement, regs32_dbg[op.reg32]);
+            if ( op->with_displacement ) {
+                result = buf_printf(result, "%%%%%d(%s)", op->displacement, regs32_dbg[op->reg32]);
             } else {
-                result = buf_printf(result, "%s", regs32_dbg[op.reg32]);
+                result = buf_printf(result, "%s", regs32_dbg[op->reg32]);
             }
         } break;
 
         case OPERAND_REG16: {
-            if ( op.with_displacement ) {
-                result = buf_printf(result, "%%%%%d(%s)", op.displacement, regs16_dbg[op.reg16]);
+            if ( op->with_displacement ) {
+                result = buf_printf(result, "%%%%%d(%s)", op->displacement, regs16_dbg[op->reg16]);
             } else {
-                result = buf_printf(result, "%s", regs16_dbg[op.reg16]);
+                result = buf_printf(result, "%s", regs16_dbg[op->reg16]);
             }
         } break;
 
         case OPERAND_REG8L: {
-            if ( op.with_displacement ) {
-                result = buf_printf(result, "%%%%%d(%s)", op.displacement, regs8l[op.reg8l]);
+            if ( op->with_displacement ) {
+                result = buf_printf(result, "%%%%%d(%s)", op->displacement, regs8l[op->reg8l]);
             } else {
-                result = buf_printf(result, "%s", regs8l[op.reg8l]);
+                result = buf_printf(result, "%s", regs8l[op->reg8l]);
             }
         } break;
 
         case OPERAND_REG8H: {
-            if ( op.with_displacement ) {
-                result = buf_printf(result, "%%%%%d(%s)", op.displacement, regs8h[op.reg8h]);
+            if ( op->with_displacement ) {
+                result = buf_printf(result, "%%%%%d(%s)", op->displacement, regs8h[op->reg8h]);
             } else {
-                result = buf_printf(result, "%s", regs8h[op.reg8h]);
+                result = buf_printf(result, "%s", regs8h[op->reg8h]);
             }
         } break;
 
         case OPERAND_NAME: {
-            result = buf_printf(result, "%s", to_str(op.val));
+            result = buf_printf(result, "%s", to_str(op->val));
         } break;
 
         default: {
@@ -199,7 +203,7 @@ to_str(Instr *instr) {
 
         case OP_DATA: {
             output = buf_printf(output, "%s", to_str(instr->operand1));
-            if ( instr->operand2.kind != OPERAND_NONE ) {
+            if ( instr->operand2 ) {
                 output = buf_printf(output, " %s", to_str(instr->operand2));
             }
         } break;

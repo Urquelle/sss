@@ -519,6 +519,7 @@ type_ptr(Type *base) {
     Type_Ptr *result = urq_allocs(Type_Ptr);
 
     result->kind = TYPE_PTR;
+    result->size = PTR_SIZE;
     result->base = base;
 
     return result;

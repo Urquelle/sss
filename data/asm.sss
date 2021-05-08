@@ -1,4 +1,4 @@
-#load "W:/sss/data/expr.sss";
+##load "W:/sss/data/expr.sss";
 
 ##(
 Vec3 :: struktur {
@@ -8,6 +8,8 @@ Vec3 :: struktur {
 
 main :: proc(a: u32, b: u32, c: u32, d: u32, e: u32) -> s32 {
     f: s32 = 7;
+
+    test(@f);
 
     ## if
     falls e > 1 && falsch {
@@ -34,6 +36,10 @@ main :: proc(a: u32, b: u32, c: u32, d: u32, e: u32) -> s32 {
     }
 
     res g;
+}
+
+test :: proc(x : *s32 ) {
+    @x = 15;
 }
 
 main(5, 3, 1, 2, 4);
