@@ -118,6 +118,7 @@ struct Type_Ptr : Type {
 
 struct Type_Array : Type {
     Type   * base;
+    uint32_t base_size;
     size_t   num_elems;
 };
 
@@ -526,13 +527,14 @@ type_ptr(Type *base) {
 }
 
 Type_Array *
-type_array(Type *base, size_t num_elems, uint32_t size = 0) {
+type_array(Type *base, uint32_t num_elems, uint32_t size) {
     Type_Array *result = urq_allocs(Type_Array);
 
     result->kind      = TYPE_ARRAY;
     result->base      = base;
     result->num_elems = num_elems;
-    result->size      = size;
+    result->base_size = size;
+    result->size      = num_elems * size;
     result->scope     = scope_new("array");
 
     sym_push_scope(&loc_none, result->scope, prop_size, type_u64);
@@ -1144,9 +1146,9 @@ resolve_typespec(Typespec *typespec) {
 
                 if ( op->is_const ) {
                     assert(op->val.kind != VAL_NONE);
-                    result = type_array(type, op->val.s32);
+                    result = type_array(type, op->val.s32, type->size);
                 } else {
-                    result = type_array(type, 0);
+                    result = type_array(type, 0, type->size);
                 }
             } else {
                 result = type_array(type, 0, PTR_SIZE);

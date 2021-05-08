@@ -15,6 +15,7 @@ enum Vm_Op {
     OP_CALL,
     OP_CMP,
     OP_DIV,
+    OP_ENTER,
     OP_IDIV,
     OP_IMUL,
     OP_JE,
@@ -23,6 +24,7 @@ enum Vm_Op {
     OP_JNZ,
     OP_JZ,
     OP_LEA,
+    OP_LEAVE,
     OP_MOV,
     OP_MUL,
     OP_NOP,
@@ -159,15 +161,17 @@ struct Value {
 
 enum Operand_Kind {
     OPERAND_NONE,
-    OPERAND_PTR,
+
+    OPERAND_ADDR,
+    OPERAND_ADDR_REGS,
     OPERAND_IMM,
+    OPERAND_NAME,
+    OPERAND_PTR,
     OPERAND_REG64,
     OPERAND_REG32,
     OPERAND_REG16,
     OPERAND_REG8L,
     OPERAND_REG8H,
-    OPERAND_ADDR,
-    OPERAND_NAME,
 };
 struct Operand {
     Operand_Kind kind;
@@ -185,6 +189,11 @@ struct Operand {
         Vm_Reg8h reg8h;
         Value    val;
         Operand  *op;
+
+        struct {
+            Operand *op1;
+            Operand *op2;
+        };
     };
 };
 
@@ -515,6 +524,10 @@ mem_read(Mem *mem, uint32_t addr, uint32_t size) {
         case 1: {
             result = *(uint8_t *)(mem->mem + addr);
         } break;
+
+        default: {
+            assert(0);
+        } break;
     }
 
     return result;
@@ -685,6 +698,17 @@ operand_addr(uint32_t addr, int32_t size) {
     result->kind = OPERAND_ADDR;
     result->addr = addr;
     result->size = size;
+
+    return result;
+}
+
+Operand *
+operand_addr(Operand *op1, Operand *op2) {
+    Operand *result = urq_allocs(Operand);
+
+    result->kind = OPERAND_ADDR_REGS;
+    result->op1  = op1;
+    result->op2  = op2;
 
     return result;
 }
@@ -1096,6 +1120,10 @@ vm_addr(Expr *expr) {
             return operand_rbp(expr->type->size, EIDENT(expr)->sym->decl->offset);
         } break;
 
+        case EXPR_PAREN: {
+            return vm_addr(EPAREN(expr)->expr);
+        } break;
+
         default: {
             assert(0);
             return NULL;
@@ -1110,6 +1138,7 @@ vm_expr(Expr *expr, bool assignment = false) {
     switch ( expr->kind ) {
         case EXPR_AT: {
             if ( assignment ) {
+                /* @AUFGABE: alle ausdrücke müssen hier unterstützt werden! aktuell werden nur IDENTs unterstützt */
                 vm_emit(vm_instr(expr, OP_MOV, operand_rsi(expr->type->size), vm_addr(EAT(expr)->expr)));
                 return operand_ptr(operand_rsi(expr->type->size));
             } else {
@@ -1220,6 +1249,29 @@ vm_expr(Expr *expr, bool assignment = false) {
             }
         } break;
 
+        case EXPR_INDEX: {
+            uint32_t index_size = EINDEX(expr)->index->type->size;
+            uint32_t base_size  = TARRAY(EINDEX(expr)->base->type)->base_size;
+            int32_t  displacement = -(int32_t)base_size;
+
+            if ( assignment ) {
+                vm_expr(EINDEX(expr)->index);
+                vm_emit(vm_instr(expr, OP_PUSH, operand_rax(index_size)));
+
+                vm_emit(vm_instr(expr, OP_LEA, operand_rsi(base_size), operand_ptr(operand_reg(REG_RBP, displacement))));
+                vm_emit(vm_instr(expr, OP_POP, operand_rdi(index_size)));
+
+                return operand_ptr(operand_addr(operand_rsi(base_size), operand_rdi(index_size)));
+            } else {
+                vm_expr(EINDEX(expr)->index);
+                vm_emit(vm_instr(expr, OP_PUSH, operand_rax(index_size)));
+
+                vm_emit(vm_instr(expr, OP_LEA, operand_rsi(base_size), operand_ptr(operand_reg(REG_RBP, displacement))));
+                vm_emit(vm_instr(expr, OP_POP, operand_rdi(index_size)));
+                vm_emit(vm_instr(expr, OP_MOV, operand_rax(expr->type->size), operand_addr(operand_rsi(base_size), operand_rdi(index_size))));
+            }
+        } break;
+
         case EXPR_INT: {
             if ( expr->type->is_signed ) {
                 vm_emit(vm_instr(expr, OP_MOV, operand_rax(expr->type->size), operand_imm(value((int64_t)EINT(expr)->val, expr->type->size), expr->type->size)));
@@ -1274,12 +1326,7 @@ vm_decl(Decl *decl) {
         case DECL_PROC: {
             vm_emit(vm_instr(decl, OP_DATA, operand_name(value(".text"))));
             vm_emit(vm_instr(decl, OP_DATA, operand_name(value(".global")), operand_name(value(decl->name))));
-            vm_emit(vm_instr(decl, OP_PUSH, operand_reg(REG_RBP), decl->name));
-            vm_emit(vm_instr(decl, OP_MOV, operand_reg(REG_RBP), operand_reg(REG_RSP)));
-
-            if ( DPROC(decl)->scope->frame_size ) {
-                vm_emit(vm_instr(decl, OP_SUB, operand_reg(REG_RSP), operand_imm(value((uint64_t)DPROC(decl)->scope->frame_size, 4), 4)));
-            }
+            vm_emit(vm_instr(decl, OP_ENTER, operand_imm(value((uint64_t)DPROC(decl)->scope->frame_size, 4), 4), decl->name));
 
             uint8_t reg = 0;
             for ( uint32_t i = 0; i < DPROC(decl)->sign->num_params; ++i ) {
@@ -1291,9 +1338,7 @@ vm_decl(Decl *decl) {
             }
 
             vm_stmt(DPROC(decl)->block, decl->name);
-
-            vm_emit(vm_instr(decl, OP_MOV, operand_reg(REG_RSP), operand_reg(REG_RBP), make_label("%s.end", decl->name)));
-            vm_emit(vm_instr(decl, OP_POP, operand_reg(REG_RBP)));
+            vm_emit(vm_instr(decl, OP_LEAVE, make_label("%s.end", decl->name)));
             vm_emit(vm_instr(decl, OP_RET));
         } break;
 
@@ -1490,6 +1535,14 @@ step(Cpu *cpu) {
             //
         } break;
 
+        case OP_ENTER: {
+            stack_push(cpu, reg_read(cpu, REG_RBP), 8);
+            reg_write(cpu, REG_RBP, reg_read(cpu, REG_RSP));
+            if ( instr->operand1->val.u64 ) {
+                reg_write(cpu, REG_RSP, reg_read(cpu, REG_RSP) - instr->operand1->val.u64);
+            }
+        } break;
+
         case OP_IDIV: {
             uint64_t dividend = reg_read(cpu, REG_RAX);
             uint64_t divisor = 0;
@@ -1600,11 +1653,29 @@ step(Cpu *cpu) {
                 } else if ( instr->src->kind == OPERAND_NAME ) {
                     reg_write(cpu, instr->dst, addr_lookup(instr->src->val));
                 } else {
-                    reg_write(cpu, instr->dst, mem_read(cpu->mem, (uint32_t)instr->src->addr, instr->src->size));
+                    assert(instr->src->kind == OPERAND_PTR );
+                    Operand *op = instr->src->op;
+
+                    if ( operand_is_reg(op) ) {
+                        if ( op->with_displacement ) {
+                            reg_write(cpu, instr->dst, reg_read(cpu, op) + op->displacement);
+                        } else {
+                            assert(0);
+                        }
+                    } else if ( op->kind == OPERAND_ADDR ) {
+                        reg_write(cpu, instr->dst, mem_read(cpu->mem, (uint32_t)op->addr, op->size));
+                    } else {
+                        assert(0);
+                    }
                 }
             } else {
                 assert(0);
             }
+        } break;
+
+        case OP_LEAVE: {
+            reg_write(cpu, REG_RSP, reg_read(cpu, REG_RBP));
+            stack_pop(cpu, REG_RBP);
         } break;
 
         case OP_MOV: {
@@ -1637,9 +1708,14 @@ step(Cpu *cpu) {
                             if ( op->with_displacement ) {
                                 reg_write(cpu, instr->dst, reg_read(cpu, op) + op->displacement);
                             } else {
-                                assert(0);
+                                reg_write(cpu, instr->dst, reg_read(cpu, op));
                             }
                         }
+                    } else if ( instr->src->kind == OPERAND_ADDR_REGS ) {
+                        Operand *op1 = instr->src->op1;
+                        Operand *op2 = instr->src->op2;
+
+                        reg_write(cpu, instr->dst, mem_read(cpu->mem, (uint32_t)(reg_read(cpu, op1) + reg_read(cpu, op2)), instr->src->op1->size));
                     } else {
                         assert(0);
                     }
@@ -1654,6 +1730,13 @@ step(Cpu *cpu) {
                         assert(operand_is_reg(instr->src));
                         mem_write(cpu->mem, (uint64_t)reg_read(cpu, op), reg_read(cpu, instr->src), instr->src->size);
                     }
+                } else if ( op->kind == OPERAND_ADDR_REGS ) {
+                    Operand *op1 = op->op1;
+                    Operand *op2 = op->op2;
+
+                    mem_write(cpu->mem, (uint32_t)(reg_read(cpu, op1) + reg_read(cpu, op2)), reg_read(cpu, instr->src));
+                } else {
+                    assert(0);
                 }
             } else {
                 assert(0);
@@ -1807,7 +1890,7 @@ compile(Parsed_File *file) {
 
 uint64_t
 eval(Instrs instrs) {
-    Cpu *cpu = cpu_new(instrs, 1024*1024, 103);
+    Cpu *cpu = cpu_new(instrs, 1024*1024, 101);
 
     for (;;) {
         if ( !step(cpu) ) {

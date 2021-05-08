@@ -109,17 +109,21 @@ to_str(Urq::Sss::Vm::Operand *op) {
             result = buf_printf(result, "@%d", op->addr);
         } break;
 
+        case OPERAND_ADDR_REGS: {
+            result = buf_printf(result, "[%s+%s]", to_str(op->op1), to_str(op->op2));
+        } break;
+
         case OPERAND_IMM: {
             result = buf_printf(result, "$%d", op->val.u64);
         } break;
 
         case OPERAND_PTR: {
-            result = buf_printf(result, "ptr(%s)", to_str(op->op));
+            result = buf_printf(result, "ptr %s", to_str(op->op));
         } break;
 
         case OPERAND_REG64: {
             if ( op->with_displacement ) {
-                result = buf_printf(result, "%%%%%d(%s)", op->displacement, regs64_dbg[op->reg64]);
+                result = buf_printf(result, "%d(%s)", op->displacement, regs64_dbg[op->reg64]);
             } else {
                 result = buf_printf(result, "%s", regs64_dbg[op->reg64]);
             }
@@ -127,7 +131,7 @@ to_str(Urq::Sss::Vm::Operand *op) {
 
         case OPERAND_REG32: {
             if ( op->with_displacement ) {
-                result = buf_printf(result, "%%%%%d(%s)", op->displacement, regs32_dbg[op->reg32]);
+                result = buf_printf(result, "%d(%s)", op->displacement, regs32_dbg[op->reg32]);
             } else {
                 result = buf_printf(result, "%s", regs32_dbg[op->reg32]);
             }
@@ -135,7 +139,7 @@ to_str(Urq::Sss::Vm::Operand *op) {
 
         case OPERAND_REG16: {
             if ( op->with_displacement ) {
-                result = buf_printf(result, "%%%%%d(%s)", op->displacement, regs16_dbg[op->reg16]);
+                result = buf_printf(result, "%d(%s)", op->displacement, regs16_dbg[op->reg16]);
             } else {
                 result = buf_printf(result, "%s", regs16_dbg[op->reg16]);
             }
@@ -143,7 +147,7 @@ to_str(Urq::Sss::Vm::Operand *op) {
 
         case OPERAND_REG8L: {
             if ( op->with_displacement ) {
-                result = buf_printf(result, "%%%%%d(%s)", op->displacement, regs8l[op->reg8l]);
+                result = buf_printf(result, "%d(%s)", op->displacement, regs8l[op->reg8l]);
             } else {
                 result = buf_printf(result, "%s", regs8l[op->reg8l]);
             }
@@ -151,7 +155,7 @@ to_str(Urq::Sss::Vm::Operand *op) {
 
         case OPERAND_REG8H: {
             if ( op->with_displacement ) {
-                result = buf_printf(result, "%%%%%d(%s)", op->displacement, regs8h[op->reg8h]);
+                result = buf_printf(result, "%d(%s)", op->displacement, regs8h[op->reg8h]);
             } else {
                 result = buf_printf(result, "%s", regs8h[op->reg8h]);
             }
@@ -208,6 +212,10 @@ to_str(Instr *instr) {
             }
         } break;
 
+        case OP_ENTER: {
+            output = buf_printf(output, "enter %s", to_str(instr->operand1));
+        } break;
+
         case OP_IDIV: {
             output = buf_printf(output, "idiv %s", to_str(instr->dst));
         } break;
@@ -238,6 +246,10 @@ to_str(Instr *instr) {
 
         case OP_LEA: {
             output = buf_printf(output, to_str_binop("lea", instr));
+        } break;
+
+        case OP_LEAVE: {
+            output = buf_printf(output, "leave");
         } break;
 
         case OP_MOV: {
