@@ -1271,6 +1271,31 @@ vm_expr(Expr *expr, bool assignment = false) {
             vm_emit(vm_instr(expr, OP_CALL, operand_reg(REG_RAX)));
         } break;
 
+        case EXPR_FIELD: {
+            Operand *op = vm_expr(EFIELD(expr)->base, true);
+            Type_Struct *type = TSTRUCT(EFIELD(expr)->base->type);
+
+            Aggr_Field *field = NULL;
+            for ( int i = 0; i < type->num_fields; ++i ) {
+                Aggr_Field *f = type->fields[i];
+
+                if ( f->name == EFIELD(expr)->field ) {
+                    field = f;
+                    break;
+                }
+            }
+
+            assert(field);
+            vm_emit(vm_instr(expr, OP_LEA, operand_rsi(field->type->size), operand_ptr(op)));
+            vm_emit(vm_instr(expr, OP_ADD, operand_rsi(field->type->size), operand_imm(value((int64_t)field->offset, 4), 4)));
+
+            if ( assignment ) {
+                return operand_ptr(operand_rsi(field->type->size));
+            } else {
+                vm_emit(vm_instr(expr, OP_MOV, operand_rax(field->type->size), operand_addr(operand_rsi(field->type->size))));
+            }
+        } break;
+
         case EXPR_FLOAT: {
             vm_emit(vm_instr(expr, OP_MOV, operand_reg(REG_RAX), operand_imm(value(EFLOAT(expr)->val), expr->type->size)));
         } break;
@@ -1295,7 +1320,7 @@ vm_expr(Expr *expr, bool assignment = false) {
             uint32_t item_size      = EINDEX(expr)->base->type->item_size;
 
             Operand *op = vm_addr(expr);
-            Expr *offset = construct_offset_expr(EINDEX(expr));
+            Expr *offset = construct_offset_expr(expr);
 
             vm_expr(offset, assignment);
             vm_emit(vm_instr(expr, OP_MUL, operand_rax(item_size), operand_imm(value((uint64_t)item_size, item_size), item_size)));
@@ -1375,6 +1400,10 @@ vm_decl(Decl *decl) {
             vm_stmt(DPROC(decl)->block, decl->name);
             vm_emit(vm_instr(decl, OP_LEAVE, make_label("%s.end", decl->name)));
             vm_emit(vm_instr(decl, OP_RET));
+        } break;
+
+        case DECL_STRUCT: {
+            //
         } break;
 
         default: {
@@ -1948,7 +1977,7 @@ compile(Parsed_File *file) {
     for ( int i = 0; i < buf_len(file->stmts); ++i ) {
         Stmt *stmt = file->stmts[i];
 
-        if ( stmt->kind != STMT_DECL && SDECL(stmt)->decl->kind != DECL_PROC ) {
+        if ( stmt->kind != STMT_DECL || SDECL(stmt)->decl->kind != DECL_PROC ) {
             vm_stmt(stmt);
         }
     }
@@ -1958,7 +1987,7 @@ compile(Parsed_File *file) {
 
 uint64_t
 eval(Instrs instrs) {
-    Cpu *cpu = cpu_new(instrs, 1024*1024, 121);
+    Cpu *cpu = cpu_new(instrs, 1024*1024, 131);
 
     for (;;) {
         if ( !step(cpu) ) {

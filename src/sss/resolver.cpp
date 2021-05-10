@@ -292,7 +292,7 @@ type_incomplete_struct(Sym *sym) {
     result->kind  = TYPE_INCOMPLETE;
     result->sym   = sym;
     result->size  = 0;
-    result->item_size = 0;
+    result->item_size = PTR_SIZE;
     result->align = 0;
     result->id    = global_type_id++;
     result->scope = scope_new(sym->name);
@@ -542,7 +542,7 @@ type_array(Type *base, uint32_t num_elems, uint32_t size, uint32_t item_size) {
     result->base      = base;
     result->num_elems = num_elems;
     result->item_size = item_size;
-    result->size      = num_elems * size;
+    result->size      = (num_elems) ? num_elems * size : size;
     result->scope     = scope_new("array");
 
     sym_push_scope(&loc_none, result->scope, prop_size, type_u64);
