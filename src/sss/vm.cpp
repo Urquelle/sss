@@ -1802,10 +1802,11 @@ step(Cpu *cpu) {
                 assert(0);
             }
 
-            reg_write(cpu, REG_RAX, operand1 * operand2);
+            uint64_t result = operand1 * operand2;
+            reg_write(cpu, operand_rax(instr->src->size), result);
 
             flags_clear(cpu);
-            if ( reg_read(cpu, REG_RAX) == 0 ) {
+            if ( result == 0 ) {
                 flags_set(cpu, RFLAG_ZF);
             }
         } break;

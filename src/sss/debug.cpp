@@ -181,7 +181,7 @@ char *
 to_str_binop(char *op, Instr *instr) {
     char *result = NULL;
 
-    result = buf_printf(result, "%-6s%-6s, %-25s", op, to_str(instr->operand1), to_str(instr->operand2));
+    result = buf_printf(result, "%-6s%-15s, %-16s", op, to_str(instr->operand1), to_str(instr->operand2));
 
     return result;
 }
@@ -202,7 +202,7 @@ to_str(Instr *instr) {
         } break;
 
         case OP_CALL: {
-            output = buf_printf(output, "call %s", to_str(instr->operand1));
+            output = buf_printf(output, "call  %-33s", to_str(instr->operand1));
         } break;
 
         case OP_CMP: {
@@ -221,7 +221,7 @@ to_str(Instr *instr) {
         } break;
 
         case OP_IDIV: {
-            output = buf_printf(output, "idiv %s", to_str(instr->dst));
+            output = buf_printf(output, "idiv  %-33s", to_str(instr->dst));
         } break;
 
         case OP_IMUL: {
@@ -229,23 +229,23 @@ to_str(Instr *instr) {
         } break;
 
         case OP_JE: {
-            output = buf_printf(output, "je    %s", to_str(instr->operand1));
+            output = buf_printf(output, "je    %-33s", to_str(instr->operand1));
         } break;
 
         case OP_JMP: {
-            output = buf_printf(output, "jmp   %-33s", to_str(instr->operand1));
+            output = buf_printf(output, "jmp   %-30s", to_str(instr->operand1));
         } break;
 
         case OP_JNE: {
-            output = buf_printf(output, "jne %s", to_str(instr->operand1));
+            output = buf_printf(output, "jne   %-33s", to_str(instr->operand1));
         } break;
 
         case OP_JNZ: {
-            output = buf_printf(output, "jnz %s", to_str(instr->operand1));
+            output = buf_printf(output, "jnz   %-33s", to_str(instr->operand1));
         } break;
 
         case OP_JZ: {
-            output = buf_printf(output, "jz %s", to_str(instr->operand1));
+            output = buf_printf(output, "jz    %-33s", to_str(instr->operand1));
         } break;
 
         case OP_LEA: {
@@ -253,7 +253,7 @@ to_str(Instr *instr) {
         } break;
 
         case OP_LEAVE: {
-            output = buf_printf(output, "leave");
+            output = buf_printf(output, "%-39s", "leave");
         } break;
 
         case OP_MOV: {
@@ -265,7 +265,7 @@ to_str(Instr *instr) {
         } break;
 
         case OP_NOP: {
-            output = buf_printf(output, "nop");
+            output = buf_printf(output, "%-36s", "nop");
         } break;
 
         case OP_NOT: {
@@ -285,31 +285,31 @@ to_str(Instr *instr) {
         } break;
 
         case OP_SETL: {
-            output = buf_printf(output, "setl %s", to_str(instr->dst));
+            output = buf_printf(output, "setl  %-33s", to_str(instr->dst));
         } break;
 
         case OP_SETLE: {
-            output = buf_printf(output, "setle %s", to_str(instr->dst));
+            output = buf_printf(output, "setle %-33s", to_str(instr->dst));
         } break;
 
         case OP_SETE: {
-            output = buf_printf(output, "sete %s", to_str(instr->dst));
+            output = buf_printf(output, "sete  %-33s", to_str(instr->dst));
         } break;
 
         case OP_SETGE: {
-            output = buf_printf(output, "setge %s", to_str(instr->dst));
+            output = buf_printf(output, "setge %-33s", to_str(instr->dst));
         } break;
 
         case OP_SETG: {
-            output = buf_printf(output, "setg %s", to_str(instr->dst));
+            output = buf_printf(output, "setg  %-33s", to_str(instr->dst));
         } break;
 
         case OP_SETNE: {
-            output = buf_printf(output, "setne %s", to_str(instr->dst));
+            output = buf_printf(output, "setne %-33s", to_str(instr->dst));
         } break;
 
         case OP_RET: {
-            output = buf_printf(output, "ret");
+            output = buf_printf(output, "%-39s", "ret");
         } break;
 
         default: {
