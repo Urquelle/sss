@@ -109,6 +109,10 @@ to_str(Urq::Sss::Vm::Operand *op) {
             result = buf_printf(result, "@%d", op->addr);
         } break;
 
+        case OPERAND_ADDR_REG: {
+            result = buf_printf(result, "@%s", to_str(op->op));
+        } break;
+
         case OPERAND_ADDR_REGS: {
             result = buf_printf(result, "[%s+%s]", to_str(op->op1), to_str(op->op2));
         } break;
@@ -177,7 +181,7 @@ char *
 to_str_binop(char *op, Instr *instr) {
     char *result = NULL;
 
-    result = buf_printf(result, "%s %s, %s", op, to_str(instr->operand1), to_str(instr->operand2));
+    result = buf_printf(result, "%-6s%-6s, %-25s", op, to_str(instr->operand1), to_str(instr->operand2));
 
     return result;
 }
@@ -213,7 +217,7 @@ to_str(Instr *instr) {
         } break;
 
         case OP_ENTER: {
-            output = buf_printf(output, "enter %s", to_str(instr->operand1));
+            output = buf_printf(output, "enter %-33s", to_str(instr->operand1));
         } break;
 
         case OP_IDIV: {
@@ -225,11 +229,11 @@ to_str(Instr *instr) {
         } break;
 
         case OP_JE: {
-            output = buf_printf(output, "je %s", to_str(instr->operand1));
+            output = buf_printf(output, "je    %s", to_str(instr->operand1));
         } break;
 
         case OP_JMP: {
-            output = buf_printf(output, "jmp %s", to_str(instr->operand1));
+            output = buf_printf(output, "jmp   %-33s", to_str(instr->operand1));
         } break;
 
         case OP_JNE: {
@@ -256,6 +260,10 @@ to_str(Instr *instr) {
             output = buf_printf(output, to_str_binop("mov", instr));
         } break;
 
+        case OP_MUL: {
+            output = buf_printf(output, to_str_binop("mul", instr));
+        } break;
+
         case OP_NOP: {
             output = buf_printf(output, "nop");
         } break;
@@ -265,11 +273,11 @@ to_str(Instr *instr) {
         } break;
 
         case OP_PUSH: {
-            output = buf_printf(output, "push %s", to_str(instr->operand1));
+            output = buf_printf(output, "push  %-33s", to_str(instr->operand1));
         } break;
 
         case OP_POP: {
-            output = buf_printf(output, "pop %s", to_str(instr->operand1));
+            output = buf_printf(output, "pop   %-33s", to_str(instr->operand1));
         } break;
 
         case OP_SUB: {

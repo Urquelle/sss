@@ -163,6 +163,7 @@ enum Operand_Kind {
     OPERAND_NONE,
 
     OPERAND_ADDR,
+    OPERAND_ADDR_REG,
     OPERAND_ADDR_REGS,
     OPERAND_IMM,
     OPERAND_NAME,
@@ -703,6 +704,16 @@ operand_addr(uint32_t addr, int32_t size) {
 }
 
 Operand *
+operand_addr(Operand *reg) {
+    Operand *result = urq_allocs(Operand);
+
+    result->kind = OPERAND_ADDR_REG;
+    result->op   = reg;
+
+    return result;
+}
+
+Operand *
 operand_addr(Operand *op1, Operand *op2) {
     Operand *result = urq_allocs(Operand);
 
@@ -1117,11 +1128,15 @@ Operand *
 vm_addr(Expr *expr) {
     switch ( expr->kind ) {
         case EXPR_IDENT: {
-            return operand_rbp(expr->type->size, EIDENT(expr)->sym->decl->offset);
+            return operand_rbp(expr->type->item_size, EIDENT(expr)->sym->decl->offset);
         } break;
 
         case EXPR_PAREN: {
             return vm_addr(EPAREN(expr)->expr);
+        } break;
+
+        case EXPR_INDEX: {
+            return vm_addr(EINDEX(expr)->base);
         } break;
 
         default: {
@@ -1129,6 +1144,28 @@ vm_addr(Expr *expr) {
             return NULL;
         }
     }
+}
+
+Expr *
+construct_offset_expr(Expr *expr) {
+    if ( expr->kind != EXPR_INDEX ) {
+        return expr;
+    }
+
+    Expr_Index *index = EINDEX(expr);
+    uint32_t item_size = index->base->type->item_size;
+    Type_Array *array = TARRAY(index->base->type);
+
+    Expr_Int *offset = expr_int(expr, array->num_elems);
+    offset->type = type_s32;
+
+    Expr_Bin *left = expr_bin(index, BIN_MUL, construct_offset_expr(index->base), offset);
+    left->type = type_s32;
+
+    Expr_Bin *result = expr_bin(index, BIN_ADD, left, index->index);
+    result->type = type_s32;
+
+    return result;
 }
 
 Operand *
@@ -1174,14 +1211,18 @@ vm_expr(Expr *expr, bool assignment = false) {
                 vm_emit(vm_instr(expr, OP_PUSH, operand_rax(EBIN(expr)->right->type->size)));
 
                 vm_expr(EBIN(expr)->left);
-                vm_emit(vm_instr(expr, OP_POP, operand_rdi(EBIN(expr)->left->type->size)));
+                vm_emit(vm_instr(expr, OP_POP, operand_rdi(EBIN(expr)->left->type->item_size)));
 
                 if ( EBIN(expr)->op == BIN_ADD ) {
                     vm_emit(vm_instr(expr, OP_ADD, operand_rax(expr->type->size), operand_rdi(expr->type->size)));
                 } else if ( EBIN(expr)->op == BIN_SUB ) {
                     vm_emit(vm_instr(expr, OP_SUB, operand_rax(expr->type->size), operand_rdi(expr->type->size)));
                 } else if ( EBIN(expr)->op == BIN_MUL ) {
-                    vm_emit(vm_instr(expr, OP_IMUL, operand_rax(expr->type->size), operand_rdi(expr->type->size)));
+                    if ( expr->type->is_signed ) {
+                        vm_emit(vm_instr(expr, OP_IMUL, operand_rax(expr->type->size), operand_rdi(expr->type->size)));
+                    } else {
+                        vm_emit(vm_instr(expr, OP_MUL, operand_rax(expr->type->size), operand_rdi(expr->type->size)));
+                    }
                 } else if ( EBIN(expr)->op == BIN_DIV ) {
                     if ( EBIN(expr)->right->type->is_signed ) {
                         vm_emit(vm_instr(expr, OP_DIV, operand_rdi(expr->type->size)));
@@ -1244,31 +1285,27 @@ vm_expr(Expr *expr, bool assignment = false) {
                 if ( assignment ) {
                     return vm_addr(expr);
                 } else {
-                    vm_emit(vm_instr(expr, OP_LEA, operand_rax(expr->type->size), operand_rbp(expr->type->size, sym->decl->offset)));
+                    vm_emit(vm_instr(expr, OP_LEA, operand_rax(expr->type->item_size), operand_rbp(expr->type->item_size, sym->decl->offset)));
                 }
             }
         } break;
 
         case EXPR_INDEX: {
-            uint32_t index_size = EINDEX(expr)->index->type->size;
-            uint32_t base_size  = TARRAY(EINDEX(expr)->base->type)->base_size;
-            int32_t  displacement = -(int32_t)base_size;
+            uint32_t index_size     = EINDEX(expr)->index->type->size;
+            uint32_t item_size      = EINDEX(expr)->base->type->item_size;
+
+            Operand *op = vm_addr(expr);
+            Expr *offset = construct_offset_expr(EINDEX(expr));
+
+            vm_expr(offset, assignment);
+            vm_emit(vm_instr(expr, OP_MUL, operand_rax(item_size), operand_imm(value((uint64_t)item_size, item_size), item_size)));
+            vm_emit(vm_instr(expr, OP_LEA, operand_rsi(item_size), operand_ptr(op)));
+            vm_emit(vm_instr(expr, OP_ADD, operand_rsi(item_size), operand_rax(index_size)));
 
             if ( assignment ) {
-                vm_expr(EINDEX(expr)->index);
-                vm_emit(vm_instr(expr, OP_PUSH, operand_rax(index_size)));
-
-                vm_emit(vm_instr(expr, OP_LEA, operand_rsi(base_size), operand_ptr(operand_reg(REG_RBP, displacement))));
-                vm_emit(vm_instr(expr, OP_POP, operand_rdi(index_size)));
-
-                return operand_ptr(operand_addr(operand_rsi(base_size), operand_rdi(index_size)));
+                return operand_ptr(operand_rsi(item_size));
             } else {
-                vm_expr(EINDEX(expr)->index);
-                vm_emit(vm_instr(expr, OP_PUSH, operand_rax(index_size)));
-
-                vm_emit(vm_instr(expr, OP_LEA, operand_rsi(base_size), operand_ptr(operand_reg(REG_RBP, displacement))));
-                vm_emit(vm_instr(expr, OP_POP, operand_rdi(index_size)));
-                vm_emit(vm_instr(expr, OP_MOV, operand_rax(expr->type->size), operand_addr(operand_rsi(base_size), operand_rdi(index_size))));
+                vm_emit(vm_instr(expr, OP_MOV, operand_rax(item_size), operand_addr(operand_rsi(item_size))));
             }
         } break;
 
@@ -1324,8 +1361,6 @@ vm_decl(Decl *decl) {
         } break;
 
         case DECL_PROC: {
-            vm_emit(vm_instr(decl, OP_DATA, operand_name(value(".text"))));
-            vm_emit(vm_instr(decl, OP_DATA, operand_name(value(".global")), operand_name(value(decl->name))));
             vm_emit(vm_instr(decl, OP_ENTER, operand_imm(value((uint64_t)DPROC(decl)->scope->frame_size, 4), 4), decl->name));
 
             uint8_t reg = 0;
@@ -1480,7 +1515,7 @@ step(Cpu *cpu) {
                 assert(0);
             }
 
-            reg_write(cpu, REG_RAX, operand1 + operand2);
+            reg_write(cpu, instr->dst, operand1 + operand2);
         } break;
 
         case OP_CALL: {
@@ -1711,6 +1746,10 @@ step(Cpu *cpu) {
                                 reg_write(cpu, instr->dst, reg_read(cpu, op));
                             }
                         }
+                    } else if ( instr->src->kind == OPERAND_ADDR_REG ) {
+                        Operand *op = instr->src->op;
+
+                        reg_write(cpu, instr->dst, mem_read(cpu->mem, (uint32_t)(reg_read(cpu, op)), instr->src->op->size));
                     } else if ( instr->src->kind == OPERAND_ADDR_REGS ) {
                         Operand *op1 = instr->src->op1;
                         Operand *op2 = instr->src->op2;
@@ -1740,6 +1779,34 @@ step(Cpu *cpu) {
                 }
             } else {
                 assert(0);
+            }
+        } break;
+
+        case OP_MUL: {
+            uint64_t operand1 = 0;
+            uint64_t operand2 = 0;
+
+            if ( operand_is_reg(instr->operand1) ) {
+                operand1 = reg_read(cpu, instr->operand1);
+            } else if ( instr->operand1->kind == OPERAND_IMM ) {
+                operand1 = instr->operand1->val.u64;
+            } else {
+                assert(0);
+            }
+
+            if ( operand_is_reg(instr->operand2) ) {
+                operand2 = reg_read(cpu, instr->operand2);
+            } else if ( instr->operand2->kind == OPERAND_IMM ) {
+                operand2 = instr->operand2->val.u64;
+            } else {
+                assert(0);
+            }
+
+            reg_write(cpu, REG_RAX, operand1 * operand2);
+
+            flags_clear(cpu);
+            if ( reg_read(cpu, REG_RAX) == 0 ) {
+                flags_set(cpu, RFLAG_ZF);
             }
         } break;
 
@@ -1890,7 +1957,7 @@ compile(Parsed_File *file) {
 
 uint64_t
 eval(Instrs instrs) {
-    Cpu *cpu = cpu_new(instrs, 1024*1024, 101);
+    Cpu *cpu = cpu_new(instrs, 1024*1024, 121);
 
     for (;;) {
         if ( !step(cpu) ) {

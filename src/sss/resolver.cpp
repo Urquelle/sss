@@ -103,6 +103,7 @@ struct Type {
     Type_Kind kind;
 
     uint32_t size;
+    uint32_t item_size;
     uint32_t align;
     uint16_t id;
     bool     is_signed;
@@ -113,18 +114,17 @@ struct Type {
 };
 
 struct Type_Ptr : Type {
-    Type *base;
+    Type  * base;
 };
 
 struct Type_Array : Type {
     Type   * base;
-    uint32_t base_size;
-    size_t   num_elems;
+    int32_t  num_elems;
 };
 
 struct Type_Compound : Type {
     Compound_Elems elems;
-    uint32_t       num_elems;
+    int32_t        num_elems;
 };
 
 struct Type_Struct : Type {
@@ -256,6 +256,7 @@ type_new( uint32_t size, Type_Kind kind, bool is_signed = false ) {
     result->kind      = kind;
     result->sym       = NULL;
     result->size      = size;
+    result->item_size = size;
     result->align     = 0;
     result->id        = global_type_id++;
     result->is_signed = is_signed;
@@ -270,10 +271,11 @@ Type_String *
 type_string_new() {
     Type_String *result = urq_allocs(Type_String);
 
-    result->kind  = TYPE_STRING;
-    result->size  = sizeof(uint64_t) + PTR_SIZE;
-    result->id    = global_type_id++;
-    result->scope = scope_new("string");
+    result->kind      = TYPE_STRING;
+    result->size      = sizeof(uint64_t) + PTR_SIZE;
+    result->item_size = result->size;
+    result->id        = global_type_id++;
+    result->scope     = scope_new("string");
 
     sym_push_scope(&loc_none, result->scope, prop_size, type_u64);
     sym_push_scope(&loc_none, result->scope, prop_num, type_u64);
@@ -290,6 +292,7 @@ type_incomplete_struct(Sym *sym) {
     result->kind  = TYPE_INCOMPLETE;
     result->sym   = sym;
     result->size  = 0;
+    result->item_size = 0;
     result->align = 0;
     result->id    = global_type_id++;
     result->scope = scope_new(sym->name);
@@ -306,6 +309,7 @@ type_incomplete_enum(Sym *sym) {
     result->kind  = TYPE_INCOMPLETE;
     result->sym   = sym;
     result->size  = 0;
+    result->item_size = 0;
     result->align = 0;
     result->id    = global_type_id++;
     result->scope = scope_new(sym->name);
@@ -322,6 +326,7 @@ type_incomplete_union(Sym *sym) {
     result->kind  = TYPE_INCOMPLETE;
     result->sym   = sym;
     result->size  = 0;
+    result->item_size = 0;
     result->align = 0;
     result->id    = global_type_id++;
     result->scope = scope_new(sym->name);
@@ -337,6 +342,7 @@ type_union() {
 
     result->kind  = TYPE_UNION;
     result->size  = 0;
+    result->item_size = 0;
     result->align = 0;
     result->id    = global_type_id++;
     result->scope = scope_new("union");
@@ -364,6 +370,7 @@ type_compound(Compound_Elems elems, uint32_t num_elems) {
     result->kind      = TYPE_COMPOUND;
     result->sym       = NULL;
     result->size      = 0;
+    result->item_size = 0;
     result->align     = 0;
     result->id        = global_type_id++;
     result->scope     = NULL;
@@ -521,19 +528,20 @@ type_ptr(Type *base) {
 
     result->kind = TYPE_PTR;
     result->size = PTR_SIZE;
+    result->item_size = PTR_SIZE;
     result->base = base;
 
     return result;
 }
 
 Type_Array *
-type_array(Type *base, uint32_t num_elems, uint32_t size) {
+type_array(Type *base, uint32_t num_elems, uint32_t size, uint32_t item_size) {
     Type_Array *result = urq_allocs(Type_Array);
 
     result->kind      = TYPE_ARRAY;
     result->base      = base;
     result->num_elems = num_elems;
-    result->base_size = size;
+    result->item_size = item_size;
     result->size      = num_elems * size;
     result->scope     = scope_new("array");
 
@@ -1146,12 +1154,12 @@ resolve_typespec(Typespec *typespec) {
 
                 if ( op->is_const ) {
                     assert(op->val.kind != VAL_NONE);
-                    result = type_array(type, op->val.s32, type->size);
+                    result = type_array(type, op->val.s32, type->size, type->item_size);
                 } else {
-                    result = type_array(type, 0, type->size);
+                    result = type_array(type, 0, type->size, type->item_size);
                 }
             } else {
-                result = type_array(type, 0, PTR_SIZE);
+                result = type_array(type, 0, PTR_SIZE, PTR_SIZE);
             }
         } break;
 
