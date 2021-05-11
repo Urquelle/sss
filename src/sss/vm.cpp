@@ -3,9 +3,11 @@ namespace Vm {
 enum { STACK_SIZE = 1024 };
 
 struct Cpu;
+struct Operand;
 struct Mem;
 
-void vm_stmt(Stmt *stmt, Mem *mem, char *proc_name = NULL);
+Operand * vm_expr(Expr *expr, bool assignment = false);
+void      vm_stmt(Stmt *stmt, Mem *mem, char *proc_name = NULL);
 
 enum Vm_Op {
     OP_HLT,
@@ -1170,8 +1172,32 @@ construct_offset_expr(Expr *expr) {
     return result;
 }
 
+void
+vm_emit_and(Expr_Bin *expr) {
+    vm_expr(expr->left);
+    vm_emit(vm_instr(expr, OP_CMP, operand_rax(expr->type->size), operand_imm(value1, expr->type->size)));
+    int32_t jmp1_instr = vm_emit(vm_instr(expr, OP_JNE, operand_addr(0, expr->type->size)));
+
+    vm_expr(expr->right);
+    vm_emit(vm_instr(expr, OP_CMP, operand_rax(expr->type->size), operand_imm(value1, expr->type->size)));
+
+    vm_instr_patch(jmp1_instr, buf_len(vm_instrs));
+}
+
+void
+vm_emit_or(Expr_Bin *expr) {
+    vm_expr(expr->left);
+    vm_emit(vm_instr(expr, OP_CMP, operand_rax(expr->type->size), operand_imm(value1, expr->type->size)));
+    int32_t jmp1_instr = vm_emit(vm_instr(expr, OP_JE, operand_addr(0, expr->type->size)));
+
+    vm_expr(expr->right);
+    vm_emit(vm_instr(expr, OP_CMP, operand_rax(expr->type->size), operand_imm(value1, expr->type->size)));
+
+    vm_instr_patch(jmp1_instr, buf_len(vm_instrs));
+}
+
 Operand *
-vm_expr(Expr *expr, bool assignment = false) {
+vm_expr(Expr *expr, bool assignment) {
     Operand *result = NULL;
 
     switch ( expr->kind ) {
@@ -1191,26 +1217,12 @@ vm_expr(Expr *expr, bool assignment = false) {
 
         case EXPR_BIN: {
             if ( EBIN(expr)->op == BIN_AND ) {
-                vm_expr(EBIN(expr)->left);
-                vm_emit(vm_instr(expr, OP_CMP, operand_rax(expr->type->size), operand_imm(value1, expr->type->size)));
-                int32_t jmp1_instr = vm_emit(vm_instr(expr, OP_JNE, operand_addr(0, expr->type->size)));
-
-                vm_expr(EBIN(expr)->right);
-                vm_emit(vm_instr(expr, OP_CMP, operand_rax(expr->type->size), operand_imm(value1, expr->type->size)));
-
-                vm_instr_patch(jmp1_instr, buf_len(vm_instrs));
+                vm_emit_and(EBIN(expr));
             } else if ( EBIN(expr)->op == BIN_OR ) {
-                vm_expr(EBIN(expr)->left);
-                vm_emit(vm_instr(expr, OP_CMP, operand_rax(expr->type->size), operand_imm(value1, expr->type->size)));
-                int32_t jmp1_instr = vm_emit(vm_instr(expr, OP_JE, operand_addr(0, expr->type->size)));
-
-                vm_expr(EBIN(expr)->right);
-                vm_emit(vm_instr(expr, OP_CMP, operand_rax(expr->type->size), operand_imm(value1, expr->type->size)));
-
-                vm_instr_patch(jmp1_instr, buf_len(vm_instrs));
+                vm_emit_and(EBIN(expr));
             } else {
                 vm_expr(EBIN(expr)->right);
-                vm_emit(vm_instr(expr, OP_PUSH, operand_rax(EBIN(expr)->right->type->size)));
+                vm_emit(vm_instr(expr, OP_PUSH, operand_rax(EBIN(expr)->right->type->item_size)));
 
                 vm_expr(EBIN(expr)->left);
                 vm_emit(vm_instr(expr, OP_POP, operand_rdi(EBIN(expr)->left->type->item_size)));
@@ -2010,7 +2022,7 @@ compile(Parsed_File *file, Mem *mem) {
 
 uint64_t
 eval(Instrs instrs, Mem *mem) {
-    Cpu *cpu = cpu_new(instrs, mem, 135);
+    Cpu *cpu = cpu_new(instrs, mem, 17);
 
     for (;;) {
         if ( !step(cpu) ) {

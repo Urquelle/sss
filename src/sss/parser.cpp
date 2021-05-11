@@ -1189,7 +1189,7 @@ parse_expr_mul(Token_List *tokens) {
 
     while ( token_is(tokens, T_ASTERISK) || token_is(tokens, T_SLASH) ) {
         Token *op = token_read(tokens);
-        left = expr_bin(curr, token_op(op), left, parse_expr_mul(tokens));
+        left = expr_bin(curr, token_op(op), left, parse_expr_index(tokens));
     }
 
     return left;
@@ -1202,7 +1202,7 @@ parse_expr_plus(Token_List *tokens) {
 
     while ( token_is(tokens, T_PLUS) || token_is(tokens, T_MINUS) ) {
         Token *op = token_read(tokens);
-        left = expr_bin(curr, token_op(op), left, parse_expr_plus(tokens));
+        left = expr_bin(curr, token_op(op), left, parse_expr_mul(tokens));
     }
 
     return left;
