@@ -221,7 +221,7 @@ struct Instr : Loc {
 
 typedef Instr ** Instrs;
 
-struct Segment {
+struct Section {
     char     * name;
     Instrs     instrs;
     uint32_t   num_instrs;
@@ -234,8 +234,8 @@ struct Mem {
 };
 
 struct Vm {
-    Segment * data_segment;
-    Segment * text_segment;
+    Section * data_section;
+    Section * text_section;
 };
 
 struct Cpu {
@@ -250,9 +250,9 @@ struct Cpu {
 
 Instrs    vm_instrs;
 Instrs    vm_instrs_labeled;
-Segment * vm_data_segment;
-Segment * vm_text_segment;
-Segment * vm_curr_segment;
+Section * vm_data_section;
+Section * vm_text_section;
+Section * vm_curr_section;
 
 Vm_Reg64 regs64[] = { REG_RCX, REG_RDX, REG_R8,  REG_R9  };
 Vm_Reg32 regs32[] = { REG_ECX, REG_EDX, REG_R8D, REG_R9D };
@@ -433,9 +433,9 @@ flag_state(Cpu *cpu, Vm_Rflag flag) {
     return result;
 }
 
-Segment *
-segment_new(char *name) {
-    Segment *result = urq_allocs(Segment);
+Section *
+section_new(char *name) {
+    Section *result = urq_allocs(Section);
 
     result->name       = name;
     result->instrs     = NULL;
@@ -445,17 +445,17 @@ segment_new(char *name) {
 }
 
 void
-segment_add_instr(Segment *segment, Instr *instr) {
-    buf_push(segment->instrs, instr);
-    segment->num_instrs = buf_len(segment->instrs);
+section_add_instr(Section *section, Instr *instr) {
+    buf_push(section->instrs, instr);
+    section->num_instrs = buf_len(section->instrs);
 }
 
 Vm *
-vm_new(Segment *data_segment, Segment *text_segment) {
+vm_new(Section *data_section, Section *text_section) {
     Vm *result = urq_allocs(Vm);
 
-    result->data_segment = data_segment;
-    result->text_segment = text_segment;
+    result->data_section = data_section;
+    result->text_section = text_section;
 
     return result;
 }
@@ -1041,7 +1041,7 @@ vm_emit(Instr *instr) {
         buf_push(vm_instrs_labeled, instr);
     }
 
-    segment_add_instr(vm_curr_segment, instr);
+    section_add_instr(vm_curr_section, instr);
 
     return result;
 }
@@ -2029,19 +2029,19 @@ compile_procs(Stmts stmts, Mem *mem) {
 
 Vm *
 compile(Parsed_File *file, Mem *mem) {
-    if ( !vm_data_segment ) {
-        vm_data_segment = segment_new("data");
+    if ( !vm_data_section ) {
+        vm_data_section = section_new("data");
     }
 
-    if ( !vm_text_segment ) {
-        vm_text_segment = segment_new("text");
+    if ( !vm_text_section ) {
+        vm_text_section = section_new("text");
     }
 
-    vm_curr_segment = vm_text_segment;
+    vm_curr_section = vm_text_section;
 
     compile_procs(file->stmts, mem);
 
-    vm_curr_segment = vm_data_segment;
+    vm_curr_section = vm_data_section;
     for ( int i = 0; i < buf_len(file->stmts); ++i ) {
         Stmt *stmt = file->stmts[i];
 
@@ -2050,7 +2050,7 @@ compile(Parsed_File *file, Mem *mem) {
         }
     }
 
-    Vm *result = vm_new(vm_data_segment, vm_text_segment);
+    Vm *result = vm_new(vm_data_section, vm_text_section);
 
     return result;
 }
@@ -2075,13 +2075,13 @@ setup_init_call(Instrs instrs, Mem *mem) {
 }
 
 Cpu *
-eval_segment(Segment *segment, Mem *mem, bool use_entry_point) {
+eval_section(Section *section, Mem *mem, bool use_entry_point) {
     Cpu *cpu = NULL;
 
     if ( use_entry_point ) {
-        cpu = setup_init_call(segment->instrs, mem);
+        cpu = setup_init_call(section->instrs, mem);
     } else {
-        cpu = cpu_new(segment->instrs, mem, 0);
+        cpu = cpu_new(section->instrs, mem, 0);
     }
 
     for (;;) {
@@ -2095,8 +2095,8 @@ eval_segment(Segment *segment, Mem *mem, bool use_entry_point) {
 
 uint64_t
 eval(Vm *vm, Mem *mem, bool use_entry_point = true) {
-    eval_segment(vm->data_segment, mem, use_entry_point);
-    Cpu *cpu = eval_segment(vm->text_segment, mem, use_entry_point);
+    eval_section(vm->data_section, mem, use_entry_point);
+    Cpu *cpu = eval_section(vm->text_section, mem, use_entry_point);
 
     return reg_read(cpu, REG_RAX);
 }

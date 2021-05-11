@@ -328,15 +328,15 @@ void
 debug(Urq::Sss::Vm::Vm *vm, char *file_name) {
     char *output = NULL;
 
-    output = buf_printf(output, "segment %s:\n", vm->data_segment->name);
-    for ( uint32_t i = 0; i < vm->data_segment->num_instrs; ++i ) {
-        Instr *instr = vm->data_segment->instrs[i];
+    output = buf_printf(output, "section .%s\n", vm->data_section->name);
+    for ( uint32_t i = 0; i < vm->data_section->num_instrs; ++i ) {
+        Instr *instr = vm->data_section->instrs[i];
         output = buf_printf(output, "%s%s%d\n", to_str(instr), instr->comment ? " addr: " : " ; addr: ", instr->addr);
     }
 
-    output = buf_printf(output, "\nsegment %s:\n", vm->text_segment->name);
-    for ( uint32_t i = 0; i < vm->text_segment->num_instrs; ++i ) {
-        Instr *instr = vm->text_segment->instrs[i];
+    output = buf_printf(output, "\nsection .%s\n", vm->text_section->name);
+    for ( uint32_t i = 0; i < vm->text_section->num_instrs; ++i ) {
+        Instr *instr = vm->text_section->instrs[i];
         output = buf_printf(output, "%s%s%d\n", to_str(instr), instr->comment ? " addr: " : " ; addr: ", instr->addr);
     }
 
