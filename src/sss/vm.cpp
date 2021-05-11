@@ -221,10 +221,21 @@ struct Instr : Loc {
 
 typedef Instr ** Instrs;
 
+struct Segment {
+    char     * name;
+    Instrs     instrs;
+    uint32_t   num_instrs;
+};
+
 struct Mem {
     uint8_t  * mem;
     uint32_t   used;
     uint32_t   size;
+};
+
+struct Vm {
+    Segment * data_segment;
+    Segment * text_segment;
 };
 
 struct Cpu {
@@ -237,15 +248,11 @@ struct Cpu {
     uint32_t   stack_size;
 };
 
-struct Data {
-    char    * name;
-    int32_t   size;
-    int32_t   addr;
-};
-
 Instrs    vm_instrs;
 Instrs    vm_instrs_labeled;
-Data   ** vm_data;
+Segment * vm_data_segment;
+Segment * vm_text_segment;
+Segment * vm_curr_segment;
 
 Vm_Reg64 regs64[] = { REG_RCX, REG_RDX, REG_R8,  REG_R9  };
 Vm_Reg32 regs32[] = { REG_ECX, REG_EDX, REG_R8D, REG_R9D };
@@ -269,17 +276,6 @@ make_label(char *fmt, char *str) {
     char *result = NULL;
 
     result = buf_printf(result, fmt, str);
-
-    return result;
-}
-
-Data *
-data(char *name, int32_t size, int32_t addr) {
-    Data *result = urq_allocs(Data);
-
-    result->name = name;
-    result->size = size;
-    result->addr = addr;
 
     return result;
 }
@@ -433,6 +429,33 @@ flags_clear(Cpu *cpu, uint64_t flags) {
 uint32_t
 flag_state(Cpu *cpu, Vm_Rflag flag) {
     uint32_t result = (reg_read(cpu, REG_RFLAGS) & flag) == flag;
+
+    return result;
+}
+
+Segment *
+segment_new(char *name) {
+    Segment *result = urq_allocs(Segment);
+
+    result->name       = name;
+    result->instrs     = NULL;
+    result->num_instrs = 0;
+
+    return result;
+}
+
+void
+segment_add_instr(Segment *segment, Instr *instr) {
+    buf_push(segment->instrs, instr);
+    segment->num_instrs = buf_len(segment->instrs);
+}
+
+Vm *
+vm_new(Segment *data_segment, Segment *text_segment) {
+    Vm *result = urq_allocs(Vm);
+
+    result->data_segment = data_segment;
+    result->text_segment = text_segment;
 
     return result;
 }
@@ -1018,6 +1041,8 @@ vm_emit(Instr *instr) {
         buf_push(vm_instrs_labeled, instr);
     }
 
+    segment_add_instr(vm_curr_segment, instr);
+
     return result;
 }
 
@@ -1516,10 +1541,7 @@ vm_stmt(Stmt *stmt, Mem *mem, char *proc_name) {
         } break;
 
         case STMT_WHILE: {
-            static int while_count = 0;
-            char *label = make_label("while.%d.start", while_count++);
-
-            int32_t loop_start = vm_emit(vm_instr(stmt, OP_NOP, label, "wird für die jmp anweisung benötigt"));
+            int32_t loop_start = buf_len(vm_instrs);
             vm_expr(SWHILE(stmt)->cond);
             vm_emit(vm_instr(stmt, OP_CMP, operand_rax(SWHILE(stmt)->cond->type->size), operand_imm(value0, SWHILE(stmt)->cond->type->size)));
             int32_t jmp_instr = vm_emit(vm_instr(stmt, OP_JZ, operand_addr(0, SWHILE(stmt)->cond->type->size), operand_imm(value1, SWHILE(stmt)->cond->type->size)));
@@ -2005,10 +2027,21 @@ compile_procs(Stmts stmts, Mem *mem) {
     }
 }
 
-Instrs
+Vm *
 compile(Parsed_File *file, Mem *mem) {
+    if ( !vm_data_segment ) {
+        vm_data_segment = segment_new("data");
+    }
+
+    if ( !vm_text_segment ) {
+        vm_text_segment = segment_new("text");
+    }
+
+    vm_curr_segment = vm_text_segment;
+
     compile_procs(file->stmts, mem);
 
+    vm_curr_segment = vm_data_segment;
     for ( int i = 0; i < buf_len(file->stmts); ++i ) {
         Stmt *stmt = file->stmts[i];
 
@@ -2017,18 +2050,53 @@ compile(Parsed_File *file, Mem *mem) {
         }
     }
 
-    return vm_instrs;
+    Vm *result = vm_new(vm_data_segment, vm_text_segment);
+
+    return result;
 }
 
-uint64_t
-eval(Instrs instrs, Mem *mem) {
-    Cpu *cpu = cpu_new(instrs, mem, 17);
+Cpu *
+setup_init_call(Instrs instrs, Mem *mem) {
+    uint32_t start_addr = addr_lookup(value(entry_point));
+
+    Cpu *cpu = cpu_new(instrs, mem, start_addr);
+
+    stack_push(cpu, buf_len(instrs), 8);
+    stack_push(cpu, reg_read(cpu, REG_RBX), 8);
+    stack_push(cpu, reg_read(cpu, REG_RCX), 8);
+    stack_push(cpu, reg_read(cpu, REG_RDX), 8);
+    stack_push(cpu, reg_read(cpu, REG_RDI), 8);
+    stack_push(cpu, reg_read(cpu, REG_R12), 8);
+    stack_push(cpu, reg_read(cpu, REG_R13), 8);
+    stack_push(cpu, reg_read(cpu, REG_R14), 8);
+    stack_push(cpu, reg_read(cpu, REG_R15), 8);
+
+    return cpu;
+}
+
+Cpu *
+eval_segment(Segment *segment, Mem *mem, bool use_entry_point) {
+    Cpu *cpu = NULL;
+
+    if ( use_entry_point ) {
+        cpu = setup_init_call(segment->instrs, mem);
+    } else {
+        cpu = cpu_new(segment->instrs, mem, 0);
+    }
 
     for (;;) {
         if ( !step(cpu) ) {
             break;
         }
     }
+
+    return cpu;
+}
+
+uint64_t
+eval(Vm *vm, Mem *mem, bool use_entry_point = true) {
+    eval_segment(vm->data_segment, mem, use_entry_point);
+    Cpu *cpu = eval_segment(vm->text_segment, mem, use_entry_point);
 
     return reg_read(cpu, REG_RAX);
 }

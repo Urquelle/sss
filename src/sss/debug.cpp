@@ -106,11 +106,11 @@ to_str(Urq::Sss::Vm::Operand *op) {
 
     switch ( op->kind ) {
         case OPERAND_ADDR: {
-            result = buf_printf(result, "@%d", op->addr);
+            result = buf_printf(result, "[%d]", op->addr);
         } break;
 
         case OPERAND_ADDR_REG: {
-            result = buf_printf(result, "@%s", to_str(op->op));
+            result = buf_printf(result, "[%s]", to_str(op->op));
         } break;
 
         case OPERAND_ADDR_REGS: {
@@ -127,7 +127,7 @@ to_str(Urq::Sss::Vm::Operand *op) {
 
         case OPERAND_REG64: {
             if ( op->with_displacement ) {
-                result = buf_printf(result, "%d(%s)", op->displacement, regs64_dbg[op->reg64]);
+                result = buf_printf(result, "%d[%s]", op->displacement, regs64_dbg[op->reg64]);
             } else {
                 result = buf_printf(result, "%s", regs64_dbg[op->reg64]);
             }
@@ -135,7 +135,7 @@ to_str(Urq::Sss::Vm::Operand *op) {
 
         case OPERAND_REG32: {
             if ( op->with_displacement ) {
-                result = buf_printf(result, "%d(%s)", op->displacement, regs32_dbg[op->reg32]);
+                result = buf_printf(result, "%d[%s]", op->displacement, regs32_dbg[op->reg32]);
             } else {
                 result = buf_printf(result, "%s", regs32_dbg[op->reg32]);
             }
@@ -143,7 +143,7 @@ to_str(Urq::Sss::Vm::Operand *op) {
 
         case OPERAND_REG16: {
             if ( op->with_displacement ) {
-                result = buf_printf(result, "%d(%s)", op->displacement, regs16_dbg[op->reg16]);
+                result = buf_printf(result, "%d[%s]", op->displacement, regs16_dbg[op->reg16]);
             } else {
                 result = buf_printf(result, "%s", regs16_dbg[op->reg16]);
             }
@@ -151,7 +151,7 @@ to_str(Urq::Sss::Vm::Operand *op) {
 
         case OPERAND_REG8L: {
             if ( op->with_displacement ) {
-                result = buf_printf(result, "%d(%s)", op->displacement, regs8l[op->reg8l]);
+                result = buf_printf(result, "%d[%s]", op->displacement, regs8l[op->reg8l]);
             } else {
                 result = buf_printf(result, "%s", regs8l[op->reg8l]);
             }
@@ -159,7 +159,7 @@ to_str(Urq::Sss::Vm::Operand *op) {
 
         case OPERAND_REG8H: {
             if ( op->with_displacement ) {
-                result = buf_printf(result, "%d(%s)", op->displacement, regs8h[op->reg8h]);
+                result = buf_printf(result, "%d[%s]", op->displacement, regs8h[op->reg8h]);
             } else {
                 result = buf_printf(result, "%s", regs8h[op->reg8h]);
             }
@@ -325,11 +325,18 @@ to_str(Instr *instr) {
 }
 
 void
-debug(Instrs instrs, char *file_name) {
+debug(Urq::Sss::Vm::Vm *vm, char *file_name) {
     char *output = NULL;
 
-    for ( int32_t i = 0; i < buf_len(instrs); ++i ) {
-        Instr *instr = instrs[i];
+    output = buf_printf(output, "segment %s:\n", vm->data_segment->name);
+    for ( uint32_t i = 0; i < vm->data_segment->num_instrs; ++i ) {
+        Instr *instr = vm->data_segment->instrs[i];
+        output = buf_printf(output, "%s%s%d\n", to_str(instr), instr->comment ? " addr: " : " ; addr: ", instr->addr);
+    }
+
+    output = buf_printf(output, "\nsegment %s:\n", vm->text_segment->name);
+    for ( uint32_t i = 0; i < vm->text_segment->num_instrs; ++i ) {
+        Instr *instr = vm->text_segment->instrs[i];
         output = buf_printf(output, "%s%s%d\n", to_str(instr), instr->comment ? " addr: " : " ; addr: ", instr->addr);
     }
 
