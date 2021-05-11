@@ -1,8 +1,10 @@
-##load "W:/sss/data/expr.sss";
+#load "W:/sss/data/expr.sss";
 
 Vec3 :: struktur {
     x, y, z : s32;
 }
+
+z : s32 = 120;
 
 main :: proc(a: u32, b: u32, c: u32, d: u32, e: u32) -> s32 {
     f: s32 = 7;
@@ -38,7 +40,7 @@ main :: proc(a: u32, b: u32, c: u32, d: u32, e: u32) -> s32 {
     h : [3] s32;
     (h)[c] = 12;
 
-    res h[c] + g + v.x;
+    res z - h[c] + g + v.x;
 }
 
 test :: proc(x : *s32 ) {

@@ -70,12 +70,14 @@ int main(int argc, char* argv[]) {
         char *content = "";
         os_file_read(file_name, &content);
 
+        Mem *mem      = mem_new(1024*1024);
+
         auto tokens   = tokenize(file_name, content);
         auto ast      = parse(&tokens);
                         resolve(ast, false);
-        auto bc       = compile(ast);
+        auto bc       = compile(ast, mem);
                         debug(bc, "output.S");
-        auto result   = eval(bc);
+        auto result   = eval(bc, mem);
 
         printf("result = %lld\n", result);
     }

@@ -178,6 +178,8 @@ Type *type_typeid;
 Type *type_string;
 Type *type_variadic;
 
+Sym * sym_get(char *name);
+
 char *
 to_str(Type *type) {
     char *result = NULL;
@@ -555,6 +557,8 @@ type_proc(Decl_Var **params, uint32_t num_params, Decl_Var **rets, uint32_t num_
     Type_Proc *result = urq_allocs(Type_Proc);
 
     result->kind       = TYPE_PROC;
+    result->size       = 8;
+    result->item_size  = 8;
     result->params     = (Decl_Var **)MEMDUP(params);
     result->num_params = num_params;
     result->rets       = (Decl_Var **)MEMDUP(rets);
@@ -696,6 +700,11 @@ sym_push_type(Loc *loc, char *name, Decl *decl) {
 
 Sym *
 sym_push_var(Loc *loc, char *name, Decl *decl) {
+    Sym *sym = sym_get(name);
+    if ( sym ) {
+        report_error(sym, "%s überschattet eine vorherige deklaration", sym->name);
+    }
+
     Sym *result = sym_push(loc, name, NULL);
 
     result->kind  = SYM_VAR;
@@ -706,6 +715,22 @@ sym_push_var(Loc *loc, char *name, Decl *decl) {
 
 Sym *
 sym_push_var(Loc *loc, char *name, Type *type) {
+    Sym *sym = sym_get(name);
+    if ( sym ) {
+        report_error(sym, "%s überschattet eine vorherige deklaration", sym->name);
+    }
+
+    Sym *result = sym_push(loc, name, NULL);
+
+    result->kind  = SYM_VAR;
+    result->state = SYMSTATE_RESOLVED;
+    result->type  = type;
+
+    return result;
+}
+
+Sym *
+sym_push_aggr_field(Loc *loc, char *name, Type *type) {
     Sym *result = sym_push(loc, name, NULL);
 
     result->kind  = SYM_VAR;
@@ -1637,7 +1662,7 @@ resolve_aggr_fields(Aggr_Fields fields, uint32_t num_fields) {
         field->type = field_type;
         field->operand = operand;
 
-        sym_push_var(field, field->name, field_type);
+        sym_push_aggr_field(field, field->name, field_type);
 
         if ( field->has_using ) {
             if ( field->type->kind != TYPE_STRUCT ) {

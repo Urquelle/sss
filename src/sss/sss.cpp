@@ -198,28 +198,31 @@ void sss_repl() {
         printf(">>> ");
         gets_s(buf, sizeof(buf));
 
+        Mem *mem      = mem_new(1024*1024);
+
         auto tokens   = tokenize("<repl>", buf);
         auto ast      = parse(&tokens);
                         resolve(ast, false);
-        auto bc       = compile(ast);
+        auto bc       = compile(ast, mem);
                         debug(bc, "output.S");
-        auto result   = eval(bc);
+        auto result   = eval(bc, mem);
 
         printf("-> %lld\n", result);
     }
 }
 
 namespace api {
+    using Urq::Sss::Mem;
+
+    using Urq::Sss::Vm::compile;
+    using Urq::Sss::Vm::eval;
+    using Urq::Sss::debug;
+    using Urq::Sss::mem_new;
     using Urq::Sss::parse;
     using Urq::Sss::resolve;
     using Urq::Sss::resolver_init;
     using Urq::Sss::sss_repl;
     using Urq::Sss::tokenize;
-
-    using Urq::Sss::debug;
-
-    using Urq::Sss::Vm::compile;
-    using Urq::Sss::Vm::eval;
 }
 
 }}
