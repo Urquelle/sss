@@ -1101,11 +1101,11 @@ vm_expr(Expr *expr, Mem *mem, bool assignment) {
             }
 
             assert(field);
-            vm_emit(vm_instr(expr, OP_LEA, operand_rsi(field->type->size), operand_ptr(op)));
+            vm_emit(vm_instr(expr, OP_LEA, operand_rsi(field->type->size), op));
             vm_emit(vm_instr(expr, OP_ADD, operand_rsi(field->type->size), operand_imm(value((int64_t)field->offset, 4), 4)));
 
             if ( assignment ) {
-                return operand_ptr(operand_rsi(field->type->size));
+                return operand_addr(operand_rsi(field->type->size));
             } else {
                 vm_emit(vm_instr(expr, OP_MOV, operand_rax(field->type->size), operand_addr(operand_rsi(field->type->size))));
             }
@@ -1121,37 +1121,37 @@ vm_expr(Expr *expr, Mem *mem, bool assignment) {
 
             if (sym->decl->is_global) {
                 if ( assignment ) {
-                    return operand_ptr(operand_addr(EIDENT(expr)->sym->decl->offset, expr->type->item_size));
+                    return operand_addr(EIDENT(expr)->sym->decl->offset, expr->type->item_size);
                 } else {
                     if ( sym->decl->kind == DECL_PROC ) {
                         vm_emit(vm_instr(expr, OP_LEA, operand_rax(sym->type->item_size), operand_name(value(sym->name))));
                     } else {
-                        vm_emit(vm_instr(expr, OP_LEA, operand_rax(sym->type->item_size), operand_ptr(operand_addr(sym->decl->offset, sym->type->item_size))));
+                        vm_emit(vm_instr(expr, OP_LEA, operand_rax(sym->type->item_size), operand_addr(sym->decl->offset, sym->type->item_size)));
                     }
                 }
             } else {
                 if ( assignment ) {
                     return vm_addr(expr);
                 } else {
-                    vm_emit(vm_instr(expr, OP_LEA, operand_rax(sym->type->item_size), operand_rbp(sym->type->item_size, sym->decl->offset)));
+                    vm_emit(vm_instr(expr, OP_LEA, operand_rax(sym->type->item_size), operand_addr(operand_rbp(sym->type->item_size, sym->decl->offset))));
                 }
             }
         } break;
 
         case EXPR_INDEX: {
-            uint32_t index_size     = EINDEX(expr)->index->type->size;
-            uint32_t item_size      = EINDEX(expr)->base->type->item_size;
+            uint32_t index_size = EINDEX(expr)->index->type->size;
+            uint32_t item_size  = EINDEX(expr)->base->type->item_size;
 
             Operand *op = vm_addr(expr);
             Expr *offset = construct_offset_expr(expr);
 
             vm_expr(offset, mem, assignment);
             vm_emit(vm_instr(expr, OP_MUL, operand_rax(item_size), operand_imm(value((uint64_t)item_size, item_size), item_size)));
-            vm_emit(vm_instr(expr, OP_LEA, operand_rsi(item_size), operand_ptr(op)));
+            vm_emit(vm_instr(expr, OP_LEA, operand_rsi(item_size), operand_addr(op)));
             vm_emit(vm_instr(expr, OP_ADD, operand_rsi(item_size), operand_rax(index_size)));
 
             if ( assignment ) {
-                return operand_ptr(operand_rsi(item_size));
+                return operand_addr(operand_rsi(item_size));
             } else {
                 vm_emit(vm_instr(expr, OP_MOV, operand_rax(item_size), operand_addr(operand_rsi(item_size))));
             }
@@ -1521,18 +1521,22 @@ step(Cpu *cpu) {
             if ( instr->dst->kind == OPERAND_REG ) {
                 if ( instr->src->kind == OPERAND_REG ) {
                     if ( instr->src->with_displacement ) {
-#if 0
                         reg_write(cpu, instr->dst, reg_read(cpu, instr->src) + instr->src->displacement);
-#else
-                        reg_write(cpu, instr->dst, mem_read64(cpu->mem, (uint32_t)(reg_read(cpu, instr->src) + instr->src->displacement)));
-#endif
                     } else {
                         reg_write(cpu, instr->dst, reg_read(cpu, instr->src));
                     }
                 } else if ( instr->src->kind == OPERAND_NAME ) {
                     reg_write(cpu, instr->dst, addr_lookup(instr->src->val));
                 } else if ( instr->src->kind == OPERAND_ADDR ) {
-                    reg_write(cpu, instr->dst, instr->src->addr);
+                    reg_write(cpu, instr->dst, mem_read(cpu->mem, (uint32_t)instr->src->addr, instr->src->size));
+                } else if ( instr->src->kind == OPERAND_ADDR_REG ) {
+                    Operand *op = instr->src->op;
+
+                    if ( op->with_displacement ) {
+                        reg_write(cpu, instr->dst, mem_read(cpu->mem, (uint32_t)(reg_read(cpu, op)) + op->displacement, instr->src->op->size));
+                    } else {
+                        reg_write(cpu, instr->dst, mem_read(cpu->mem, (uint32_t)(reg_read(cpu, op)), instr->src->op->size));
+                    }
                 } else {
                     assert(instr->src->kind == OPERAND_PTR );
                     Operand *op = instr->src->op;
@@ -1618,12 +1622,22 @@ step(Cpu *cpu) {
                     Operand *op2 = op->op2;
 
                     mem_write(cpu->mem, (uint32_t)(reg_read(cpu, op1) + reg_read(cpu, op2)), reg_read(cpu, instr->src));
+                } else if ( op->kind == OPERAND_ADDR ) {
+                    mem_write(cpu->mem, op->addr, reg_read(cpu, instr->src));
                 } else {
                     assert(0);
                 }
             } else if ( instr->dst->kind == OPERAND_ADDR ) {
                 if ( instr->src->kind == OPERAND_REG ) {
                     mem_write(cpu->mem, instr->dst->addr, reg_read(cpu, instr->src));
+                } else {
+                    assert(0);
+                }
+            } else if ( instr->dst->kind == OPERAND_ADDR_REG ) {
+                Operand *op = instr->dst->op;
+
+                if ( instr->src->kind == OPERAND_REG ) {
+                    mem_write(cpu->mem, reg_read(cpu, op), reg_read(cpu, instr->src));
                 } else {
                     assert(0);
                 }
