@@ -47,24 +47,17 @@ char *regs16_dbg[] = {
     "r9w",
 };
 
-char *regs8l[] = {
+char *regs8_dbg[] = {
     "al",
     "bl",
     "cl",
     "dl",
     "",
     "",
-    "",
+    "dil",
     "spl",
     "r8b",
     "r9b",
-};
-
-char *regs8h[] = {
-    "ah",
-    "bh",
-    "ch",
-    "dh",
 };
 
 char *
@@ -125,43 +118,27 @@ to_str(Urq::Sss::Vm::Operand *op) {
             result = buf_printf(result, "ptr %s", to_str(op->op));
         } break;
 
-        case OPERAND_REG64: {
+        case OPERAND_REG: {
             if ( op->with_displacement ) {
-                result = buf_printf(result, "%d[%s]", op->displacement, regs64_dbg[op->reg64]);
+                if ( op->reg.size == 8 ) {
+                    result = buf_printf(result, "%d[%s]", op->displacement, regs64_dbg[op->reg.kind]);
+                } else if ( op->reg.size == 4 ) {
+                    result = buf_printf(result, "%d[%s]", op->displacement, regs32_dbg[op->reg.kind]);
+                } else if ( op->reg.size == 2 ) {
+                    result = buf_printf(result, "%d[%s]", op->displacement, regs16_dbg[op->reg.kind]);
+                } else if ( op->reg.size == 1 ) {
+                    result = buf_printf(result, "%d[%s]", op->displacement, regs8_dbg[op->reg.kind]);
+                }
             } else {
-                result = buf_printf(result, "%s", regs64_dbg[op->reg64]);
-            }
-        } break;
-
-        case OPERAND_REG32: {
-            if ( op->with_displacement ) {
-                result = buf_printf(result, "%d[%s]", op->displacement, regs32_dbg[op->reg32]);
-            } else {
-                result = buf_printf(result, "%s", regs32_dbg[op->reg32]);
-            }
-        } break;
-
-        case OPERAND_REG16: {
-            if ( op->with_displacement ) {
-                result = buf_printf(result, "%d[%s]", op->displacement, regs16_dbg[op->reg16]);
-            } else {
-                result = buf_printf(result, "%s", regs16_dbg[op->reg16]);
-            }
-        } break;
-
-        case OPERAND_REG8L: {
-            if ( op->with_displacement ) {
-                result = buf_printf(result, "%d[%s]", op->displacement, regs8l[op->reg8l]);
-            } else {
-                result = buf_printf(result, "%s", regs8l[op->reg8l]);
-            }
-        } break;
-
-        case OPERAND_REG8H: {
-            if ( op->with_displacement ) {
-                result = buf_printf(result, "%d[%s]", op->displacement, regs8h[op->reg8h]);
-            } else {
-                result = buf_printf(result, "%s", regs8h[op->reg8h]);
+                if ( op->reg.size == 8 ) {
+                    result = buf_printf(result, "%s", regs64_dbg[op->reg.kind]);
+                } else if ( op->reg.size == 4 ) {
+                    result = buf_printf(result, "%s", regs32_dbg[op->reg.kind]);
+                } else if ( op->reg.size == 2 ) {
+                    result = buf_printf(result, "%s", regs16_dbg[op->reg.kind]);
+                } else if ( op->reg.size == 1 ) {
+                    result = buf_printf(result, "%s", regs8_dbg[op->reg.kind]);
+                }
             }
         } break;
 
@@ -328,13 +305,16 @@ void
 debug(Urq::Sss::Vm::Vm *vm, char *file_name) {
     char *output = NULL;
 
-    output = buf_printf(output, "section .%s\n", vm->data_section->name);
-    for ( uint32_t i = 0; i < vm->data_section->num_instrs; ++i ) {
-        Instr *instr = vm->data_section->instrs[i];
-        output = buf_printf(output, "%s%s%d\n", to_str(instr), instr->comment ? " addr: " : " ; addr: ", instr->addr);
+    if ( vm->data_section->num_instrs ) {
+        output = buf_printf(output, "section .%s\n", vm->data_section->name);
+        for ( uint32_t i = 0; i < vm->data_section->num_instrs; ++i ) {
+            Instr *instr = vm->data_section->instrs[i];
+            output = buf_printf(output, "%s%s%d\n", to_str(instr), instr->comment ? " addr: " : " ; addr: ", instr->addr);
+        }
+        output = buf_printf(output, "\n");
     }
 
-    output = buf_printf(output, "\nsection .%s\n", vm->text_section->name);
+    output = buf_printf(output, "section .%s\n", vm->text_section->name);
     for ( uint32_t i = 0; i < vm->text_section->num_instrs; ++i ) {
         Instr *instr = vm->text_section->instrs[i];
         output = buf_printf(output, "%s%s%d\n", to_str(instr), instr->comment ? " addr: " : " ; addr: ", instr->addr);

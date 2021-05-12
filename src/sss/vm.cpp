@@ -45,7 +45,7 @@ enum Vm_Op {
     OP_COUNT,
 };
 
-enum Vm_Reg64 {
+enum Reg_Kind {
     REG_RAX,
     REG_RBX,
     REG_RCX,
@@ -68,47 +68,9 @@ enum Vm_Reg64 {
     REG_COUNT,
 };
 
-enum Vm_Reg32 {
-    REG_EAX,
-    REG_EBX,
-    REG_ECX,
-    REG_EDX,
-    REG_EBP,
-    REG_ESI,
-    REG_EDI,
-    REG_ESP,
-    REG_R8D,
-    REG_R9D,
-};
-
-enum Vm_Reg16 {
-    REG_AX,
-    REG_BX,
-    REG_CX,
-    REG_DX,
-    REG_BP,
-    REG_SI,
-    REG_DI,
-    REG_SP,
-    REG_R8W,
-    REG_R9W,
-};
-
-enum Vm_Reg8h {
-    REG_AH,
-    REG_BH,
-    REG_CH,
-    REG_DH,
-};
-
-enum Vm_Reg8l {
-    REG_AL,
-    REG_BL,
-    REG_CL,
-    REG_DL,
-    REG_SPL = REG_SP,
-    REG_R8B = REG_R8W,
-    REG_R9B = REG_R9W,
+struct Reg {
+    Reg_Kind kind;
+    uint32_t size;
 };
 
 enum Vm_Rflag {
@@ -170,11 +132,7 @@ enum Operand_Kind {
     OPERAND_IMM,
     OPERAND_NAME,
     OPERAND_PTR,
-    OPERAND_REG64,
-    OPERAND_REG32,
-    OPERAND_REG16,
-    OPERAND_REG8L,
-    OPERAND_REG8H,
+    OPERAND_REG,
 };
 struct Operand {
     Operand_Kind kind;
@@ -185,11 +143,7 @@ struct Operand {
 
     union {
         uint64_t addr;
-        Vm_Reg64 reg64;
-        Vm_Reg32 reg32;
-        Vm_Reg16 reg16;
-        Vm_Reg8l reg8l;
-        Vm_Reg8h reg8h;
+        Reg      reg;
         Value    val;
         Operand  *op;
 
@@ -254,10 +208,7 @@ Section * vm_data_section;
 Section * vm_text_section;
 Section * vm_curr_section;
 
-Vm_Reg64 regs64[] = { REG_RCX, REG_RDX, REG_R8,  REG_R9  };
-Vm_Reg32 regs32[] = { REG_ECX, REG_EDX, REG_R8D, REG_R9D };
-Vm_Reg16 regs16[] = { REG_CX,  REG_DX,  REG_R8W, REG_R9W };
-Vm_Reg8l  regs8[] = { REG_CL,  REG_DL,  REG_R8B, REG_R9B };
+Reg_Kind regs[] = { REG_RCX, REG_RDX, REG_R8, REG_R9 };
 
 Value value0 = { VAL_U64, 0 };
 Value value1 = { VAL_U64, 1 };
@@ -299,61 +250,52 @@ addr_lookup(Value val) {
 }
 
 uint64_t
-reg_read(Cpu *cpu, Vm_Reg64 reg) {
+reg_read8(Cpu *cpu, Reg_Kind reg) {
     uint64_t result = cpu->regs[reg];
 
     return result;
 }
 
 uint32_t
-reg_read(Cpu *cpu, Vm_Reg32 reg) {
+reg_read4(Cpu *cpu, Reg_Kind reg) {
     uint32_t result = (uint32_t)(cpu->regs[reg] & 0xffffffff);
 
     return result;
 }
 
 uint16_t
-reg_read(Cpu *cpu, Vm_Reg16 reg) {
+reg_read2(Cpu *cpu, Reg_Kind reg) {
     uint16_t result = (uint16_t)(cpu->regs[reg] & 0xffff);
 
     return result;
 }
 
 uint16_t
-reg_read(Cpu *cpu, Vm_Reg8l reg) {
+reg_read1(Cpu *cpu, Reg_Kind reg) {
     uint8_t result = (uint8_t)(cpu->regs[reg] & 0xff);
-
-    return result;
-}
-
-uint16_t
-reg_read(Cpu *cpu, Vm_Reg8h reg) {
-    uint8_t result = (uint8_t)((cpu->regs[reg] >> 2) & 0xff00);
 
     return result;
 }
 
 uint64_t
 reg_read(Cpu *cpu, Operand *op) {
-    switch ( op->kind ) {
-        case OPERAND_REG64: {
-            return reg_read(cpu, op->reg64);
+    assert(op->kind == OPERAND_REG);
+
+    switch ( op->reg.size ) {
+        case 8: {
+            return reg_read8(cpu, op->reg.kind);
         } break;
 
-        case OPERAND_REG32: {
-            return reg_read(cpu, op->reg32);
+        case 4: {
+            return reg_read4(cpu, op->reg.kind);
         } break;
 
-        case OPERAND_REG16: {
-            return reg_read(cpu, op->reg16);
+        case 2: {
+            return reg_read2(cpu, op->reg.kind);
         } break;
 
-        case OPERAND_REG8L: {
-            return reg_read(cpu, op->reg8l);
-        } break;
-
-        case OPERAND_REG8H: {
-            return reg_read(cpu, op->reg8h);
+        case 1: {
+            return reg_read1(cpu, op->reg.kind);
         } break;
 
         default: {
@@ -364,71 +306,65 @@ reg_read(Cpu *cpu, Operand *op) {
 }
 
 void
-reg_write(Cpu *cpu, Vm_Reg64 reg, uint64_t val) {
+reg_write8(Cpu *cpu, Reg_Kind reg, uint64_t val) {
     cpu->regs[reg] = val;
 }
 
 void
-reg_write(Cpu *cpu, Vm_Reg32 reg, uint32_t val) {
+reg_write4(Cpu *cpu, Reg_Kind reg, uint32_t val) {
     cpu->regs[reg] = (cpu->regs[reg] & 0xffffffff00000000) | val;
 }
 
 void
-reg_write(Cpu *cpu, Vm_Reg16 reg, uint16_t val) {
+reg_write2(Cpu *cpu, Reg_Kind reg, uint16_t val) {
     cpu->regs[reg] = (cpu->regs[reg] & 0xffffffffffff0000) | val;
 }
 
 void
-reg_write(Cpu *cpu, Vm_Reg8l reg, uint8_t val) {
+reg_write1(Cpu *cpu, Reg_Kind reg, uint8_t val) {
     cpu->regs[reg] = (cpu->regs[reg] & 0xffffffffffffff00) | val;
 }
 
 void
-reg_write(Cpu *cpu, Vm_Reg8h reg, uint8_t val) {
-    uint16_t temp = val;
-
-    cpu->regs[reg] = (cpu->regs[reg] & 0xffffffffffff00ff) | ((temp << 2) & 0xff00);
-}
-
-void
 reg_write(Cpu *cpu, Operand *op, uint64_t val) {
-    switch ( op->kind ) {
-        case OPERAND_REG64: {
-            reg_write(cpu, op->reg64, val);
+    assert(op->kind == OPERAND_REG);
+    switch ( op->reg.size ) {
+        case 8: {
+            reg_write8(cpu, op->reg.kind, val);
         } break;
-        case OPERAND_REG32: {
-            reg_write(cpu, op->reg32, (uint32_t)val);
+
+        case 4: {
+            reg_write4(cpu, op->reg.kind, (uint32_t)val);
         } break;
-        case OPERAND_REG16: {
-            reg_write(cpu, op->reg16, (uint16_t)val);
+
+        case 2: {
+            reg_write2(cpu, op->reg.kind, (uint16_t)val);
         } break;
-        case OPERAND_REG8L: {
-            reg_write(cpu, op->reg8l, (uint8_t)val);
-        } break;
-        case OPERAND_REG8H: {
-            reg_write(cpu, op->reg8h, (uint8_t)val);
+
+        case 1: {
+            reg_write1(cpu, op->reg.kind, (uint8_t)val);
         } break;
     }
 }
 
 void
 flags_set(Cpu *cpu, uint32_t flags) {
-    reg_write(cpu, REG_RFLAGS, reg_read(cpu, REG_RFLAGS) | flags);
+    reg_write8(cpu, REG_RFLAGS, reg_read8(cpu, REG_RFLAGS) | flags);
 }
 
 void
 flags_clear(Cpu *cpu) {
-    reg_write(cpu, REG_RFLAGS, 0);
+    reg_write8(cpu, REG_RFLAGS, 0);
 }
 
 void
 flags_clear(Cpu *cpu, uint64_t flags) {
-    reg_write(cpu, REG_RFLAGS, reg_read(cpu, REG_RFLAGS) & ~(flags));
+    reg_write8(cpu, REG_RFLAGS, reg_read8(cpu, REG_RFLAGS) & ~(flags));
 }
 
 uint32_t
 flag_state(Cpu *cpu, Vm_Rflag flag) {
-    uint32_t result = (reg_read(cpu, REG_RFLAGS) & flag) == flag;
+    uint32_t result = (reg_read8(cpu, REG_RFLAGS) & flag) == flag;
 
     return result;
 }
@@ -605,8 +541,8 @@ cpu_new(Instrs instrs, Mem *mem, uint32_t start = 0) {
     result->stack_size = STACK_SIZE;
     result->mem        = mem;
 
-    reg_write(result, REG_RIP, start);
-    reg_write(result, REG_RSP, result->mem->size);
+    reg_write8(result, REG_RIP, start);
+    reg_write8(result, REG_RSP, result->mem->size);
 
     return result;
 }
@@ -772,203 +708,58 @@ operand_ptr(Operand *op) {
 }
 
 Operand *
-operand_reg(Vm_Reg64 reg, int32_t displacement) {
+operand_reg(Reg_Kind reg, uint32_t size) {
     Operand *result = urq_allocs(Operand);
 
-    result->kind              = OPERAND_REG64;
-    result->size              = 8;
+    assert(size >= 1 && size <= 8);
+
+    result->kind              = OPERAND_REG;
+    result->size              = size;
+    result->displacement      = 0;
+    result->with_displacement = false;
+    result->reg               = { reg, size };
+
+    return result;
+}
+
+Operand *
+operand_reg(Reg_Kind reg, uint32_t size, int32_t displacement) {
+    Operand *result = urq_allocs(Operand);
+
+    assert(size >= 1 && size <= 8);
+
+    result->kind              = OPERAND_REG;
+    result->size              = size;
     result->displacement      = displacement;
     result->with_displacement = true;
-    result->reg64             = reg;
-
-    return result;
-}
-
-Operand *
-operand_reg(Vm_Reg64 reg) {
-    Operand *result = urq_allocs(Operand);
-
-    result->kind  = OPERAND_REG64;
-    result->size  = 8;
-    result->reg64 = reg;
-
-    return result;
-}
-
-Operand *
-operand_reg(Vm_Reg32 reg, int32_t displacement) {
-    Operand *result = urq_allocs(Operand);
-
-    result->kind              = OPERAND_REG32;
-    result->size              = 4;
-    result->displacement      = displacement;
-    result->with_displacement = true;
-    result->reg32             = reg;
-
-    return result;
-}
-
-Operand *
-operand_reg(Vm_Reg32 reg) {
-    Operand *result = urq_allocs(Operand);
-
-    result->kind  = OPERAND_REG32;
-    result->size  = 4;
-    result->reg32 = reg;
-
-    return result;
-}
-
-Operand *
-operand_reg(Vm_Reg16 reg, int32_t displacement) {
-    Operand *result = urq_allocs(Operand);
-
-    result->kind              = OPERAND_REG16;
-    result->size              = 2;
-    result->displacement      = displacement;
-    result->with_displacement = true;
-    result->reg16             = reg;
-
-    return result;
-}
-
-Operand *
-operand_reg(Vm_Reg16 reg) {
-    Operand *result = urq_allocs(Operand);
-
-    result->kind  = OPERAND_REG16;
-    result->size  = 2;
-    result->reg16 = reg;
-
-    return result;
-}
-
-Operand *
-operand_reg(Vm_Reg8l reg, int32_t displacement) {
-    Operand *result = urq_allocs(Operand);
-
-    result->kind              = OPERAND_REG8L;
-    result->size              = 1;
-    result->displacement      = displacement;
-    result->with_displacement = true;
-    result->reg8l             = reg;
-
-    return result;
-}
-
-Operand *
-operand_reg(Vm_Reg8l reg) {
-    Operand *result = urq_allocs(Operand);
-
-    result->kind  = OPERAND_REG8L;
-    result->size  = 1;
-    result->reg8l = reg;
-
-    return result;
-}
-
-Operand *
-operand_reg(Vm_Reg8h reg, int32_t displacement) {
-    Operand *result = urq_allocs(Operand);
-
-    result->kind              = OPERAND_REG8H;
-    result->size              = 1;
-    result->displacement      = displacement;
-    result->with_displacement = true;
-    result->reg8h             = reg;
-
-    return result;
-}
-
-Operand *
-operand_reg(Vm_Reg8h reg) {
-    Operand *result = urq_allocs(Operand);
-
-    result->kind  = OPERAND_REG8H;
-    result->size  = 1;
-    result->reg8h = reg;
+    result->reg               = { reg, size };
 
     return result;
 }
 
 Operand *
 operand_rax(int32_t size) {
-    if ( size == 1 ) {
-        return operand_reg(REG_AL);
-    } else if ( size == 2 ) {
-        return operand_reg(REG_AX);
-    } else if ( size == 4 ) {
-        return operand_reg(REG_EAX);
-    } else if ( size == 8 ) {
-        return operand_reg(REG_RAX);
-    } else {
-        assert(0);
-        return operand_reg(REG_RAX);
-    }
+    return operand_reg(REG_RAX, size);
 }
 
 Operand *
 operand_rsi(int32_t size) {
-    if ( size == 1 ) {
-        return operand_reg(REG_SI);
-    } else if ( size == 2 ) {
-        return operand_reg(REG_SI);
-    } else if ( size == 4 ) {
-        return operand_reg(REG_ESI);
-    } else if ( size == 8 ) {
-        return operand_reg(REG_RSI);
-    } else {
-        assert(0);
-        return operand_reg(REG_RSI);
-    }
+    return operand_reg(REG_RSI, size);
 }
 
 Operand *
 operand_rdi(int32_t size) {
-    if ( size == 1 ) {
-        return operand_reg(REG_DI);
-    } else if ( size == 2 ) {
-        return operand_reg(REG_DI);
-    } else if ( size == 4 ) {
-        return operand_reg(REG_EDI);
-    } else if ( size == 8 ) {
-        return operand_reg(REG_RDI);
-    } else {
-        assert(0);
-        return operand_reg(REG_RDI);
-    }
+    return operand_reg(REG_RDI, size);
 }
 
 Operand *
 operand_rbp(int32_t size, int32_t displacement) {
-    if ( size == 1 ) {
-        return operand_reg(REG_BP, displacement);
-    } else if ( size == 2 ) {
-        return operand_reg(REG_BP, displacement);
-    } else if ( size == 4 ) {
-        return operand_reg(REG_EBP, displacement);
-    } else if ( size == 8 ) {
-        return operand_reg(REG_RBP, displacement);
-    } else {
-        assert(0);
-        return operand_reg(REG_RBP);
-    }
+    return operand_reg(REG_RBP, size, displacement);
 }
 
 Operand *
 operand_args(int32_t size, int32_t count) {
-    if ( size == 1 ) {
-        return operand_reg(regs8[count]);
-    } else if ( size == 2 ) {
-        return operand_reg(regs16[count]);
-    } else if ( size == 4 ) {
-        return operand_reg(regs32[count]);
-    } else if ( size == 8 ) {
-        return operand_reg(regs64[count]);
-    } else {
-        assert(0);
-        return operand_reg(REG_RCX);
-    }
+    return operand_reg(regs[count], size);
 }
 
 Operand *
@@ -1012,8 +803,8 @@ vm_instr(Loc *loc, Vm_Op op, char *label = NULL, char *comment = NULL) {
 
 Instr *
 vm_instr_fetch(Cpu *cpu) {
-    Instr *result = cpu->instrs[reg_read(cpu, REG_RIP)];
-    reg_write(cpu, REG_RIP, reg_read(cpu, REG_RIP) + 1);
+    Instr *result = cpu->instrs[reg_read8(cpu, REG_RIP)];
+    reg_write8(cpu, REG_RIP, reg_read8(cpu, REG_RIP) + 1);
 
     return result;
 }
@@ -1041,12 +832,12 @@ vm_emit(Instr *instr) {
 
 void
 rsp_dec(Cpu *cpu, uint32_t by_how_much) {
-    reg_write(cpu, REG_RSP, reg_read(cpu, REG_RSP) - by_how_much);
+    reg_write8(cpu, REG_RSP, reg_read8(cpu, REG_RSP) - by_how_much);
 }
 
 void
 rsp_inc(Cpu *cpu, uint32_t by_how_much) {
-    reg_write(cpu, REG_RSP, reg_read(cpu, REG_RSP) + by_how_much);
+    reg_write8(cpu, REG_RSP, reg_read8(cpu, REG_RSP) + by_how_much);
 }
 
 void
@@ -1054,28 +845,28 @@ stack_push(Cpu *cpu, uint64_t val, uint32_t size) {
     switch ( size ) {
         case 1: {
             rsp_dec(cpu, size);
-            uint64_t addr = reg_read(cpu, REG_SPL);
+            uint64_t addr = reg_read1(cpu, REG_RSP);
             assert(addr > cpu->stack_size);
             mem_write(cpu->mem, addr, (uint8_t)val);
         } break;
 
         case 2: {
             rsp_dec(cpu, size);
-            uint64_t addr = reg_read(cpu, REG_SP);
+            uint64_t addr = reg_read2(cpu, REG_RSP);
             assert(addr > cpu->stack_size);
             mem_write(cpu->mem, addr, (uint16_t)val);
         } break;
 
         case 4: {
             rsp_dec(cpu, size);
-            uint64_t addr = reg_read(cpu, REG_ESP);
+            uint64_t addr = reg_read4(cpu, REG_RSP);
             assert(addr > cpu->stack_size);
             mem_write(cpu->mem, addr, (uint32_t)val);
         } break;
 
         case 8: {
             rsp_dec(cpu, size);
-            uint64_t addr = reg_read(cpu, REG_RSP);
+            uint64_t addr = reg_read8(cpu, REG_RSP);
             assert(addr > cpu->stack_size);
             mem_write(cpu->mem, addr, val);
         } break;
@@ -1087,61 +878,53 @@ stack_push(Cpu *cpu, uint64_t val, uint32_t size) {
 }
 
 void
-stack_pop(Cpu *cpu, Vm_Reg64 reg) {
-    assert(cpu->mem->size >= reg_read(cpu, REG_RSP) + 8);
-    reg_write(cpu, reg, mem_read64(cpu->mem, (uint32_t)reg_read(cpu, REG_RSP)));
-    rsp_inc(cpu, 8);
-}
+stack_pop(Cpu *cpu, Reg_Kind reg, uint32_t size) {
+    switch ( size ) {
+        case 1: {
+            assert(cpu->mem->size >= reg_read8(cpu, REG_RSP) + 1);
+            reg_write1(cpu, reg, mem_read8(cpu->mem, (uint32_t)reg_read1(cpu, REG_RSP)));
+            rsp_inc(cpu, 1);
+        } break;
 
-void
-stack_pop(Cpu *cpu, Vm_Reg32 reg) {
-    assert(cpu->mem->size >= reg_read(cpu, REG_RSP) + 4);
-    reg_write(cpu, reg, mem_read32(cpu->mem, (uint32_t)reg_read(cpu, REG_ESP)));
-    rsp_inc(cpu, 4);
-}
+        case 2: {
+            assert(cpu->mem->size >= reg_read8(cpu, REG_RSP) + 2);
+            reg_write2(cpu, reg, mem_read16(cpu->mem, (uint32_t)reg_read2(cpu, REG_RSP)));
+            rsp_inc(cpu, 2);
+        } break;
 
-void
-stack_pop(Cpu *cpu, Vm_Reg16 reg) {
-    assert(cpu->mem->size >= reg_read(cpu, REG_RSP) + 2);
-    reg_write(cpu, reg, mem_read16(cpu->mem, (uint32_t)reg_read(cpu, REG_SP)));
-    rsp_inc(cpu, 2);
-}
+        case 4: {
+            assert(cpu->mem->size >= reg_read8(cpu, REG_RSP) + 4);
+            reg_write4(cpu, reg, mem_read32(cpu->mem, (uint32_t)reg_read4(cpu, REG_RSP)));
+            rsp_inc(cpu, 4);
+        } break;
 
-void
-stack_pop(Cpu *cpu, Vm_Reg8l reg) {
-    assert(cpu->mem->size >= reg_read(cpu, REG_RSP) + 1);
-    reg_write(cpu, reg, mem_read8(cpu->mem, (uint32_t)reg_read(cpu, REG_SPL)));
-    rsp_inc(cpu, 1);
-}
-
-void
-stack_pop(Cpu *cpu, Vm_Reg8h reg) {
-    assert(cpu->mem->size > reg_read(cpu, REG_RSP) + 1);
-    reg_write(cpu, reg, mem_read8(cpu->mem, (uint32_t)reg_read(cpu, REG_SPL)));
-    rsp_inc(cpu, 1);
+        case 8: {
+            assert(cpu->mem->size >= reg_read8(cpu, REG_RSP) + 8);
+            reg_write8(cpu, reg, mem_read64(cpu->mem, (uint32_t)reg_read8(cpu, REG_RSP)));
+            rsp_inc(cpu, 8);
+        } break;
+    }
 }
 
 void
 stack_pop(Cpu *cpu, Operand *op) {
-    switch ( op->kind ) {
-        case OPERAND_REG64: {
-            stack_pop(cpu, op->reg64);
+    assert(op->kind == OPERAND_REG);
+
+    switch ( op->reg.size ) {
+        case 8: {
+            stack_pop(cpu, op->reg.kind, 8);
         } break;
 
-        case OPERAND_REG32: {
-            stack_pop(cpu, op->reg32);
+        case 4: {
+            stack_pop(cpu, op->reg.kind, 4);
         } break;
 
-        case OPERAND_REG16: {
-            stack_pop(cpu, op->reg16);
+        case 2: {
+            stack_pop(cpu, op->reg.kind, 2);
         } break;
 
-        case OPERAND_REG8L: {
-            stack_pop(cpu, op->reg8l);
-        } break;
-
-        case OPERAND_REG8H: {
-            stack_pop(cpu, op->reg8h);
+        case 1: {
+            stack_pop(cpu, op->reg.kind, 1);
         } break;
     }
 }
@@ -1300,7 +1083,7 @@ vm_expr(Expr *expr, Mem *mem, bool assignment) {
             }
 
             vm_expr(ECALL(expr)->base, mem);
-            vm_emit(vm_instr(expr, OP_CALL, operand_reg(REG_RAX)));
+            vm_emit(vm_instr(expr, OP_CALL, operand_reg(REG_RAX, 8)));
         } break;
 
         case EXPR_FIELD: {
@@ -1329,7 +1112,7 @@ vm_expr(Expr *expr, Mem *mem, bool assignment) {
         } break;
 
         case EXPR_FLOAT: {
-            vm_emit(vm_instr(expr, OP_MOV, operand_reg(REG_RAX), operand_imm(value(EFLOAT(expr)->val), expr->type->size)));
+            vm_emit(vm_instr(expr, OP_MOV, operand_reg(REG_RAX, 8), operand_imm(value(EFLOAT(expr)->val), expr->type->size)));
         } break;
 
         case EXPR_IDENT: {
@@ -1479,17 +1262,14 @@ vm_stmt(Stmt *stmt, Mem *mem, char *proc_name) {
         } break;
 
         case STMT_FOR: {
-            static int for_count = 0;
-            char *label = make_label("for.%d.start", for_count++);
-
             vm_stmt(SFOR(stmt)->init, mem, proc_name);
-            int32_t loop_start = vm_emit(vm_instr(stmt, OP_NOP, label, "wird für die jmp anweisung benötigt"));
+            int32_t loop_start = buf_len(vm_instrs);
             vm_expr(SFOR(stmt)->cond, mem);
             vm_emit(vm_instr(stmt, OP_CMP, operand_rax(SFOR(stmt)->cond->type->size), operand_imm(value1, SFOR(stmt)->cond->type->size)));
             int32_t jmpnz_instr = vm_emit(vm_instr(stmt, OP_JNZ, operand_addr(0, SFOR(stmt)->cond->type->size)));
             vm_stmt(SFOR(stmt)->block, mem, proc_name);
             vm_stmt(SFOR(stmt)->step, mem, proc_name);
-            vm_emit(vm_instr(stmt, OP_JMP, operand_name(value(label))));
+            vm_emit(vm_instr(stmt, OP_JMP, operand_addr(loop_start, SFOR(stmt)->cond->type->size)));
 
             /* @AUFGABE: sonst zweig für schleife */
 #if 0
@@ -1547,15 +1327,8 @@ vm_stmt(Stmt *stmt, Mem *mem, char *proc_name) {
 }
 
 bool
-operand_is_reg(Operand *op) {
-    bool result = op->kind >= OPERAND_REG64 && op->kind <= OPERAND_REG8H;
-
-    return result;
-}
-
-bool
 step(Cpu *cpu) {
-    if ( cpu->num_instrs <= reg_read(cpu, REG_RIP) ) {
+    if ( cpu->num_instrs <= reg_read8(cpu, REG_RIP) ) {
         return false;
     }
 
@@ -1566,7 +1339,7 @@ step(Cpu *cpu) {
             uint64_t operand1 = 0;
             uint64_t operand2 = 0;
 
-            if ( operand_is_reg(instr->operand1) ) {
+            if ( instr->operand1->kind == OPERAND_REG ) {
                 operand1 = reg_read(cpu, instr->operand1);
             } else if ( instr->operand1->kind == OPERAND_IMM ) {
                 operand1 = instr->operand1->val.u64;
@@ -1574,7 +1347,7 @@ step(Cpu *cpu) {
                 assert(0);
             }
 
-            if ( operand_is_reg(instr->operand2) ) {
+            if ( instr->operand2->kind == OPERAND_REG ) {
                 operand2 = reg_read(cpu, instr->operand2);
             } else if ( instr->operand2->kind == OPERAND_IMM ) {
                 operand2 = instr->operand2->val.u64;
@@ -1586,20 +1359,20 @@ step(Cpu *cpu) {
         } break;
 
         case OP_CALL: {
-            stack_push(cpu, reg_read(cpu, REG_RIP), 8);
-            stack_push(cpu, reg_read(cpu, REG_RBX), 8);
-            stack_push(cpu, reg_read(cpu, REG_RCX), 8);
-            stack_push(cpu, reg_read(cpu, REG_RDX), 8);
-            stack_push(cpu, reg_read(cpu, REG_RDI), 8);
-            stack_push(cpu, reg_read(cpu, REG_R12), 8);
-            stack_push(cpu, reg_read(cpu, REG_R13), 8);
-            stack_push(cpu, reg_read(cpu, REG_R14), 8);
-            stack_push(cpu, reg_read(cpu, REG_R15), 8);
+            stack_push(cpu, reg_read8(cpu, REG_RIP), 8);
+            stack_push(cpu, reg_read8(cpu, REG_RBX), 8);
+            stack_push(cpu, reg_read8(cpu, REG_RCX), 8);
+            stack_push(cpu, reg_read8(cpu, REG_RDX), 8);
+            stack_push(cpu, reg_read8(cpu, REG_RDI), 8);
+            stack_push(cpu, reg_read8(cpu, REG_R12), 8);
+            stack_push(cpu, reg_read8(cpu, REG_R13), 8);
+            stack_push(cpu, reg_read8(cpu, REG_R14), 8);
+            stack_push(cpu, reg_read8(cpu, REG_R15), 8);
 
-            if ( operand_is_reg(instr->operand1) ) {
-                reg_write(cpu, REG_RIP, reg_read(cpu, instr->operand1));
+            if ( instr->operand1->kind == OPERAND_REG ) {
+                reg_write8(cpu, REG_RIP, reg_read(cpu, instr->operand1));
             } else if ( instr->operand1->kind == OPERAND_NAME ) {
-                reg_write(cpu, REG_RIP, addr_lookup(instr->operand1->val));
+                reg_write8(cpu, REG_RIP, addr_lookup(instr->operand1->val));
             } else {
                 assert(0);
             }
@@ -1609,7 +1382,7 @@ step(Cpu *cpu) {
             uint64_t operand1 = 0;
             uint64_t operand2 = 0;
 
-            if ( operand_is_reg(instr->operand1) ) {
+            if ( instr->operand1->kind == OPERAND_REG ) {
                 operand1 = reg_read(cpu, instr->operand1);
             } else if ( instr->operand1->kind == OPERAND_IMM ) {
                 operand1 = instr->operand1->val.u64;
@@ -1617,7 +1390,7 @@ step(Cpu *cpu) {
                 assert(0);
             }
 
-            if ( operand_is_reg(instr->operand2) ) {
+            if ( instr->operand2->kind == OPERAND_REG ) {
                 operand2 = reg_read(cpu, instr->operand2);
             } else if ( instr->operand2->kind == OPERAND_IMM ) {
                 operand2 = instr->operand2->val.u64;
@@ -1638,18 +1411,18 @@ step(Cpu *cpu) {
         } break;
 
         case OP_ENTER: {
-            stack_push(cpu, reg_read(cpu, REG_RBP), 8);
-            reg_write(cpu, REG_RBP, reg_read(cpu, REG_RSP));
+            stack_push(cpu, reg_read8(cpu, REG_RBP), 8);
+            reg_write8(cpu, REG_RBP, reg_read8(cpu, REG_RSP));
             if ( instr->operand1->val.u64 ) {
-                reg_write(cpu, REG_RSP, reg_read(cpu, REG_RSP) - instr->operand1->val.u64);
+                reg_write8(cpu, REG_RSP, reg_read8(cpu, REG_RSP) - instr->operand1->val.u64);
             }
         } break;
 
         case OP_IDIV: {
-            uint64_t dividend = reg_read(cpu, REG_RAX);
+            uint64_t dividend = reg_read8(cpu, REG_RAX);
             uint64_t divisor = 0;
 
-            if ( operand_is_reg(instr->operand1) ) {
+            if ( instr->operand1->kind == OPERAND_REG ) {
                 divisor = reg_read(cpu, instr->operand1);
             } else if ( instr->operand1->kind == OPERAND_IMM ) {
                 divisor = instr->operand1->val.u64;
@@ -1660,15 +1433,15 @@ step(Cpu *cpu) {
             uint64_t quotient  = (uint64_t)(dividend / divisor);
             uint64_t remainder = dividend % divisor;
 
-            reg_write(cpu, REG_RAX, quotient);
-            reg_write(cpu, REG_RDX, remainder);
+            reg_write8(cpu, REG_RAX, quotient);
+            reg_write8(cpu, REG_RDX, remainder);
         } break;
 
         case OP_IMUL: {
             uint64_t operand1 = 0;
             uint64_t operand2 = 0;
 
-            if ( operand_is_reg(instr->operand1) ) {
+            if ( instr->operand1->kind == OPERAND_REG ) {
                 operand1 = reg_read(cpu, instr->operand1);
             } else if ( instr->operand1->kind == OPERAND_IMM ) {
                 operand1 = instr->operand1->val.u64;
@@ -1676,7 +1449,7 @@ step(Cpu *cpu) {
                 assert(0);
             }
 
-            if ( operand_is_reg(instr->operand2) ) {
+            if ( instr->operand2->kind == OPERAND_REG ) {
                 operand2 = reg_read(cpu, instr->operand2);
             } else if ( instr->operand2->kind == OPERAND_IMM ) {
                 operand2 = instr->operand2->val.u64;
@@ -1684,10 +1457,10 @@ step(Cpu *cpu) {
                 assert(0);
             }
 
-            reg_write(cpu, REG_RAX, operand1 * operand2);
+            reg_write8(cpu, REG_RAX, operand1 * operand2);
 
             flags_clear(cpu);
-            if ( reg_read(cpu, REG_RAX) == 0 ) {
+            if ( reg_read8(cpu, REG_RAX) == 0 ) {
                 flags_set(cpu, RFLAG_ZF);
             }
         } break;
@@ -1695,9 +1468,9 @@ step(Cpu *cpu) {
         case OP_JE: {
             if ( flag_state(cpu, RFLAG_ZF) ) {
                 if ( instr->operand1->kind == OPERAND_ADDR ) {
-                    reg_write(cpu, REG_RIP, instr->operand1->addr);
+                    reg_write8(cpu, REG_RIP, instr->operand1->addr);
                 } else if ( instr->operand1->kind == OPERAND_NAME ) {
-                    reg_write(cpu, REG_RIP, addr_lookup(instr->operand1->val));
+                    reg_write8(cpu, REG_RIP, addr_lookup(instr->operand1->val));
                 } else {
                     assert(0);
                 }
@@ -1706,9 +1479,9 @@ step(Cpu *cpu) {
 
         case OP_JMP: {
             if ( instr->operand1->kind == OPERAND_ADDR ) {
-                reg_write(cpu, REG_RIP, instr->operand1->addr);
+                reg_write8(cpu, REG_RIP, instr->operand1->addr);
             } else if ( instr->operand1->kind == OPERAND_NAME ) {
-                reg_write(cpu, REG_RIP, addr_lookup(instr->operand1->val));
+                reg_write8(cpu, REG_RIP, addr_lookup(instr->operand1->val));
             } else {
                 assert(0);
             }
@@ -1717,7 +1490,7 @@ step(Cpu *cpu) {
         case OP_JNE: {
             if ( !flag_state(cpu, RFLAG_ZF) ) {
                 if ( instr->operand1->kind == OPERAND_ADDR ) {
-                    reg_write(cpu, REG_RIP, instr->operand1->addr);
+                    reg_write8(cpu, REG_RIP, instr->operand1->addr);
                 } else {
                     assert(0);
                 }
@@ -1727,7 +1500,7 @@ step(Cpu *cpu) {
         case OP_JNZ: {
             if ( !flag_state(cpu, RFLAG_ZF) ) {
                 if ( instr->operand1->kind == OPERAND_ADDR ) {
-                    reg_write(cpu, REG_RIP, instr->operand1->addr);
+                    reg_write8(cpu, REG_RIP, instr->operand1->addr);
                 } else {
                     assert(0);
                 }
@@ -1737,7 +1510,7 @@ step(Cpu *cpu) {
         case OP_JZ: {
             if ( flag_state(cpu, RFLAG_ZF) ) {
                 if ( instr->operand1->kind == OPERAND_ADDR ) {
-                    reg_write(cpu, REG_RIP, instr->operand1->addr);
+                    reg_write8(cpu, REG_RIP, instr->operand1->addr);
                 } else {
                     assert(0);
                 }
@@ -1745,8 +1518,8 @@ step(Cpu *cpu) {
         } break;
 
         case OP_LEA: {
-            if ( operand_is_reg(instr->dst) ) {
-                if ( operand_is_reg(instr->src) ) {
+            if ( instr->dst->kind == OPERAND_REG ) {
+                if ( instr->src->kind == OPERAND_REG ) {
                     if ( instr->src->with_displacement ) {
 #if 0
                         reg_write(cpu, instr->dst, reg_read(cpu, instr->src) + instr->src->displacement);
@@ -1764,7 +1537,7 @@ step(Cpu *cpu) {
                     assert(instr->src->kind == OPERAND_PTR );
                     Operand *op = instr->src->op;
 
-                    if ( operand_is_reg(op) ) {
+                    if ( op->kind == OPERAND_REG ) {
                         if ( op->with_displacement ) {
                             reg_write(cpu, instr->dst, reg_read(cpu, op) + op->displacement);
                         } else {
@@ -1782,16 +1555,16 @@ step(Cpu *cpu) {
         } break;
 
         case OP_LEAVE: {
-            reg_write(cpu, REG_RSP, reg_read(cpu, REG_RBP));
-            stack_pop(cpu, REG_RBP);
+            reg_write8(cpu, REG_RSP, reg_read8(cpu, REG_RBP));
+            stack_pop(cpu, REG_RBP, 8);
         } break;
 
         case OP_MOV: {
-            if ( operand_is_reg(instr->dst) ) {
+            if ( instr->dst->kind == OPERAND_REG ) {
                 if ( instr->dst->with_displacement ) {
                     if ( instr->src->kind == OPERAND_IMM ) {
                         mem_write(cpu->mem, reg_read(cpu, instr->dst) + instr->dst->displacement, instr->src->val.u64);
-                    } else if ( operand_is_reg(instr->src) ) {
+                    } else if ( instr->src->kind == OPERAND_REG ) {
                         mem_write(cpu->mem, reg_read(cpu, instr->dst) + instr->dst->displacement, reg_read(cpu, instr->src), instr->src->size);
                     } else {
                         assert(0);
@@ -1799,20 +1572,16 @@ step(Cpu *cpu) {
                 } else {
                     if ( instr->src->kind == OPERAND_IMM ) {
                         reg_write(cpu, instr->dst, instr->src->val.u64);
-                    } else if ( operand_is_reg(instr->src) ) {
+                    } else if ( instr->src->kind == OPERAND_REG ) {
                         if ( instr->src->with_displacement ) {
-                            if ( instr->src->kind == OPERAND_REG64 ) {
-                                reg_write(cpu, instr->dst, mem_read64(cpu->mem, (uint32_t)reg_read(cpu, instr->src) + instr->src->displacement));
-                            } else {
-                                assert(0);
-                            }
+                            reg_write(cpu, instr->dst, mem_read64(cpu->mem, (uint32_t)reg_read(cpu, instr->src) + instr->src->displacement));
                         } else {
                             reg_write(cpu, instr->dst, reg_read(cpu, instr->src));
                         }
                     } else if ( instr->src->kind == OPERAND_PTR ) {
                         Operand *op = instr->src->op;
 
-                        if ( operand_is_reg(op) ) {
+                        if ( op->kind == OPERAND_REG ) {
                             if ( op->with_displacement ) {
                                 reg_write(cpu, instr->dst, reg_read(cpu, op) + op->displacement);
                             } else {
@@ -1837,11 +1606,11 @@ step(Cpu *cpu) {
             } else if ( instr->dst->kind == OPERAND_PTR ) {
                 Operand *op = instr->dst->op;
 
-                if ( operand_is_reg(op) ) {
+                if ( op->kind == OPERAND_REG ) {
                     if ( op->with_displacement ) {
                         assert(0);
                     } else {
-                        assert(operand_is_reg(instr->src));
+                        assert(instr->src->kind == OPERAND_REG);
                         mem_write(cpu->mem, (uint64_t)reg_read(cpu, op), reg_read(cpu, instr->src), instr->src->size);
                     }
                 } else if ( op->kind == OPERAND_ADDR_REGS ) {
@@ -1853,7 +1622,7 @@ step(Cpu *cpu) {
                     assert(0);
                 }
             } else if ( instr->dst->kind == OPERAND_ADDR ) {
-                if ( operand_is_reg(instr->src) ) {
+                if ( instr->src->kind == OPERAND_REG ) {
                     mem_write(cpu->mem, instr->dst->addr, reg_read(cpu, instr->src));
                 } else {
                     assert(0);
@@ -1867,7 +1636,7 @@ step(Cpu *cpu) {
             uint64_t operand1 = 0;
             uint64_t operand2 = 0;
 
-            if ( operand_is_reg(instr->operand1) ) {
+            if ( instr->operand1->kind == OPERAND_REG ) {
                 operand1 = reg_read(cpu, instr->operand1);
             } else if ( instr->operand1->kind == OPERAND_IMM ) {
                 operand1 = instr->operand1->val.u64;
@@ -1875,7 +1644,7 @@ step(Cpu *cpu) {
                 assert(0);
             }
 
-            if ( operand_is_reg(instr->operand2) ) {
+            if ( instr->operand2->kind == OPERAND_REG ) {
                 operand2 = reg_read(cpu, instr->operand2);
             } else if ( instr->operand2->kind == OPERAND_IMM ) {
                 operand2 = instr->operand2->val.u64;
@@ -1897,7 +1666,7 @@ step(Cpu *cpu) {
         } break;
 
         case OP_NOT: {
-            if ( operand_is_reg(instr->operand1) ) {
+            if ( instr->operand1->kind == OPERAND_REG ) {
                 auto val = reg_read(cpu, instr->operand1);
                 reg_write(cpu, instr->operand1, ~val);
             } else {
@@ -1906,7 +1675,7 @@ step(Cpu *cpu) {
         } break;
 
         case OP_PUSH: {
-            if ( operand_is_reg(instr->operand1) ) {
+            if ( instr->operand1->kind == OPERAND_REG ) {
                 stack_push(cpu, reg_read(cpu, instr->operand1), instr->operand1->size);
             } else {
                 assert(0);
@@ -1914,7 +1683,7 @@ step(Cpu *cpu) {
         } break;
 
         case OP_POP: {
-            if ( operand_is_reg(instr->dst) ) {
+            if ( instr->dst->kind == OPERAND_REG ) {
                 stack_pop(cpu, instr->dst);
             } else {
                 assert(0);
@@ -1922,49 +1691,49 @@ step(Cpu *cpu) {
         } break;
 
         case OP_RET: {
-            stack_pop(cpu, REG_R15);
-            stack_pop(cpu, REG_R14);
-            stack_pop(cpu, REG_R13);
-            stack_pop(cpu, REG_R12);
-            stack_pop(cpu, REG_RDI);
-            stack_pop(cpu, REG_RDX);
-            stack_pop(cpu, REG_RCX);
-            stack_pop(cpu, REG_RBX);
-            stack_pop(cpu, REG_RIP);
+            stack_pop(cpu, REG_R15, 8);
+            stack_pop(cpu, REG_R14, 8);
+            stack_pop(cpu, REG_R13, 8);
+            stack_pop(cpu, REG_R12, 8);
+            stack_pop(cpu, REG_RDI, 8);
+            stack_pop(cpu, REG_RDX, 8);
+            stack_pop(cpu, REG_RCX, 8);
+            stack_pop(cpu, REG_RBX, 8);
+            stack_pop(cpu, REG_RIP, 8);
         } break;
 
         case OP_SETL: {
-            assert(operand_is_reg(instr->dst));
+            assert(instr->dst->kind == OPERAND_REG);
 
             reg_write(cpu, instr->dst, flag_state(cpu, RFLAG_CF));
         } break;
 
         case OP_SETLE: {
-            assert(operand_is_reg(instr->dst));
+            assert(instr->dst->kind == OPERAND_REG);
 
             reg_write(cpu, instr->dst, flag_state(cpu, RFLAG_ZF) || (flag_state(cpu, RFLAG_CF)));
         } break;
 
         case OP_SETE: {
-            assert(operand_is_reg(instr->dst));
+            assert(instr->dst->kind == OPERAND_REG);
 
             reg_write(cpu, instr->dst, flag_state(cpu, RFLAG_ZF));
         } break;
 
         case OP_SETGE: {
-            assert(operand_is_reg(instr->dst));
+            assert(instr->dst->kind == OPERAND_REG);
 
             reg_write(cpu, instr->dst, flag_state(cpu, RFLAG_ZF) || !flag_state(cpu, RFLAG_CF));
         } break;
 
         case OP_SETG: {
-            assert(operand_is_reg(instr->dst));
+            assert(instr->dst->kind == OPERAND_REG);
 
             reg_write(cpu, instr->dst, !flag_state(cpu, RFLAG_ZF) && !flag_state(cpu, RFLAG_CF));
         } break;
 
         case OP_SETNE: {
-            assert(operand_is_reg(instr->dst));
+            assert(instr->dst->kind == OPERAND_REG);
 
             reg_write(cpu, instr->dst, !flag_state(cpu, RFLAG_ZF));
         } break;
@@ -1973,7 +1742,7 @@ step(Cpu *cpu) {
             uint64_t operand1 = 0;
             uint64_t operand2 = 0;
 
-            if ( operand_is_reg(instr->operand1) ) {
+            if ( instr->operand1->kind == OPERAND_REG ) {
                 operand1 = reg_read(cpu, instr->operand1);
             } else if ( instr->operand1->kind == OPERAND_IMM ) {
                 operand1 = instr->operand1->val.u64;
@@ -1981,7 +1750,7 @@ step(Cpu *cpu) {
                 assert(0);
             }
 
-            if ( operand_is_reg(instr->operand2) ) {
+            if ( instr->operand2->kind == OPERAND_REG ) {
                 operand2 = reg_read(cpu, instr->operand2);
             } else if ( instr->operand2->kind == OPERAND_IMM ) {
                 operand2 = instr->operand2->val.u64;
@@ -1989,7 +1758,7 @@ step(Cpu *cpu) {
                 assert(0);
             }
 
-            if ( operand_is_reg(instr->dst) ) {
+            if ( instr->dst->kind == OPERAND_REG ) {
                 reg_write(cpu, instr->dst, operand1 - operand2);
             } else {
                 assert(0);
@@ -2060,14 +1829,14 @@ eval_section(Section *section, Mem *mem, bool use_entry_point) {
         cpu = cpu_new(section->instrs, mem, start_addr);
 
         stack_push(cpu, section->num_instrs, 8);
-        stack_push(cpu, reg_read(cpu, REG_RBX), 8);
-        stack_push(cpu, reg_read(cpu, REG_RCX), 8);
-        stack_push(cpu, reg_read(cpu, REG_RDX), 8);
-        stack_push(cpu, reg_read(cpu, REG_RDI), 8);
-        stack_push(cpu, reg_read(cpu, REG_R12), 8);
-        stack_push(cpu, reg_read(cpu, REG_R13), 8);
-        stack_push(cpu, reg_read(cpu, REG_R14), 8);
-        stack_push(cpu, reg_read(cpu, REG_R15), 8);
+        stack_push(cpu, reg_read8(cpu, REG_RBX), 8);
+        stack_push(cpu, reg_read8(cpu, REG_RCX), 8);
+        stack_push(cpu, reg_read8(cpu, REG_RDX), 8);
+        stack_push(cpu, reg_read8(cpu, REG_RDI), 8);
+        stack_push(cpu, reg_read8(cpu, REG_R12), 8);
+        stack_push(cpu, reg_read8(cpu, REG_R13), 8);
+        stack_push(cpu, reg_read8(cpu, REG_R14), 8);
+        stack_push(cpu, reg_read8(cpu, REG_R15), 8);
     } else {
         cpu = cpu_new(section->instrs, mem, 0);
     }
@@ -2086,7 +1855,7 @@ eval(Vm *vm, Mem *mem, bool use_entry_point = true) {
     eval_section(vm->data_section, mem, use_entry_point);
     Cpu *cpu = eval_section(vm->text_section, mem, use_entry_point);
 
-    return reg_read(cpu, REG_RAX);
+    return reg_read8(cpu, REG_RAX);
 }
 
 }
