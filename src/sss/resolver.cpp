@@ -274,7 +274,7 @@ type_string_new() {
     Type_String *result = urq_allocs(Type_String);
 
     result->kind      = TYPE_STRING;
-    result->size      = sizeof(uint64_t) + PTR_SIZE;
+    result->size      = PTR_SIZE;
     result->item_size = result->size;
     result->id        = global_type_id++;
     result->scope     = scope_new("string");

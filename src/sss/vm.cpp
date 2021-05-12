@@ -6,7 +6,7 @@ struct Cpu;
 struct Operand;
 struct Mem;
 
-Operand * vm_expr(Expr *expr, bool assignment = false);
+Operand * vm_expr(Expr *expr, Mem *mem, bool assignment = false);
 void      vm_stmt(Stmt *stmt, Mem *mem, char *proc_name = NULL);
 
 enum Vm_Op {
@@ -591,13 +591,6 @@ mem_read64(Mem *mem, uint32_t addr) {
     assert(addr < mem->size);
 
     uint64_t result = *(uint64_t *)(mem->mem + addr);
-
-    return result;
-}
-
-uint32_t
-register_global(Mem *mem, Decl *decl) {
-    uint32_t result = mem_alloc(mem, decl->type->size);
 
     return result;
 }
@@ -1198,31 +1191,31 @@ construct_offset_expr(Expr *expr) {
 }
 
 void
-vm_emit_and(Expr_Bin *expr) {
-    vm_expr(expr->left);
+vm_emit_and(Expr_Bin *expr, Mem *mem) {
+    vm_expr(expr->left, mem);
     vm_emit(vm_instr(expr, OP_CMP, operand_rax(expr->type->size), operand_imm(value1, expr->type->size)));
     int32_t jmp1_instr = vm_emit(vm_instr(expr, OP_JNE, operand_addr(0, expr->type->size)));
 
-    vm_expr(expr->right);
+    vm_expr(expr->right, mem);
     vm_emit(vm_instr(expr, OP_CMP, operand_rax(expr->type->size), operand_imm(value1, expr->type->size)));
 
     vm_instr_patch(jmp1_instr, buf_len(vm_instrs));
 }
 
 void
-vm_emit_or(Expr_Bin *expr) {
-    vm_expr(expr->left);
+vm_emit_or(Expr_Bin *expr, Mem *mem) {
+    vm_expr(expr->left, mem);
     vm_emit(vm_instr(expr, OP_CMP, operand_rax(expr->type->size), operand_imm(value1, expr->type->size)));
     int32_t jmp1_instr = vm_emit(vm_instr(expr, OP_JE, operand_addr(0, expr->type->size)));
 
-    vm_expr(expr->right);
+    vm_expr(expr->right, mem);
     vm_emit(vm_instr(expr, OP_CMP, operand_rax(expr->type->size), operand_imm(value1, expr->type->size)));
 
     vm_instr_patch(jmp1_instr, buf_len(vm_instrs));
 }
 
 Operand *
-vm_expr(Expr *expr, bool assignment) {
+vm_expr(Expr *expr, Mem *mem, bool assignment) {
     Operand *result = NULL;
 
     switch ( expr->kind ) {
@@ -1242,14 +1235,14 @@ vm_expr(Expr *expr, bool assignment) {
 
         case EXPR_BIN: {
             if ( EBIN(expr)->op == BIN_AND ) {
-                vm_emit_and(EBIN(expr));
+                vm_emit_and(EBIN(expr), mem);
             } else if ( EBIN(expr)->op == BIN_OR ) {
-                vm_emit_and(EBIN(expr));
+                vm_emit_and(EBIN(expr), mem);
             } else {
-                vm_expr(EBIN(expr)->right);
+                vm_expr(EBIN(expr)->right, mem);
                 vm_emit(vm_instr(expr, OP_PUSH, operand_rax(EBIN(expr)->right->type->item_size)));
 
-                vm_expr(EBIN(expr)->left);
+                vm_expr(EBIN(expr)->left, mem);
                 vm_emit(vm_instr(expr, OP_POP, operand_rdi(EBIN(expr)->left->type->item_size)));
 
                 if ( EBIN(expr)->op == BIN_ADD ) {
@@ -1293,7 +1286,7 @@ vm_expr(Expr *expr, bool assignment) {
             for ( int i = (int32_t)ECALL(expr)->num_args; i > 0; --i ) {
                 Expr *arg = ECALL(expr)->args[i-1];
 
-                vm_expr(arg);
+                vm_expr(arg, mem);
                 vm_emit(vm_instr(expr, OP_PUSH, operand_rax(arg->type->size)));
             }
 
@@ -1306,12 +1299,12 @@ vm_expr(Expr *expr, bool assignment) {
                 vm_emit(vm_instr(expr, OP_POP, operand_args(arg->type->size, i)));
             }
 
-            vm_expr(ECALL(expr)->base);
+            vm_expr(ECALL(expr)->base, mem);
             vm_emit(vm_instr(expr, OP_CALL, operand_reg(REG_RAX)));
         } break;
 
         case EXPR_FIELD: {
-            Operand *op = vm_expr(EFIELD(expr)->base, true);
+            Operand *op = vm_expr(EFIELD(expr)->base, mem, true);
             Type_Struct *type = TSTRUCT(EFIELD(expr)->base->type);
 
             Aggr_Field *field = NULL;
@@ -1369,7 +1362,7 @@ vm_expr(Expr *expr, bool assignment) {
             Operand *op = vm_addr(expr);
             Expr *offset = construct_offset_expr(expr);
 
-            vm_expr(offset, assignment);
+            vm_expr(offset, mem, assignment);
             vm_emit(vm_instr(expr, OP_MUL, operand_rax(item_size), operand_imm(value((uint64_t)item_size, item_size), item_size)));
             vm_emit(vm_instr(expr, OP_LEA, operand_rsi(item_size), operand_ptr(op)));
             vm_emit(vm_instr(expr, OP_ADD, operand_rsi(item_size), operand_rax(index_size)));
@@ -1390,22 +1383,18 @@ vm_expr(Expr *expr, bool assignment) {
         } break;
 
         case EXPR_NOT: {
-            vm_expr(ENOT(expr)->expr);
+            vm_expr(ENOT(expr)->expr, mem);
             vm_emit(vm_instr(expr, OP_NOT, operand_rax(expr->type->size)));
         } break;
 
         case EXPR_PAREN: {
-            vm_expr(EPAREN(expr)->expr, assignment);
+            vm_expr(EPAREN(expr)->expr, mem, assignment);
         } break;
 
         case EXPR_STR: {
-            static uint32_t string_num = 0;
-            char *name = make_label(".string.%d", string_num);
+            expr->offset = mem_alloc(mem, utf8_str_size(ESTR(expr)->val));
 
-            vm_emit(vm_instr(expr, OP_DATA, operand_name(value(".string")), operand_imm(value(ESTR(expr)->val), expr->type->size), name));
-            vm_emit(vm_instr(expr, OP_LEA, operand_name(value(name)), operand_rax(expr->type->size)));
-
-            string_num++;
+            vm_emit(vm_instr(expr, OP_MOV, operand_rax(expr->type->size), operand_addr(expr->offset, expr->type->size)));
         } break;
 
         default: {
@@ -1444,15 +1433,15 @@ vm_decl(Decl *decl, Mem *mem) {
             Expr *expr = DVAR(decl)->expr;
 
             if ( decl->is_global ) {
-                decl->offset = register_global(mem, decl);
+                decl->offset = mem_alloc(mem, decl->type->size);
 
                 if ( expr ) {
-                    vm_expr(expr);
+                    vm_expr(expr, mem);
                     vm_emit(vm_instr(decl, OP_MOV, operand_addr(decl->offset, decl->type->item_size), operand_rax(decl->type->size)));
                 }
             } else {
                 if ( expr ) {
-                    vm_expr(expr);
+                    vm_expr(expr, mem);
                     vm_emit(vm_instr(decl, OP_MOV, operand_rbp(expr->type->size, decl->offset), operand_rax(expr->type->size)));
                 }
             }
@@ -1468,10 +1457,10 @@ void
 vm_stmt(Stmt *stmt, Mem *mem, char *proc_name) {
     switch ( stmt->kind ) {
         case STMT_ASSIGN: {
-            Operand *dst = vm_expr(SASSIGN(stmt)->lhs, true);
+            Operand *dst = vm_expr(SASSIGN(stmt)->lhs, mem, true);
             assert(dst);
 
-            vm_expr(SASSIGN(stmt)->rhs);
+            vm_expr(SASSIGN(stmt)->rhs, mem);
             vm_emit(vm_instr(stmt, OP_MOV, dst, operand_rax(SASSIGN(stmt)->rhs->type->size)));
         } break;
 
@@ -1486,7 +1475,7 @@ vm_stmt(Stmt *stmt, Mem *mem, char *proc_name) {
         } break;
 
         case STMT_EXPR: {
-            vm_expr(SEXPR(stmt)->expr);
+            vm_expr(SEXPR(stmt)->expr, mem);
         } break;
 
         case STMT_FOR: {
@@ -1495,7 +1484,7 @@ vm_stmt(Stmt *stmt, Mem *mem, char *proc_name) {
 
             vm_stmt(SFOR(stmt)->init, mem, proc_name);
             int32_t loop_start = vm_emit(vm_instr(stmt, OP_NOP, label, "wird für die jmp anweisung benötigt"));
-            vm_expr(SFOR(stmt)->cond);
+            vm_expr(SFOR(stmt)->cond, mem);
             vm_emit(vm_instr(stmt, OP_CMP, operand_rax(SFOR(stmt)->cond->type->size), operand_imm(value1, SFOR(stmt)->cond->type->size)));
             int32_t jmpnz_instr = vm_emit(vm_instr(stmt, OP_JNZ, operand_addr(0, SFOR(stmt)->cond->type->size)));
             vm_stmt(SFOR(stmt)->block, mem, proc_name);
@@ -1515,7 +1504,7 @@ vm_stmt(Stmt *stmt, Mem *mem, char *proc_name) {
             static uint32_t loop_count = 0;
             char *label = make_label("if.%d", loop_count++);
 
-            vm_expr(SIF(stmt)->cond);
+            vm_expr(SIF(stmt)->cond, mem);
             vm_emit(vm_instr(stmt, OP_CMP, operand_rax(SIF(stmt)->cond->type->size), operand_imm(value1, SIF(stmt)->cond->type->size)));
             int32_t jmp1_instr = vm_emit(vm_instr(stmt, OP_JNE, operand_addr(0, SIF(stmt)->cond->type->size), label));
             vm_stmt(SIF(stmt)->stmt, mem, proc_name);
@@ -1532,7 +1521,7 @@ vm_stmt(Stmt *stmt, Mem *mem, char *proc_name) {
 
         case STMT_RET: {
             if ( SRET(stmt)->num_exprs ) {
-                vm_expr(SRET(stmt)->exprs[0]);
+                vm_expr(SRET(stmt)->exprs[0], mem);
             }
 
             assert(proc_name);
@@ -1542,7 +1531,7 @@ vm_stmt(Stmt *stmt, Mem *mem, char *proc_name) {
 
         case STMT_WHILE: {
             int32_t loop_start = buf_len(vm_instrs);
-            vm_expr(SWHILE(stmt)->cond);
+            vm_expr(SWHILE(stmt)->cond, mem);
             vm_emit(vm_instr(stmt, OP_CMP, operand_rax(SWHILE(stmt)->cond->type->size), operand_imm(value0, SWHILE(stmt)->cond->type->size)));
             int32_t jmp_instr = vm_emit(vm_instr(stmt, OP_JZ, operand_addr(0, SWHILE(stmt)->cond->type->size), operand_imm(value1, SWHILE(stmt)->cond->type->size)));
             vm_stmt(SWHILE(stmt)->block, mem, proc_name);
@@ -1759,7 +1748,11 @@ step(Cpu *cpu) {
             if ( operand_is_reg(instr->dst) ) {
                 if ( operand_is_reg(instr->src) ) {
                     if ( instr->src->with_displacement ) {
+#if 0
+                        reg_write(cpu, instr->dst, reg_read(cpu, instr->src) + instr->src->displacement);
+#else
                         reg_write(cpu, instr->dst, mem_read64(cpu->mem, (uint32_t)(reg_read(cpu, instr->src) + instr->src->displacement)));
+#endif
                     } else {
                         reg_write(cpu, instr->dst, reg_read(cpu, instr->src));
                     }
@@ -1835,6 +1828,8 @@ step(Cpu *cpu) {
                         Operand *op2 = instr->src->op2;
 
                         reg_write(cpu, instr->dst, mem_read(cpu->mem, (uint32_t)(reg_read(cpu, op1) + reg_read(cpu, op2)), instr->src->op1->size));
+                    } else if ( instr->src->kind == OPERAND_ADDR ) {
+                        reg_write(cpu, instr->dst, instr->src->addr);
                     } else {
                         assert(0);
                     }
@@ -2056,30 +2051,23 @@ compile(Parsed_File *file, Mem *mem) {
 }
 
 Cpu *
-setup_init_call(Instrs instrs, Mem *mem) {
-    uint32_t start_addr = addr_lookup(value(entry_point));
-
-    Cpu *cpu = cpu_new(instrs, mem, start_addr);
-
-    stack_push(cpu, buf_len(instrs), 8);
-    stack_push(cpu, reg_read(cpu, REG_RBX), 8);
-    stack_push(cpu, reg_read(cpu, REG_RCX), 8);
-    stack_push(cpu, reg_read(cpu, REG_RDX), 8);
-    stack_push(cpu, reg_read(cpu, REG_RDI), 8);
-    stack_push(cpu, reg_read(cpu, REG_R12), 8);
-    stack_push(cpu, reg_read(cpu, REG_R13), 8);
-    stack_push(cpu, reg_read(cpu, REG_R14), 8);
-    stack_push(cpu, reg_read(cpu, REG_R15), 8);
-
-    return cpu;
-}
-
-Cpu *
 eval_section(Section *section, Mem *mem, bool use_entry_point) {
     Cpu *cpu = NULL;
 
     if ( use_entry_point ) {
-        cpu = setup_init_call(section->instrs, mem);
+        uint32_t start_addr = addr_lookup(value(entry_point));
+
+        cpu = cpu_new(section->instrs, mem, start_addr);
+
+        stack_push(cpu, section->num_instrs, 8);
+        stack_push(cpu, reg_read(cpu, REG_RBX), 8);
+        stack_push(cpu, reg_read(cpu, REG_RCX), 8);
+        stack_push(cpu, reg_read(cpu, REG_RDX), 8);
+        stack_push(cpu, reg_read(cpu, REG_RDI), 8);
+        stack_push(cpu, reg_read(cpu, REG_R12), 8);
+        stack_push(cpu, reg_read(cpu, REG_R13), 8);
+        stack_push(cpu, reg_read(cpu, REG_R14), 8);
+        stack_push(cpu, reg_read(cpu, REG_R15), 8);
     } else {
         cpu = cpu_new(section->instrs, mem, 0);
     }

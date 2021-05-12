@@ -122,6 +122,7 @@ enum Expr_Kind {
 struct Expr : Ast_Elem {
     Expr_Kind   kind;
     Type      * type;
+    uint32_t    offset;
 };
 
 struct Expr_At : Expr {
