@@ -1,6 +1,7 @@
 using namespace Urq::Sss::Vm;
 
 char *regs64_dbg[] = {
+    "null",
     "rax",
     "rbx",
     "rcx",
@@ -22,6 +23,7 @@ char *regs64_dbg[] = {
 };
 
 char *regs32_dbg[] = {
+    "null",
     "eax",
     "ebx",
     "ecx",
@@ -35,6 +37,7 @@ char *regs32_dbg[] = {
 };
 
 char *regs16_dbg[] = {
+    "null",
     "ax",
     "bx",
     "cx",
@@ -48,6 +51,7 @@ char *regs16_dbg[] = {
 };
 
 char *regs8_dbg[] = {
+    "null",
     "al",
     "bl",
     "cl",
@@ -94,20 +98,63 @@ to_str(Urq::Sss::Vm::Value val) {
 }
 
 char *
+to_str(Reg_Kind reg, int32_t scale, uint32_t size) {
+    char *result = NULL;
+
+    if ( reg == REG_NULL ) {
+        return "";
+    }
+
+    if ( size == 8 ) {
+        result = buf_printf(result, "+(%s*%d)", regs64_dbg[reg], scale);
+    } else if ( size == 4 ) {
+        result = buf_printf(result, "+(%s*%d)", regs32_dbg[reg], scale);
+    } else if ( size == 2 ) {
+        result = buf_printf(result, "+(%s*%d)", regs16_dbg[reg], scale);
+    } else if ( size == 1 ) {
+        result = buf_printf(result, "+(%s*%d)", regs8_dbg[reg], scale);
+    }
+
+    return result;
+}
+
+char *
+to_str(Reg_Kind reg, uint32_t size) {
+    char *result = NULL;
+
+    if ( reg == REG_NULL ) {
+        return "";
+    }
+
+    if ( size == 8 ) {
+        result = buf_printf(result, "%s", regs64_dbg[reg]);
+    } else if ( size == 4 ) {
+        result = buf_printf(result, "%s", regs32_dbg[reg]);
+    } else if ( size == 2 ) {
+        result = buf_printf(result, "%s", regs16_dbg[reg]);
+    } else if ( size == 1 ) {
+        result = buf_printf(result, "%s", regs8_dbg[reg]);
+    }
+
+    return result;
+}
+
+char *
 to_str(Urq::Sss::Vm::Operand *op) {
     char *result = NULL;
 
     switch ( op->kind ) {
         case OPERAND_ADDR: {
-            result = buf_printf(result, "[%d]", op->addr);
-        } break;
+            char *displacement = NULL;
+            if ( op->addr.displacement != 0 ) {
+                displacement = buf_printf(displacement, "%d", op->addr.displacement);
+            } else {
+                displacement = "";
+            }
 
-        case OPERAND_ADDR_REG: {
-            result = buf_printf(result, "[%s]", to_str(op->op));
-        } break;
-
-        case OPERAND_ADDR_REGS: {
-            result = buf_printf(result, "[%s+%s]", to_str(op->op1), to_str(op->op2));
+            result = buf_printf(result, "[%s%s%s%s]", to_str(op->addr.base, op->size),
+                    to_str(op->addr.index, op->addr.scale, op->size), (op->addr.displacement > 0) ? "+" : "",
+                    displacement);
         } break;
 
         case OPERAND_IMM: {
@@ -119,31 +166,11 @@ to_str(Urq::Sss::Vm::Operand *op) {
         } break;
 
         case OPERAND_REG: {
-            if ( op->with_displacement ) {
-                if ( op->reg.size == 8 ) {
-                    result = buf_printf(result, "%d[%s]", op->displacement, regs64_dbg[op->reg.kind]);
-                } else if ( op->reg.size == 4 ) {
-                    result = buf_printf(result, "%d[%s]", op->displacement, regs32_dbg[op->reg.kind]);
-                } else if ( op->reg.size == 2 ) {
-                    result = buf_printf(result, "%d[%s]", op->displacement, regs16_dbg[op->reg.kind]);
-                } else if ( op->reg.size == 1 ) {
-                    result = buf_printf(result, "%d[%s]", op->displacement, regs8_dbg[op->reg.kind]);
-                }
-            } else {
-                if ( op->reg.size == 8 ) {
-                    result = buf_printf(result, "%s", regs64_dbg[op->reg.kind]);
-                } else if ( op->reg.size == 4 ) {
-                    result = buf_printf(result, "%s", regs32_dbg[op->reg.kind]);
-                } else if ( op->reg.size == 2 ) {
-                    result = buf_printf(result, "%s", regs16_dbg[op->reg.kind]);
-                } else if ( op->reg.size == 1 ) {
-                    result = buf_printf(result, "%s", regs8_dbg[op->reg.kind]);
-                }
-            }
+            result = buf_printf(result, "%s", to_str(op->reg.kind, op->size));
         } break;
 
-        case OPERAND_NAME: {
-            result = buf_printf(result, "%s", to_str(op->val));
+        case OPERAND_LABEL: {
+            result = buf_printf(result, "%s", op->label);
         } break;
 
         default: {

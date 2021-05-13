@@ -46,6 +46,8 @@ enum Vm_Op {
 };
 
 enum Reg_Kind {
+    REG_NULL,
+
     REG_RAX,
     REG_RBX,
     REG_RCX,
@@ -71,6 +73,13 @@ enum Reg_Kind {
 struct Reg {
     Reg_Kind kind;
     uint32_t size;
+};
+
+struct Addr {
+    Reg_Kind base;
+    Reg_Kind index;
+    int32_t  scale;
+    int32_t  displacement;
 };
 
 enum Vm_Rflag {
@@ -127,30 +136,21 @@ enum Operand_Kind {
     OPERAND_NONE,
 
     OPERAND_ADDR,
-    OPERAND_ADDR_REG,
-    OPERAND_ADDR_REGS,
     OPERAND_IMM,
-    OPERAND_NAME,
+    OPERAND_LABEL,
     OPERAND_PTR,
     OPERAND_REG,
 };
 struct Operand {
     Operand_Kind kind;
-
-    bool         with_displacement;
-    int32_t      displacement;
     uint32_t     size;
 
     union {
-        uint64_t addr;
-        Reg      reg;
-        Value    val;
-        Operand  *op;
-
-        struct {
-            Operand *op1;
-            Operand *op2;
-        };
+        char    * label;
+        Reg       reg;
+        Value     val;
+        Operand * op;
+        Addr      addr;
     };
 };
 
@@ -232,10 +232,8 @@ make_label(char *fmt, char *str) {
 }
 
 uint32_t
-addr_lookup(Value val) {
-    assert(val.kind == VAL_STR);
-
-    char *label = intern_str(val.str);
+addr_lookup(char *val) {
+    char *label = intern_str(val);
 
     for ( int i = 0; i < buf_len(vm_instrs_labeled); ++i ) {
         Instr *instr = vm_instrs_labeled[i];
@@ -303,6 +301,54 @@ reg_read(Cpu *cpu, Operand *op) {
             return 0;
         } break;
     }
+}
+
+uint64_t
+reg_read(Cpu *cpu, Reg_Kind reg, uint32_t size) {
+    switch ( size ) {
+        case 8: {
+            return reg_read8(cpu, reg);
+        } break;
+
+        case 4: {
+            return reg_read4(cpu, reg);
+        } break;
+
+        case 2: {
+            return reg_read2(cpu, reg);
+        } break;
+
+        case 1: {
+            return reg_read1(cpu, reg);
+        } break;
+
+        default: {
+            assert(0);
+            return 0;
+        } break;
+    }
+}
+
+uint32_t
+effective_addr(Cpu *cpu, Operand *op) {
+    assert(op->kind == OPERAND_ADDR);
+
+    uint64_t base = 0;
+    if ( op->addr.base != REG_NULL ) {
+        base = reg_read(cpu, op->addr.base, op->size);
+    }
+
+    uint64_t index = 0;
+    if ( op->addr.index != REG_NULL ) {
+        index = reg_read(cpu, op->addr.index, op->size);
+    }
+
+    uint64_t scale = op->addr.scale;
+    uint64_t displacement = op->addr.displacement;
+
+    uint32_t result = (uint32_t)(base + index*scale + displacement);
+
+    return result;
 }
 
 void
@@ -654,33 +700,43 @@ value(char *val) {
 }
 
 Operand *
-operand_addr(uint32_t addr, int32_t size) {
+operand_addr(Reg_Kind base, Reg_Kind index, int32_t scale, int32_t displacement, int32_t size) {
     Operand *result = urq_allocs(Operand);
 
-    result->kind = OPERAND_ADDR;
-    result->addr = addr;
-    result->size = size;
+    result->kind              = OPERAND_ADDR;
+    result->size              = size;
+    result->addr.base         = base;
+    result->addr.index        = index;
+    result->addr.scale        = scale;
+    result->addr.displacement = displacement;
 
     return result;
 }
 
 Operand *
-operand_addr(Operand *reg) {
+operand_addr(Reg_Kind base, int32_t displacement, int32_t size) {
     Operand *result = urq_allocs(Operand);
 
-    result->kind = OPERAND_ADDR_REG;
-    result->op   = reg;
+    result->kind              = OPERAND_ADDR;
+    result->size              = size;
+    result->addr.base         = base;
+    result->addr.index        = REG_NULL;
+    result->addr.scale        = 0;
+    result->addr.displacement = displacement;
 
     return result;
 }
 
 Operand *
-operand_addr(Operand *op1, Operand *op2) {
+operand_addr(int32_t displacement, uint32_t size) {
     Operand *result = urq_allocs(Operand);
 
-    result->kind = OPERAND_ADDR_REGS;
-    result->op1  = op1;
-    result->op2  = op2;
+    result->kind              = OPERAND_ADDR;
+    result->size              = size;
+    result->addr.base         = REG_NULL;
+    result->addr.index        = REG_NULL;
+    result->addr.scale        = 0;
+    result->addr.displacement = displacement;
 
     return result;
 }
@@ -715,13 +771,11 @@ operand_reg(Reg_Kind reg, uint32_t size) {
 
     result->kind              = OPERAND_REG;
     result->size              = size;
-    result->displacement      = 0;
-    result->with_displacement = false;
     result->reg               = { reg, size };
 
     return result;
 }
-
+/*
 Operand *
 operand_reg(Reg_Kind reg, uint32_t size, int32_t displacement) {
     Operand *result = urq_allocs(Operand);
@@ -736,6 +790,7 @@ operand_reg(Reg_Kind reg, uint32_t size, int32_t displacement) {
 
     return result;
 }
+*/
 
 Operand *
 operand_rax(int32_t size) {
@@ -754,7 +809,7 @@ operand_rdi(int32_t size) {
 
 Operand *
 operand_rbp(int32_t size, int32_t displacement) {
-    return operand_reg(REG_RBP, size, displacement);
+    return operand_addr(REG_RBP, displacement, size);
 }
 
 Operand *
@@ -763,11 +818,11 @@ operand_args(int32_t size, int32_t count) {
 }
 
 Operand *
-operand_name(Value name) {
+operand_label(char *label) {
     Operand *result = urq_allocs(Operand);
 
-    result->kind = OPERAND_NAME;
-    result->val  = name;
+    result->kind  = OPERAND_LABEL;
+    result->label = label;
 
     return result;
 }
@@ -810,8 +865,8 @@ vm_instr_fetch(Cpu *cpu) {
 }
 
 void
-vm_instr_patch(uint32_t index, uint32_t addr) {
-    vm_instrs[index]->operand1->addr = addr;
+vm_instr_patch(uint32_t index, uint32_t displacement) {
+    vm_instrs[index]->operand1->addr.displacement = displacement;
 }
 
 uint32_t
@@ -933,7 +988,7 @@ Operand *
 vm_addr(Expr *expr) {
     switch ( expr->kind ) {
         case EXPR_IDENT: {
-            return operand_rbp(expr->type->item_size, EIDENT(expr)->sym->decl->offset);
+            return operand_addr(REG_RBP, EIDENT(expr)->sym->decl->offset, expr->type->item_size);
         } break;
 
         case EXPR_PAREN: {
@@ -1006,9 +1061,10 @@ vm_expr(Expr *expr, Mem *mem, bool assignment) {
             if ( assignment ) {
                 /* @AUFGABE: alle ausdrücke müssen hier unterstützt werden! aktuell werden nur IDENTs unterstützt */
                 vm_emit(vm_instr(expr, OP_MOV, operand_rsi(expr->type->size), vm_addr(EAT(expr)->expr)));
-                return operand_ptr(operand_rsi(expr->type->size));
+
+                return operand_addr(REG_RSI, 0, expr->type->size);
             } else {
-                vm_emit(vm_instr(expr, OP_MOV, operand_rax(expr->type->size), operand_ptr(vm_addr(EAT(expr)->expr))));
+                vm_emit(vm_instr(expr, OP_LEA, operand_rax(expr->type->size), vm_addr(EAT(expr)->expr)));
             }
         } break;
 
@@ -1105,9 +1161,9 @@ vm_expr(Expr *expr, Mem *mem, bool assignment) {
             vm_emit(vm_instr(expr, OP_ADD, operand_rsi(field->type->size), operand_imm(value((int64_t)field->offset, 4), 4)));
 
             if ( assignment ) {
-                return operand_addr(operand_rsi(field->type->size));
+                return operand_addr(REG_RSI, 0, field->type->size);
             } else {
-                vm_emit(vm_instr(expr, OP_MOV, operand_rax(field->type->size), operand_addr(operand_rsi(field->type->size))));
+                vm_emit(vm_instr(expr, OP_MOV, operand_rax(field->type->size), operand_addr(REG_RSI, 0, field->type->size)));
             }
         } break;
 
@@ -1124,16 +1180,16 @@ vm_expr(Expr *expr, Mem *mem, bool assignment) {
                     return operand_addr(EIDENT(expr)->sym->decl->offset, expr->type->item_size);
                 } else {
                     if ( sym->decl->kind == DECL_PROC ) {
-                        vm_emit(vm_instr(expr, OP_LEA, operand_rax(sym->type->item_size), operand_name(value(sym->name))));
+                        vm_emit(vm_instr(expr, OP_LEA, operand_rax(sym->type->item_size), operand_label(sym->name)));
                     } else {
-                        vm_emit(vm_instr(expr, OP_LEA, operand_rax(sym->type->item_size), operand_addr(sym->decl->offset, sym->type->item_size)));
+                        vm_emit(vm_instr(expr, OP_MOV, operand_rax(sym->type->item_size), operand_addr(sym->decl->offset, sym->type->item_size)));
                     }
                 }
             } else {
                 if ( assignment ) {
                     return vm_addr(expr);
                 } else {
-                    vm_emit(vm_instr(expr, OP_LEA, operand_rax(sym->type->item_size), operand_addr(operand_rbp(sym->type->item_size, sym->decl->offset))));
+                    vm_emit(vm_instr(expr, OP_MOV, operand_rax(sym->type->item_size), operand_addr(REG_RBP, sym->decl->offset, sym->type->item_size)));
                 }
             }
         } break;
@@ -1147,13 +1203,13 @@ vm_expr(Expr *expr, Mem *mem, bool assignment) {
 
             vm_expr(offset, mem, assignment);
             vm_emit(vm_instr(expr, OP_MUL, operand_rax(item_size), operand_imm(value((uint64_t)item_size, item_size), item_size)));
-            vm_emit(vm_instr(expr, OP_LEA, operand_rsi(item_size), operand_addr(op)));
+            vm_emit(vm_instr(expr, OP_LEA, operand_rsi(item_size), op));
             vm_emit(vm_instr(expr, OP_ADD, operand_rsi(item_size), operand_rax(index_size)));
 
             if ( assignment ) {
-                return operand_addr(operand_rsi(item_size));
+                return operand_addr(REG_RSI, 0, item_size);
             } else {
-                vm_emit(vm_instr(expr, OP_MOV, operand_rax(item_size), operand_addr(operand_rsi(item_size))));
+                vm_emit(vm_instr(expr, OP_MOV, operand_rax(item_size), operand_addr(REG_RSI, 0, item_size)));
             }
         } break;
 
@@ -1306,7 +1362,7 @@ vm_stmt(Stmt *stmt, Mem *mem, char *proc_name) {
 
             assert(proc_name);
             char *label = make_label("%s.end", proc_name);
-            vm_emit(vm_instr(stmt, OP_JMP, operand_name(value(label)), (char *)NULL, "res"));
+            vm_emit(vm_instr(stmt, OP_JMP, operand_label(label), (char *)NULL, "res"));
         } break;
 
         case STMT_WHILE: {
@@ -1371,8 +1427,8 @@ step(Cpu *cpu) {
 
             if ( instr->operand1->kind == OPERAND_REG ) {
                 reg_write8(cpu, REG_RIP, reg_read(cpu, instr->operand1));
-            } else if ( instr->operand1->kind == OPERAND_NAME ) {
-                reg_write8(cpu, REG_RIP, addr_lookup(instr->operand1->val));
+            } else if ( instr->operand1->kind == OPERAND_LABEL ) {
+                reg_write8(cpu, REG_RIP, addr_lookup(instr->operand1->label));
             } else {
                 assert(0);
             }
@@ -1468,9 +1524,9 @@ step(Cpu *cpu) {
         case OP_JE: {
             if ( flag_state(cpu, RFLAG_ZF) ) {
                 if ( instr->operand1->kind == OPERAND_ADDR ) {
-                    reg_write8(cpu, REG_RIP, instr->operand1->addr);
-                } else if ( instr->operand1->kind == OPERAND_NAME ) {
-                    reg_write8(cpu, REG_RIP, addr_lookup(instr->operand1->val));
+                    reg_write8(cpu, REG_RIP, effective_addr(cpu, instr->operand1));
+                } else if ( instr->operand1->kind == OPERAND_LABEL ) {
+                    reg_write8(cpu, REG_RIP, addr_lookup(instr->operand1->label));
                 } else {
                     assert(0);
                 }
@@ -1479,9 +1535,9 @@ step(Cpu *cpu) {
 
         case OP_JMP: {
             if ( instr->operand1->kind == OPERAND_ADDR ) {
-                reg_write8(cpu, REG_RIP, instr->operand1->addr);
-            } else if ( instr->operand1->kind == OPERAND_NAME ) {
-                reg_write8(cpu, REG_RIP, addr_lookup(instr->operand1->val));
+                reg_write8(cpu, REG_RIP, effective_addr(cpu, instr->operand1));
+            } else if ( instr->operand1->kind == OPERAND_LABEL ) {
+                reg_write8(cpu, REG_RIP, addr_lookup(instr->operand1->label));
             } else {
                 assert(0);
             }
@@ -1490,7 +1546,7 @@ step(Cpu *cpu) {
         case OP_JNE: {
             if ( !flag_state(cpu, RFLAG_ZF) ) {
                 if ( instr->operand1->kind == OPERAND_ADDR ) {
-                    reg_write8(cpu, REG_RIP, instr->operand1->addr);
+                    reg_write8(cpu, REG_RIP, effective_addr(cpu, instr->operand1));
                 } else {
                     assert(0);
                 }
@@ -1500,7 +1556,7 @@ step(Cpu *cpu) {
         case OP_JNZ: {
             if ( !flag_state(cpu, RFLAG_ZF) ) {
                 if ( instr->operand1->kind == OPERAND_ADDR ) {
-                    reg_write8(cpu, REG_RIP, instr->operand1->addr);
+                    reg_write8(cpu, REG_RIP, effective_addr(cpu, instr->operand1));
                 } else {
                     assert(0);
                 }
@@ -1510,7 +1566,7 @@ step(Cpu *cpu) {
         case OP_JZ: {
             if ( flag_state(cpu, RFLAG_ZF) ) {
                 if ( instr->operand1->kind == OPERAND_ADDR ) {
-                    reg_write8(cpu, REG_RIP, instr->operand1->addr);
+                    reg_write8(cpu, REG_RIP, effective_addr(cpu, instr->operand1));
                 } else {
                     assert(0);
                 }
@@ -1520,35 +1576,19 @@ step(Cpu *cpu) {
         case OP_LEA: {
             if ( instr->dst->kind == OPERAND_REG ) {
                 if ( instr->src->kind == OPERAND_REG ) {
-                    if ( instr->src->with_displacement ) {
-                        reg_write(cpu, instr->dst, reg_read(cpu, instr->src) + instr->src->displacement);
-                    } else {
-                        reg_write(cpu, instr->dst, reg_read(cpu, instr->src));
-                    }
-                } else if ( instr->src->kind == OPERAND_NAME ) {
-                    reg_write(cpu, instr->dst, addr_lookup(instr->src->val));
+                    reg_write(cpu, instr->dst, reg_read(cpu, instr->src));
+                } else if ( instr->src->kind == OPERAND_LABEL ) {
+                    reg_write(cpu, instr->dst, addr_lookup(instr->src->label));
                 } else if ( instr->src->kind == OPERAND_ADDR ) {
-                    reg_write(cpu, instr->dst, mem_read(cpu->mem, (uint32_t)instr->src->addr, instr->src->size));
-                } else if ( instr->src->kind == OPERAND_ADDR_REG ) {
-                    Operand *op = instr->src->op;
-
-                    if ( op->with_displacement ) {
-                        reg_write(cpu, instr->dst, mem_read(cpu->mem, (uint32_t)(reg_read(cpu, op)) + op->displacement, instr->src->op->size));
-                    } else {
-                        reg_write(cpu, instr->dst, mem_read(cpu->mem, (uint32_t)(reg_read(cpu, op)), instr->src->op->size));
-                    }
+                    reg_write(cpu, instr->dst, effective_addr(cpu, instr->src));
                 } else {
                     assert(instr->src->kind == OPERAND_PTR );
                     Operand *op = instr->src->op;
 
                     if ( op->kind == OPERAND_REG ) {
-                        if ( op->with_displacement ) {
-                            reg_write(cpu, instr->dst, reg_read(cpu, op) + op->displacement);
-                        } else {
-                            assert(0);
-                        }
+                        assert(0);
                     } else if ( op->kind == OPERAND_ADDR ) {
-                        reg_write(cpu, instr->dst, mem_read(cpu->mem, (uint32_t)op->addr, op->size));
+                        reg_write(cpu, instr->dst, mem_read(cpu->mem, effective_addr(cpu, op), op->size));
                     } else {
                         assert(0);
                     }
@@ -1565,79 +1605,39 @@ step(Cpu *cpu) {
 
         case OP_MOV: {
             if ( instr->dst->kind == OPERAND_REG ) {
-                if ( instr->dst->with_displacement ) {
-                    if ( instr->src->kind == OPERAND_IMM ) {
-                        mem_write(cpu->mem, reg_read(cpu, instr->dst) + instr->dst->displacement, instr->src->val.u64);
-                    } else if ( instr->src->kind == OPERAND_REG ) {
-                        mem_write(cpu->mem, reg_read(cpu, instr->dst) + instr->dst->displacement, reg_read(cpu, instr->src), instr->src->size);
+                if ( instr->src->kind == OPERAND_IMM ) {
+                    reg_write(cpu, instr->dst, instr->src->val.u64);
+                } else if ( instr->src->kind == OPERAND_REG ) {
+                    reg_write(cpu, instr->dst, reg_read(cpu, instr->src));
+                } else if ( instr->src->kind == OPERAND_PTR ) {
+                    Operand *op = instr->src->op;
+
+                    if ( op->kind == OPERAND_REG ) {
+                        reg_write(cpu, instr->dst, reg_read(cpu, op));
+                    } else if ( op->kind == OPERAND_ADDR ) {
+                        reg_write(cpu, instr->dst, mem_read(cpu->mem, effective_addr(cpu, op), op->size));
                     } else {
                         assert(0);
                     }
+                } else if ( instr->src->kind == OPERAND_ADDR ) {
+                    reg_write(cpu, instr->dst, mem_read(cpu->mem, effective_addr(cpu, instr->src), instr->src->size));
                 } else {
-                    if ( instr->src->kind == OPERAND_IMM ) {
-                        reg_write(cpu, instr->dst, instr->src->val.u64);
-                    } else if ( instr->src->kind == OPERAND_REG ) {
-                        if ( instr->src->with_displacement ) {
-                            reg_write(cpu, instr->dst, mem_read64(cpu->mem, (uint32_t)reg_read(cpu, instr->src) + instr->src->displacement));
-                        } else {
-                            reg_write(cpu, instr->dst, reg_read(cpu, instr->src));
-                        }
-                    } else if ( instr->src->kind == OPERAND_PTR ) {
-                        Operand *op = instr->src->op;
-
-                        if ( op->kind == OPERAND_REG ) {
-                            if ( op->with_displacement ) {
-                                reg_write(cpu, instr->dst, reg_read(cpu, op) + op->displacement);
-                            } else {
-                                reg_write(cpu, instr->dst, reg_read(cpu, op));
-                            }
-                        }
-                    } else if ( instr->src->kind == OPERAND_ADDR_REG ) {
-                        Operand *op = instr->src->op;
-
-                        reg_write(cpu, instr->dst, mem_read(cpu->mem, (uint32_t)(reg_read(cpu, op)), instr->src->op->size));
-                    } else if ( instr->src->kind == OPERAND_ADDR_REGS ) {
-                        Operand *op1 = instr->src->op1;
-                        Operand *op2 = instr->src->op2;
-
-                        reg_write(cpu, instr->dst, mem_read(cpu->mem, (uint32_t)(reg_read(cpu, op1) + reg_read(cpu, op2)), instr->src->op1->size));
-                    } else if ( instr->src->kind == OPERAND_ADDR ) {
-                        reg_write(cpu, instr->dst, instr->src->addr);
-                    } else {
-                        assert(0);
-                    }
+                    assert(0);
                 }
             } else if ( instr->dst->kind == OPERAND_PTR ) {
                 Operand *op = instr->dst->op;
 
                 if ( op->kind == OPERAND_REG ) {
-                    if ( op->with_displacement ) {
-                        assert(0);
-                    } else {
-                        assert(instr->src->kind == OPERAND_REG);
-                        mem_write(cpu->mem, (uint64_t)reg_read(cpu, op), reg_read(cpu, instr->src), instr->src->size);
-                    }
-                } else if ( op->kind == OPERAND_ADDR_REGS ) {
-                    Operand *op1 = op->op1;
-                    Operand *op2 = op->op2;
-
-                    mem_write(cpu->mem, (uint32_t)(reg_read(cpu, op1) + reg_read(cpu, op2)), reg_read(cpu, instr->src));
+                    assert(instr->src->kind == OPERAND_REG);
+                    mem_write(cpu->mem, (uint64_t)reg_read(cpu, op), reg_read(cpu, instr->src), instr->src->size);
                 } else if ( op->kind == OPERAND_ADDR ) {
-                    mem_write(cpu->mem, op->addr, reg_read(cpu, instr->src));
+                    mem_write(cpu->mem, effective_addr(cpu, op), reg_read(cpu, instr->src), instr->src->size);
                 } else {
                     assert(0);
                 }
             } else if ( instr->dst->kind == OPERAND_ADDR ) {
                 if ( instr->src->kind == OPERAND_REG ) {
-                    mem_write(cpu->mem, instr->dst->addr, reg_read(cpu, instr->src));
-                } else {
-                    assert(0);
-                }
-            } else if ( instr->dst->kind == OPERAND_ADDR_REG ) {
-                Operand *op = instr->dst->op;
-
-                if ( instr->src->kind == OPERAND_REG ) {
-                    mem_write(cpu->mem, reg_read(cpu, op), reg_read(cpu, instr->src));
+                    mem_write(cpu->mem, effective_addr(cpu, instr->dst), reg_read(cpu, instr->src), instr->src->size);
                 } else {
                     assert(0);
                 }
@@ -1838,7 +1838,7 @@ eval_section(Section *section, Mem *mem, bool use_entry_point) {
     Cpu *cpu = NULL;
 
     if ( use_entry_point ) {
-        uint32_t start_addr = addr_lookup(value(entry_point));
+        uint32_t start_addr = addr_lookup(entry_point);
 
         cpu = cpu_new(section->instrs, mem, start_addr);
 
