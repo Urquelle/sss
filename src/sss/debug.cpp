@@ -101,7 +101,7 @@ char *
 to_str(Reg_Kind reg, int32_t scale, uint32_t size) {
     char *result = NULL;
 
-    if ( reg == REG_NULL ) {
+    if ( reg == REG_NONE ) {
         return "";
     }
 
@@ -122,7 +122,7 @@ char *
 to_str(Reg_Kind reg, uint32_t size) {
     char *result = NULL;
 
-    if ( reg == REG_NULL ) {
+    if ( reg == REG_NONE ) {
         return "";
     }
 
@@ -211,13 +211,6 @@ to_str(Instr *instr) {
 
         case OP_CMP: {
             output = buf_printf(output, to_str_binop("cmp", instr));
-        } break;
-
-        case OP_DATA: {
-            output = buf_printf(output, "%s", to_str(instr->operand1));
-            if ( instr->operand2 ) {
-                output = buf_printf(output, " %s", to_str(instr->operand2));
-            }
         } break;
 
         case OP_ENTER: {

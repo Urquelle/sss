@@ -11,7 +11,6 @@ void      vm_stmt(Stmt *stmt, Mem *mem, char *proc_name = NULL);
 
 enum Vm_Op {
     OP_HLT,
-    OP_DATA,
 
     OP_ADD,
     OP_CALL,
@@ -45,8 +44,9 @@ enum Vm_Op {
     OP_COUNT,
 };
 
+#undef REG_NONE
 enum Reg_Kind {
-    REG_NULL,
+    REG_NONE,
 
     REG_RAX,
     REG_RBX,
@@ -334,12 +334,12 @@ effective_addr(Cpu *cpu, Operand *op) {
     assert(op->kind == OPERAND_ADDR);
 
     uint64_t base = 0;
-    if ( op->addr.base != REG_NULL ) {
+    if ( op->addr.base != REG_NONE ) {
         base = reg_read(cpu, op->addr.base, op->size);
     }
 
     uint64_t index = 0;
-    if ( op->addr.index != REG_NULL ) {
+    if ( op->addr.index != REG_NONE ) {
         index = reg_read(cpu, op->addr.index, op->size);
     }
 
@@ -463,6 +463,11 @@ mem_alloc(Mem *mem, uint32_t size) {
     mem->used += size;
 
     return result;
+}
+
+void
+mem_copy(Mem *mem, uint32_t addr, uint32_t size, void *data) {
+    memcpy(mem->mem + addr, data, size);
 }
 
 void
@@ -720,7 +725,7 @@ operand_addr(Reg_Kind base, int32_t displacement, int32_t size) {
     result->kind              = OPERAND_ADDR;
     result->size              = size;
     result->addr.base         = base;
-    result->addr.index        = REG_NULL;
+    result->addr.index        = REG_NONE;
     result->addr.scale        = 0;
     result->addr.displacement = displacement;
 
@@ -755,9 +760,9 @@ operand_reg(Reg_Kind reg, uint32_t size) {
 
     assert(size >= 1 && size <= 8);
 
-    result->kind              = OPERAND_REG;
-    result->size              = size;
-    result->reg               = { reg, size };
+    result->kind = OPERAND_REG;
+    result->size = size;
+    result->reg  = { reg, size };
 
     return result;
 }
@@ -1002,7 +1007,7 @@ void
 vm_emit_and(Expr_Bin *expr, Mem *mem) {
     vm_expr(expr->left, mem);
     vm_emit(vm_instr(expr, OP_CMP, operand_rax(expr->type->size), operand_imm(value1, expr->type->size)));
-    int32_t jmp1_instr = vm_emit(vm_instr(expr, OP_JNE, operand_addr(REG_NULL, 0, expr->type->size)));
+    int32_t jmp1_instr = vm_emit(vm_instr(expr, OP_JNE, operand_addr(REG_NONE, 0, expr->type->size)));
 
     vm_expr(expr->right, mem);
     vm_emit(vm_instr(expr, OP_CMP, operand_rax(expr->type->size), operand_imm(value1, expr->type->size)));
@@ -1014,7 +1019,7 @@ void
 vm_emit_or(Expr_Bin *expr, Mem *mem) {
     vm_expr(expr->left, mem);
     vm_emit(vm_instr(expr, OP_CMP, operand_rax(expr->type->size), operand_imm(value1, expr->type->size)));
-    int32_t jmp1_instr = vm_emit(vm_instr(expr, OP_JE, operand_addr(REG_NULL, 0, expr->type->size)));
+    int32_t jmp1_instr = vm_emit(vm_instr(expr, OP_JE, operand_addr(REG_NONE, 0, expr->type->size)));
 
     vm_expr(expr->right, mem);
     vm_emit(vm_instr(expr, OP_CMP, operand_rax(expr->type->size), operand_imm(value1, expr->type->size)));
@@ -1147,12 +1152,12 @@ vm_expr(Expr *expr, Mem *mem, bool assignment) {
 
             if (sym->decl->is_global) {
                 if ( assignment ) {
-                    return operand_addr(REG_NULL, EIDENT(expr)->sym->decl->offset, expr->type->item_size);
+                    return operand_addr(REG_NONE, EIDENT(expr)->sym->decl->offset, expr->type->item_size);
                 } else {
                     if ( sym->decl->kind == DECL_PROC ) {
                         vm_emit(vm_instr(expr, OP_LEA, operand_rax(sym->type->item_size), operand_label(sym->name)));
                     } else {
-                        vm_emit(vm_instr(expr, OP_MOV, operand_rax(sym->type->item_size), operand_addr(REG_NULL, sym->decl->offset, sym->type->item_size)));
+                        vm_emit(vm_instr(expr, OP_MOV, operand_rax(sym->type->item_size), operand_addr(REG_NONE, sym->decl->offset, sym->type->item_size)));
                     }
                 }
             } else {
@@ -1201,9 +1206,12 @@ vm_expr(Expr *expr, Mem *mem, bool assignment) {
         } break;
 
         case EXPR_STR: {
-            expr->offset = mem_alloc(mem, utf8_str_size(ESTR(expr)->val));
+            uint32_t str_size = utf8_str_size(ESTR(expr)->val);
 
-            vm_emit(vm_instr(expr, OP_MOV, operand_rax(expr->type->size), operand_addr(REG_NULL, expr->offset, expr->type->size)));
+            expr->offset = mem_alloc(mem, str_size);
+            mem_copy(mem, expr->offset, str_size, ESTR(expr)->val);
+
+            vm_emit(vm_instr(expr, OP_MOV, operand_rax(expr->type->size), operand_addr(REG_NONE, expr->offset, expr->type->size)));
         } break;
 
         default: {
@@ -1246,7 +1254,7 @@ vm_decl(Decl *decl, Mem *mem) {
 
                 if ( expr ) {
                     vm_expr(expr, mem);
-                    vm_emit(vm_instr(decl, OP_MOV, operand_addr(REG_NULL, decl->offset, decl->type->item_size), operand_rax(decl->type->size)));
+                    vm_emit(vm_instr(decl, OP_MOV, operand_addr(REG_NONE, decl->offset, decl->type->item_size), operand_rax(decl->type->size)));
                 }
             } else {
                 if ( expr ) {
@@ -1292,10 +1300,10 @@ vm_stmt(Stmt *stmt, Mem *mem, char *proc_name) {
             int32_t loop_start = buf_len(vm_instrs);
             vm_expr(SFOR(stmt)->cond, mem);
             vm_emit(vm_instr(stmt, OP_CMP, operand_rax(SFOR(stmt)->cond->type->size), operand_imm(value1, SFOR(stmt)->cond->type->size)));
-            int32_t jmpnz_instr = vm_emit(vm_instr(stmt, OP_JNZ, operand_addr(REG_NULL, 0, SFOR(stmt)->cond->type->size)));
+            int32_t jmpnz_instr = vm_emit(vm_instr(stmt, OP_JNZ, operand_addr(REG_NONE, 0, SFOR(stmt)->cond->type->size)));
             vm_stmt(SFOR(stmt)->block, mem, proc_name);
             vm_stmt(SFOR(stmt)->step, mem, proc_name);
-            vm_emit(vm_instr(stmt, OP_JMP, operand_addr(REG_NULL, loop_start, SFOR(stmt)->cond->type->size)));
+            vm_emit(vm_instr(stmt, OP_JMP, operand_addr(REG_NONE, loop_start, SFOR(stmt)->cond->type->size)));
 
             /* @AUFGABE: sonst zweig für schleife */
 #if 0
@@ -1312,9 +1320,9 @@ vm_stmt(Stmt *stmt, Mem *mem, char *proc_name) {
 
             vm_expr(SIF(stmt)->cond, mem);
             vm_emit(vm_instr(stmt, OP_CMP, operand_rax(SIF(stmt)->cond->type->size), operand_imm(value1, SIF(stmt)->cond->type->size)));
-            int32_t jmp1_instr = vm_emit(vm_instr(stmt, OP_JNE, operand_addr(REG_NULL, 0, SIF(stmt)->cond->type->size), label));
+            int32_t jmp1_instr = vm_emit(vm_instr(stmt, OP_JNE, operand_addr(REG_NONE, 0, SIF(stmt)->cond->type->size), label));
             vm_stmt(SIF(stmt)->stmt, mem, proc_name);
-            int32_t jmp2_instr = vm_emit(vm_instr(stmt, OP_JMP, operand_addr(REG_NULL, 0, SIF(stmt)->cond->type->size)));
+            int32_t jmp2_instr = vm_emit(vm_instr(stmt, OP_JMP, operand_addr(REG_NONE, 0, SIF(stmt)->cond->type->size)));
 
             vm_instr_patch(jmp1_instr, buf_len(vm_instrs));
 
@@ -1339,9 +1347,9 @@ vm_stmt(Stmt *stmt, Mem *mem, char *proc_name) {
             int32_t loop_start = buf_len(vm_instrs);
             vm_expr(SWHILE(stmt)->cond, mem);
             vm_emit(vm_instr(stmt, OP_CMP, operand_rax(SWHILE(stmt)->cond->type->size), operand_imm(value0, SWHILE(stmt)->cond->type->size)));
-            int32_t jmp_instr = vm_emit(vm_instr(stmt, OP_JZ, operand_addr(REG_NULL, 0, SWHILE(stmt)->cond->type->size), operand_imm(value1, SWHILE(stmt)->cond->type->size)));
+            int32_t jmp_instr = vm_emit(vm_instr(stmt, OP_JZ, operand_addr(REG_NONE, 0, SWHILE(stmt)->cond->type->size), operand_imm(value1, SWHILE(stmt)->cond->type->size)));
             vm_stmt(SWHILE(stmt)->block, mem, proc_name);
-            vm_emit(vm_instr(stmt, OP_JMP, operand_addr(REG_NULL, loop_start, SWHILE(stmt)->cond->type->size)));
+            vm_emit(vm_instr(stmt, OP_JMP, operand_addr(REG_NONE, loop_start, SWHILE(stmt)->cond->type->size)));
 
             vm_instr_patch(jmp_instr, buf_len(vm_instrs));
         } break;
@@ -1430,10 +1438,6 @@ step(Cpu *cpu) {
             } else if ( operand1 == operand2 ) {
                 flags_set(cpu, RFLAG_ZF);
             }
-        } break;
-
-        case OP_DATA: {
-            //
         } break;
 
         case OP_ENTER: {
@@ -1836,7 +1840,7 @@ eval_section(Section *section, Mem *mem, bool use_entry_point) {
 
 uint64_t
 eval(Vm *vm, Mem *mem, bool use_entry_point = true) {
-    eval_section(vm->data_section, mem, use_entry_point);
+    eval_section(vm->data_section, mem, false);
     Cpu *cpu = eval_section(vm->text_section, mem, use_entry_point);
 
     return reg_read8(cpu, REG_RAX);
