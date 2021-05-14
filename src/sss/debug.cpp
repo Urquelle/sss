@@ -85,12 +85,20 @@ to_str(Urq::Sss::Vm::Value val) {
             result = buf_printf(result, "%d", val.s64);
         } break;
 
+        case Urq::Sss::Vm::VAL_S32: {
+            result = buf_printf(result, "%d", val.s32);
+        } break;
+
         case Urq::Sss::Vm::VAL_F32: {
             result = buf_printf(result, "%f", val.f32);
         } break;
 
         case Urq::Sss::Vm::VAL_STR: {
             result = buf_printf(result, "%s", val.str);
+        } break;
+
+        default: {
+            assert(0);
         } break;
     }
 
@@ -146,11 +154,7 @@ to_str(Urq::Sss::Vm::Operand *op) {
     switch ( op->kind ) {
         case OPERAND_ADDR: {
             char *displacement = NULL;
-            if ( op->addr.displacement != 0 ) {
-                displacement = buf_printf(displacement, "%d", op->addr.displacement);
-            } else {
-                displacement = "";
-            }
+            displacement = buf_printf(displacement, "%d", op->addr.displacement);
 
             result = buf_printf(result, "[%s%s%s%s]", to_str(op->addr.base, op->size),
                     to_str(op->addr.index, op->addr.scale, op->size), (op->addr.displacement > 0) ? "+" : "",

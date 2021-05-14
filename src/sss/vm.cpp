@@ -1243,7 +1243,7 @@ vm_decl(Decl *decl, Mem *mem) {
         } break;
 
         case DECL_STRUCT: {
-            //
+            // nichts zu tun
         } break;
 
         case DECL_VAR: {

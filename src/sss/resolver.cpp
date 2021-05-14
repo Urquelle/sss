@@ -702,7 +702,7 @@ Sym *
 sym_push_var(Loc *loc, char *name, Decl *decl) {
     Sym *sym = sym_get(name);
     if ( sym ) {
-        report_error(sym, "%s überschattet eine vorherige deklaration", sym->name);
+        report_error(sym, "%s blendet eine vorherige deklaration aus", sym->name);
     }
 
     Sym *result = sym_push(loc, name, NULL);
@@ -717,7 +717,7 @@ Sym *
 sym_push_var(Loc *loc, char *name, Type *type) {
     Sym *sym = sym_get(name);
     if ( sym ) {
-        report_error(sym, "%s überschattet eine vorherige deklaration", sym->name);
+        report_error(sym, "%s blendet eine vorherige deklaration aus", sym->name);
     }
 
     Sym *result = sym_push(loc, name, NULL);
