@@ -103,7 +103,6 @@ struct Type {
     Type_Kind kind;
 
     uint32_t size;
-    uint32_t item_size;
     uint32_t align;
     uint16_t id;
     bool     is_signed;
@@ -258,7 +257,6 @@ type_new( uint32_t size, Type_Kind kind, bool is_signed = false ) {
     result->kind      = kind;
     result->sym       = NULL;
     result->size      = size;
-    result->item_size = size;
     result->align     = 0;
     result->id        = global_type_id++;
     result->is_signed = is_signed;
@@ -275,7 +273,6 @@ type_string_new() {
 
     result->kind      = TYPE_STRING;
     result->size      = PTR_SIZE;
-    result->item_size = result->size;
     result->id        = global_type_id++;
     result->scope     = scope_new("string");
 
@@ -293,8 +290,7 @@ type_incomplete_struct(Sym *sym) {
 
     result->kind  = TYPE_INCOMPLETE;
     result->sym   = sym;
-    result->size  = 0;
-    result->item_size = PTR_SIZE;
+    result->size  = PTR_SIZE;
     result->align = 0;
     result->id    = global_type_id++;
     result->scope = scope_new(sym->name);
@@ -310,8 +306,7 @@ type_incomplete_enum(Sym *sym) {
 
     result->kind  = TYPE_INCOMPLETE;
     result->sym   = sym;
-    result->size  = 0;
-    result->item_size = 0;
+    result->size  = PTR_SIZE;
     result->align = 0;
     result->id    = global_type_id++;
     result->scope = scope_new(sym->name);
@@ -327,8 +322,7 @@ type_incomplete_union(Sym *sym) {
 
     result->kind  = TYPE_INCOMPLETE;
     result->sym   = sym;
-    result->size  = 0;
-    result->item_size = 0;
+    result->size  = PTR_SIZE;
     result->align = 0;
     result->id    = global_type_id++;
     result->scope = scope_new(sym->name);
@@ -343,8 +337,7 @@ type_union() {
     Type_Union *result = urq_allocs(Type_Union);
 
     result->kind  = TYPE_UNION;
-    result->size  = 0;
-    result->item_size = 0;
+    result->size  = PTR_SIZE;
     result->align = 0;
     result->id    = global_type_id++;
     result->scope = scope_new("union");
@@ -366,13 +359,12 @@ type_namespace(char *name) {
 }
 
 Type_Compound *
-type_compound(Compound_Elems elems, uint32_t num_elems) {
+type_compound(Compound_Elems elems, uint32_t num_elems, uint32_t size) {
     Type_Compound *result = urq_allocs(Type_Compound);
 
     result->kind      = TYPE_COMPOUND;
     result->sym       = NULL;
-    result->size      = 0;
-    result->item_size = 0;
+    result->size      = size;
     result->align     = 0;
     result->id        = global_type_id++;
     result->scope     = NULL;
@@ -530,21 +522,19 @@ type_ptr(Type *base) {
 
     result->kind = TYPE_PTR;
     result->size = PTR_SIZE;
-    result->item_size = PTR_SIZE;
     result->base = base;
 
     return result;
 }
 
 Type_Array *
-type_array(Type *base, uint32_t num_elems, uint32_t size, uint32_t item_size) {
+type_array(Type *base, uint32_t num_elems) {
     Type_Array *result = urq_allocs(Type_Array);
 
     result->kind      = TYPE_ARRAY;
     result->base      = base;
     result->num_elems = num_elems;
-    result->item_size = item_size;
-    result->size      = (num_elems) ? num_elems * size : size;
+    result->size      = PTR_SIZE;
     result->scope     = scope_new("array");
 
     sym_push_scope(&loc_none, result->scope, prop_size, type_u64);
@@ -558,7 +548,6 @@ type_proc(Decl_Var **params, uint32_t num_params, Decl_Var **rets, uint32_t num_
 
     result->kind       = TYPE_PROC;
     result->size       = 8;
-    result->item_size  = 8;
     result->params     = (Decl_Var **)MEMDUP(params);
     result->num_params = num_params;
     result->rets       = (Decl_Var **)MEMDUP(rets);
@@ -842,7 +831,9 @@ resolve_expr(Expr *expr, Type *given_type = NULL) {
         } break;
 
         case EXPR_STR: {
-            result = operand_const(type_string, val_str(ESTR(expr)->val));
+            uint32_t num_elems = utf8_str_size(ESTR(expr)->val);
+
+            result = operand_const(type_array(type_char, num_elems));
         } break;
 
         case EXPR_INT: {
@@ -973,10 +964,14 @@ resolve_expr(Expr *expr, Type *given_type = NULL) {
             result->is_const = left->is_const && right->is_const;
         } break;
 
-        case EXPR_AT: {
-            Operand *op = resolve_expr(EAT(expr)->expr);
+        case EXPR_DEREF: {
+            Operand *op = resolve_expr(EDEREF(expr)->base);
 
-            result = operand(type_ptr(op->type));
+            if ( op->type->kind != TYPE_PTR ) {
+                report_error(expr, "dereferenzierung eines nicht-zeigers");
+            }
+
+            result = operand(TPTR(op->type)->base);
         } break;
 
         case EXPR_FIELD: {
@@ -1011,6 +1006,12 @@ resolve_expr(Expr *expr, Type *given_type = NULL) {
 
         case EXPR_PAREN: {
             result = resolve_expr(EPAREN(expr)->expr);
+        } break;
+
+        case EXPR_PTR: {
+            Operand *op = resolve_expr(EPTR(expr)->base);
+
+            result = operand(type_ptr(op->type));
         } break;
 
         case EXPR_CALL: {
@@ -1179,12 +1180,12 @@ resolve_typespec(Typespec *typespec) {
 
                 if ( op->is_const ) {
                     assert(op->val.kind != VAL_NONE);
-                    result = type_array(type, op->val.s32, type->size, type->item_size);
+                    result = type_array(type, op->val.s32);
                 } else {
-                    result = type_array(type, 0, type->size, type->item_size);
+                    result = type_array(type, 0);
                 }
             } else {
-                result = type_array(type, 0, PTR_SIZE, PTR_SIZE);
+                result = type_array(type, 0);
             }
         } break;
 
@@ -1318,13 +1319,23 @@ resolve_decl_var(Decl *decl) {
         }
 
         if ( scope ) {
-            scope->frame_size += type->size;
-            decl->offset       = -scope->frame_size;
+            if ( type->kind == TYPE_ARRAY ) {
+                scope->frame_size += TARRAY(type)->base->size * TARRAY(type)->num_elems;
+                decl->offset       = -scope->frame_size;
+            } else {
+                scope->frame_size += type->size;
+                decl->offset       = -scope->frame_size;
+            }
         }
     } else {
         decl->is_global = true;
         decl->offset = mem_offset;
-        mem_offset = type->size;
+
+        if ( type->kind == TYPE_ARRAY ) {
+            mem_offset = TARRAY(type)->base->size * TARRAY(type)->num_elems;
+        } else {
+            mem_offset = type->size;
+        }
     }
 
     return type;

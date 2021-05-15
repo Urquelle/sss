@@ -83,13 +83,13 @@ Scope                  * scope_new(char *name, Scope *parent = NULL);
 Sym                    * sym_push_scope(Loc *loc, Scope *scope, char *name, Type *type);
 void                     type_complete(Type *type);
 
-#define EAT(Expr)             ((Expr_At *)(Expr))
 #define EBIN(Expr)            ((Expr_Bin *)(Expr))
 #define EBOOL(Expr)           ((Expr_Bool *)(Expr))
 #define ECALL(Expr)           ((Expr_Call *)(Expr))
 #define ECAST(Expr)           ((Expr_Cast *)(Expr))
 #define ECHR(Expr)            ((Expr_Char *)(Expr))
 #define ECMPND(Expr)          ((Expr_Compound *)(Expr))
+#define EDEREF(Expr)          ((Expr_Deref *)(Expr))
 #define EFIELD(Expr)          ((Expr_Field *)(Expr))
 #define EFLOAT(Expr)          ((Expr_Float *)(Expr))
 #define EIDENT(Expr)          ((Expr_Ident *)(Expr))
@@ -98,6 +98,7 @@ void                     type_complete(Type *type);
 #define ENEW(Expr)            ((Expr_New *)(Expr))
 #define ENOT(Expr)            ((Expr_Not *)(Expr))
 #define EPAREN(Expr)          ((Expr_Paren *)(Expr))
+#define EPTR(Expr)            ((Expr_Ptr *)(Expr))
 #define ERNG(Expr)            ((Expr_Range *)(Expr))
 #define ESIZEOF(Expr)         ((Expr_Sizeof *)(Expr))
 #define ESTR(Expr)            ((Expr_Str *)(Expr))

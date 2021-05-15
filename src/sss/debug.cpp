@@ -157,7 +157,7 @@ to_str(Urq::Sss::Vm::Operand *op) {
             displacement = buf_printf(displacement, "%d", op->addr.displacement);
 
             result = buf_printf(result, "[%s%s%s%s]", to_str(op->addr.base, op->size),
-                    to_str(op->addr.index, op->addr.scale, op->size), (op->addr.displacement > 0) ? "+" : "",
+                    to_str(op->addr.index, op->addr.scale, op->size), (op->addr.displacement >= 0) ? "+" : "",
                     displacement);
         } break;
 

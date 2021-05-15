@@ -87,7 +87,7 @@ struct Note : Ast_Elem {
 
 #define EXPRS        \
     X(EXPR_NONE)     \
-    X(EXPR_AT)       \
+    X(EXPR_DEREF)    \
     X(EXPR_BIN)      \
     X(EXPR_BOOL)     \
     X(EXPR_CALL)     \
@@ -103,6 +103,7 @@ struct Note : Ast_Elem {
     X(EXPR_NEW)      \
     X(EXPR_NOT)      \
     X(EXPR_PAREN)    \
+    X(EXPR_PTR)      \
     X(EXPR_RANGE)    \
     X(EXPR_RUN)      \
     X(EXPR_SIZEOF)   \
@@ -125,8 +126,8 @@ struct Expr : Ast_Elem {
     uint32_t    offset;
 };
 
-struct Expr_At : Expr {
-    Expr *expr;
+struct Expr_Deref : Expr {
+    Expr *base;
 };
 
 struct Expr_Int : Expr {
@@ -217,6 +218,10 @@ struct Expr_Index : Expr {
 
 struct Expr_Paren : Expr {
     Expr *expr;
+};
+
+struct Expr_Ptr : Expr {
+    Expr *base;
 };
 
 struct Expr_Range : Expr {
@@ -731,11 +736,11 @@ expr_print(Expr *expr) {
     }
 }
 
-Expr_At *
-expr_at(Ast_Elem *loc, Expr *expr) {
-    STRUCTK(Expr_At, EXPR_AT);
+Expr_Deref *
+expr_deref(Ast_Elem *loc, Expr *base) {
+    STRUCTK(Expr_Deref, EXPR_DEREF);
 
-    result->expr = expr;
+    result->base = base;
 
     return result;
 }
@@ -888,6 +893,15 @@ expr_paren(Ast_Elem *loc, Expr *expr) {
     STRUCTK(Expr_Paren, EXPR_PAREN);
 
     result->expr = expr;
+
+    return result;
+}
+
+Expr_Ptr *
+expr_ptr(Ast_Elem *loc, Expr *base) {
+    STRUCTK(Expr_Ptr, EXPR_PTR);
+
+    result->base = base;
 
     return result;
 }
@@ -1074,7 +1088,9 @@ parse_expr_base(Token_List *tokens) {
 
         result = expr_unary(curr, BIN_SUB, parse_expr(tokens));
     } else if ( token_match(tokens, T_AT) ) {
-        result = expr_at(curr, parse_expr(tokens));
+        result = expr_deref(curr, parse_expr(tokens));
+    } else if ( token_match(tokens, T_ASTERISK )) {
+        result = expr_ptr(curr, parse_expr(tokens));
     } else if ( token_is(tokens, T_IDENT) ) {
         if ( token_is_keyword(tokens) ) {
             if ( keyword_matches(tokens, keyword_false) ) {
