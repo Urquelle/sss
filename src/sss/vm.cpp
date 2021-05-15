@@ -6,7 +6,7 @@ struct Cpu;
 struct Operand;
 struct Mem;
 
-Operand * vm_expr(Expr *expr, Mem *mem, bool assignment = false);
+void      vm_expr(Expr *expr, Mem *mem, bool assignment = false);
 void      vm_stmt(Stmt *stmt, Mem *mem, char *proc_name = NULL);
 
 enum Vm_Op : uint8_t {
@@ -994,10 +994,8 @@ vm_emit_or(Expr_Bin *expr, Mem *mem) {
     vm_instr_patch(jmp1_instr, buf_len(vm_instrs));
 }
 
-Operand *
+void
 vm_expr(Expr *expr, Mem *mem, bool assignment) {
-    Operand *result = NULL;
-
     switch ( expr->kind ) {
         case EXPR_BOOL: {
             vm_emit(vm_instr(expr, OP_MOV, operand_rax(expr->type->size), operand_imm(value(EBOOL(expr)->val), expr->type->size)));
@@ -1079,7 +1077,7 @@ vm_expr(Expr *expr, Mem *mem, bool assignment) {
         } break;
 
         case EXPR_FIELD: {
-            Operand *op = vm_expr(EFIELD(expr)->base, mem, true);
+            vm_expr(EFIELD(expr)->base, mem, true);
             Type_Struct *type = TSTRUCT(EFIELD(expr)->base->type);
 
             Aggr_Field *field = NULL;
@@ -1093,14 +1091,8 @@ vm_expr(Expr *expr, Mem *mem, bool assignment) {
             }
 
             assert(field);
-            vm_emit(vm_instr(expr, OP_LEA, operand_rsi(field->type->size), op));
-            vm_emit(vm_instr(expr, OP_ADD, operand_rsi(field->type->size), operand_imm(value((int64_t)field->offset, 4), 4)));
-
-            if ( assignment ) {
-                return operand_addr(REG_RSI, 0, field->type->size);
-            } else {
-                vm_emit(vm_instr(expr, OP_MOV, operand_rax(field->type->size), operand_addr(REG_RSI, 0, field->type->size)));
-            }
+            vm_emit(vm_instr(expr, OP_ADD, operand_rax(field->type->size), operand_imm(value((int64_t)field->offset, 4), 4)));
+            vm_emit(vm_instr(expr, OP_LEA, operand_rax(field->type->size), operand_reg(REG_RAX, field->type->size)));
         } break;
 
         case EXPR_FLOAT: {
@@ -1177,8 +1169,6 @@ vm_expr(Expr *expr, Mem *mem, bool assignment) {
             assert(0);
         } break;
     }
-
-    return result;
 }
 
 void

@@ -129,6 +129,7 @@ struct Type_Compound : Type {
 struct Type_Struct : Type {
     Aggr_Fields fields;
     size_t      num_fields;
+    uint32_t    aggregate_size;
 };
 
 struct Type_String : Type {
@@ -1322,6 +1323,9 @@ resolve_decl_var(Decl *decl) {
             if ( type->kind == TYPE_ARRAY ) {
                 scope->frame_size += TARRAY(type)->base->size * TARRAY(type)->num_elems;
                 decl->offset       = -scope->frame_size;
+            } else if ( type->kind == TYPE_STRUCT ) {
+                scope->frame_size += TSTRUCT(type)->aggregate_size;
+                decl->offset       = -scope->frame_size;
             } else {
                 scope->frame_size += type->size;
                 decl->offset       = -scope->frame_size;
@@ -1333,6 +1337,8 @@ resolve_decl_var(Decl *decl) {
 
         if ( type->kind == TYPE_ARRAY ) {
             mem_offset = TARRAY(type)->base->size * TARRAY(type)->num_elems;
+        } else if ( type->kind == TYPE_STRUCT ) {
+            mem_offset = TSTRUCT(type)->aggregate_size;
         } else {
             mem_offset = type->size;
         }
@@ -1710,7 +1716,7 @@ type_complete_struct(Type_Struct *type) {
     for ( uint32_t i = 0; i < DSTRUCT(decl)->num_fields; ++i ) {
         Aggr_Field *field = DSTRUCT(decl)->fields[i];
 
-        type->size += field->type->size;
+        type->aggregate_size += field->type->size;
         type->align = MAX(type->size, field->type->align);
         field->offset = offset;
 
