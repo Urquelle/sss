@@ -1136,6 +1136,7 @@ resolve_expr(Expr *expr, Type *given_type = NULL) {
         } break;
     }
 
+    expr->op   = result;
     expr->type = result->type;
 
     return result;

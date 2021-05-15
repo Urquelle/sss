@@ -6,7 +6,7 @@ struct Cpu;
 struct Operand;
 struct Mem;
 
-void      vm_expr(Expr *expr, Mem *mem, bool assignment = false);
+void      vm_expr(Expr *expr, Mem *mem);
 void      vm_stmt(Stmt *stmt, Mem *mem, char *proc_name = NULL);
 
 enum Vm_Op : uint8_t {
@@ -995,7 +995,7 @@ vm_emit_or(Expr_Bin *expr, Mem *mem) {
 }
 
 void
-vm_expr(Expr *expr, Mem *mem, bool assignment) {
+vm_expr(Expr *expr, Mem *mem) {
     switch ( expr->kind ) {
         case EXPR_BOOL: {
             vm_emit(vm_instr(expr, OP_MOV, operand_rax(expr->type->size), operand_imm(value(EBOOL(expr)->val), expr->type->size)));
@@ -1077,7 +1077,7 @@ vm_expr(Expr *expr, Mem *mem, bool assignment) {
         } break;
 
         case EXPR_FIELD: {
-            vm_expr(EFIELD(expr)->base, mem, true);
+            vm_expr(EFIELD(expr)->base, mem);
             Type_Struct *type = TSTRUCT(EFIELD(expr)->base->type);
 
             Aggr_Field *field = NULL;
@@ -1104,14 +1104,10 @@ vm_expr(Expr *expr, Mem *mem, bool assignment) {
             Sym *sym = EIDENT(expr)->sym;
 
             if (sym->decl->is_global) {
-                if ( assignment ) {
-                    return operand_addr(REG_NONE, EIDENT(expr)->sym->decl->offset, expr->type->size);
+                if ( sym->decl->kind == DECL_PROC ) {
+                    vm_emit(vm_instr(expr, OP_LEA, operand_rax(sym->type->size), operand_label(sym->name)));
                 } else {
-                    if ( sym->decl->kind == DECL_PROC ) {
-                        vm_emit(vm_instr(expr, OP_LEA, operand_rax(sym->type->size), operand_label(sym->name)));
-                    } else {
-                        vm_emit(vm_instr(expr, OP_MOV, operand_rax(sym->type->size), operand_addr(REG_NONE, sym->decl->offset, sym->type->size)));
-                    }
+                    vm_emit(vm_instr(expr, OP_LEA, operand_rax(sym->type->size), operand_addr(REG_NONE, sym->decl->offset, sym->type->size)));
                 }
             } else {
                 vm_emit(vm_instr(expr, OP_LEA, operand_rax(sym->type->size), operand_addr(REG_RBP, sym->decl->offset, sym->type->size)));
@@ -1123,7 +1119,7 @@ vm_expr(Expr *expr, Mem *mem, bool assignment) {
             uint32_t num_elems  = TARRAY(EINDEX(expr)->base->type)->num_elems;
             uint32_t elem_size  = TARRAY(EINDEX(expr)->base->type)->base->size;
 
-            vm_expr(EINDEX(expr)->base, mem, assignment);
+            vm_expr(EINDEX(expr)->base, mem);
             vm_emit(vm_instr(expr, OP_PUSH, operand_rax(index_size)));
 
             vm_expr(EINDEX(expr)->index, mem);
@@ -1149,7 +1145,7 @@ vm_expr(Expr *expr, Mem *mem, bool assignment) {
         } break;
 
         case EXPR_PAREN: {
-            vm_expr(EPAREN(expr)->expr, mem, assignment);
+            vm_expr(EPAREN(expr)->expr, mem);
         } break;
 
         case EXPR_PTR: {
@@ -1223,10 +1219,19 @@ void
 vm_stmt(Stmt *stmt, Mem *mem, char *proc_name) {
     switch ( stmt->kind ) {
         case STMT_ASSIGN: {
-            vm_expr(SASSIGN(stmt)->lhs, mem, true);
-            vm_emit(vm_instr(stmt, OP_PUSH, operand_rax(SASSIGN(stmt)->lhs->type->size)));
+            uint32_t lhs_size = SASSIGN(stmt)->lhs->type->size;
+            uint32_t rhs_size = SASSIGN(stmt)->rhs->type->size;
+
+            vm_expr(SASSIGN(stmt)->lhs, mem);
+            vm_emit(vm_instr(stmt, OP_PUSH, operand_rax(lhs_size)));
 
             vm_expr(SASSIGN(stmt)->rhs, mem);
+            if ( SASSIGN(stmt)->rhs->op->is_const ) {
+                vm_emit(vm_instr(stmt, OP_MOV, operand_reg(REG_RAX, rhs_size), operand_reg(REG_RAX, rhs_size)));
+            } else {
+                vm_emit(vm_instr(stmt, OP_MOV, operand_reg(REG_RAX, rhs_size), operand_addr(REG_RAX, 0, rhs_size)));
+            }
+
             vm_emit(vm_instr(stmt, OP_POP, operand_rdi(4)));
             vm_emit(vm_instr(stmt, OP_MOV, operand_addr(REG_RDI, 0, 4), operand_rax(SASSIGN(stmt)->rhs->type->size)));
         } break;

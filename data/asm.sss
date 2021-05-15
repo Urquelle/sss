@@ -2,11 +2,14 @@ Vec3 :: struktur {
     x, y, z: u32;
 }
 
+a : u32;
+
 master :: proc() -> u32 {
-    v : Vec3;
+    b : u32;
 
-    v.y = 15;
+    a = 15;
+    b = a;
 
-    res v.y;
+    res b;
 }
 

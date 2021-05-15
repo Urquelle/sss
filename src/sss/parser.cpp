@@ -123,6 +123,7 @@ enum Expr_Kind {
 struct Expr : Ast_Elem {
     Expr_Kind   kind;
     Type      * type;
+    Operand   * op;
     uint32_t    offset;
 };
 
