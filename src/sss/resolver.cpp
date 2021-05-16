@@ -1460,11 +1460,11 @@ resolve_stmt(Stmt *stmt, Types rets, uint32_t num_rets) {
             }
 
             scope_enter();
-            resolve_stmt(SIF(stmt)->stmt, rets, num_rets);
+            result = resolve_stmt(SIF(stmt)->stmt, rets, num_rets);
             scope_leave();
 
             if ( SIF(stmt)->stmt_else ) {
-                resolve_stmt(SIF(stmt)->stmt_else, rets, num_rets);
+                result = resolve_stmt(SIF(stmt)->stmt_else, rets, num_rets) && result;
             }
         } break;
 
