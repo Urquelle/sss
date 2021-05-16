@@ -838,7 +838,11 @@ resolve_expr(Expr *expr, Type *given_type = NULL) {
         } break;
 
         case EXPR_INT: {
-            result = operand_const(type_s32, val_int((int32_t)EINT(expr)->val));
+            Type *type = type_s32;
+            if ( given_type && type_isint(given_type) ) {
+                type = given_type;
+            }
+            result = operand_const(type, val_int((int32_t)EINT(expr)->val));
         } break;
 
         case EXPR_FLOAT: {
@@ -941,8 +945,8 @@ resolve_expr(Expr *expr, Type *given_type = NULL) {
         } break;
 
         case EXPR_BIN: {
-            Operand *left = resolve_expr(EBIN(expr)->left);
-            Operand *right = resolve_expr(EBIN(expr)->right);
+            Operand *left = resolve_expr(EBIN(expr)->left, given_type);
+            Operand *right = resolve_expr(EBIN(expr)->right, given_type);
 
             if ( EBIN(expr)->op >= BIN_CMP_START && EBIN(expr)->op <= BIN_CMP_END ) {
                 result = operand(type_bool);
@@ -1387,7 +1391,7 @@ resolve_stmt(Stmt *stmt, Types rets, uint32_t num_rets) {
     switch ( stmt->kind ) {
         case STMT_ASSIGN: {
             Operand *lhs = resolve_expr(SASSIGN(stmt)->lhs);
-            Operand *rhs = resolve_expr(SASSIGN(stmt)->rhs);
+            Operand *rhs = resolve_expr(SASSIGN(stmt)->rhs, lhs->type);
 
             if ( lhs->is_const ) {
                 report_error(stmt, "versuch der konstanten %s einen wert zuzuweisen", to_str(SASSIGN(stmt)->lhs));

@@ -6,7 +6,7 @@ struct Cpu;
 struct Operand;
 struct Mem;
 
-void      vm_expr(Expr *expr, Mem *mem);
+void      vm_expr(Expr *expr, Mem *mem, bool assign = false);
 void      vm_stmt(Stmt *stmt, Mem *mem, char *proc_name = NULL);
 
 enum Vm_Op : uint8_t {
@@ -995,23 +995,26 @@ vm_emit_or(Expr_Bin *expr, Mem *mem) {
 }
 
 void
-vm_expr(Expr *expr, Mem *mem) {
+vm_expr(Expr *expr, Mem *mem, bool assign) {
     switch ( expr->kind ) {
         case EXPR_BOOL: {
             vm_emit(vm_instr(expr, OP_MOV, operand_rax(expr->type->size), operand_imm(value(EBOOL(expr)->val), expr->type->size)));
         } break;
 
         case EXPR_BIN: {
+            uint32_t rhs_size = EBIN(expr)->right->type->size;
+            uint32_t lhs_size = EBIN(expr)->left->type->size;
+
             if ( EBIN(expr)->op == BIN_AND ) {
                 vm_emit_and(EBIN(expr), mem);
             } else if ( EBIN(expr)->op == BIN_OR ) {
                 vm_emit_and(EBIN(expr), mem);
             } else {
                 vm_expr(EBIN(expr)->right, mem);
-                vm_emit(vm_instr(expr, OP_PUSH, operand_rax(EBIN(expr)->right->type->size)));
+                vm_emit(vm_instr(expr, OP_PUSH, operand_rax(rhs_size)));
 
                 vm_expr(EBIN(expr)->left, mem);
-                vm_emit(vm_instr(expr, OP_POP, operand_rdi(EBIN(expr)->left->type->size)));
+                vm_emit(vm_instr(expr, OP_POP, operand_rdi(rhs_size)));
 
                 if ( EBIN(expr)->op == BIN_ADD ) {
                     vm_emit(vm_instr(expr, OP_ADD, operand_rax(expr->type->size), operand_rdi(expr->type->size)));
@@ -1059,8 +1062,8 @@ vm_expr(Expr *expr, Mem *mem) {
             }
 
             /* @INFO: die ersten 4 argumente werden in die register gepackt. die übrigen werden auf
-                *        dem stack gelassen
-                */
+             *        dem stack gelassen
+             */
             int32_t num_args = (int32_t)MIN(ECALL(expr)->num_args, 4);
             for ( int i = 0; i < num_args; ++i ) {
                 Expr *arg = ECALL(expr)->args[i];
@@ -1073,7 +1076,10 @@ vm_expr(Expr *expr, Mem *mem) {
 
         case EXPR_DEREF: {
             vm_expr(EDEREF(expr)->base, mem);
-            vm_emit(vm_instr(expr, OP_MOV, operand_reg(REG_RAX, 8), operand_addr(REG_RAX, 0, 8)));
+
+            if ( !assign ) {
+                vm_emit(vm_instr(expr, OP_MOV, operand_reg(REG_RAX, 8), operand_addr(REG_RAX, 0, 8)));
+            }
         } break;
 
         case EXPR_FIELD: {
@@ -1110,7 +1116,11 @@ vm_expr(Expr *expr, Mem *mem) {
                     vm_emit(vm_instr(expr, OP_LEA, operand_rax(sym->type->size), operand_addr(REG_NONE, sym->decl->offset, sym->type->size)));
                 }
             } else {
-                vm_emit(vm_instr(expr, OP_LEA, operand_rax(sym->type->size), operand_addr(REG_RBP, sym->decl->offset, sym->type->size)));
+                if ( assign ) {
+                    vm_emit(vm_instr(expr, OP_LEA, operand_rax(sym->type->size), operand_addr(REG_RBP, sym->decl->offset, sym->type->size)));
+                } else {
+                    vm_emit(vm_instr(expr, OP_MOV, operand_rax(sym->type->size), operand_addr(REG_RBP, sym->decl->offset, sym->type->size)));
+                }
             }
         } break;
 
@@ -1119,16 +1129,18 @@ vm_expr(Expr *expr, Mem *mem) {
             uint32_t num_elems  = TARRAY(EINDEX(expr)->base->type)->num_elems;
             uint32_t elem_size  = TARRAY(EINDEX(expr)->base->type)->base->size;
 
-            vm_expr(EINDEX(expr)->base, mem);
+            vm_expr(EINDEX(expr)->base, mem, true);
             vm_emit(vm_instr(expr, OP_PUSH, operand_rax(index_size)));
 
             vm_expr(EINDEX(expr)->index, mem);
             vm_emit(vm_instr(expr, OP_MUL, operand_rax(index_size), operand_imm(value(elem_size), index_size)));
 
             vm_emit(vm_instr(expr, OP_POP, operand_rsi(index_size)));
-            vm_emit(vm_instr(expr, OP_ADD, operand_rsi(index_size), operand_rax(index_size)));
+            vm_emit(vm_instr(expr, OP_ADD, operand_rax(index_size), operand_rsi(index_size)));
 
-            vm_emit(vm_instr(expr, OP_MOV, operand_rax(index_size), operand_addr(REG_RSI, 0, index_size)));
+            if ( !assign ) {
+                vm_emit(vm_instr(expr, OP_MOV, operand_rax(index_size), operand_addr(REG_RAX, 0, index_size)));
+            }
         } break;
 
         case EXPR_INT: {
@@ -1149,7 +1161,7 @@ vm_expr(Expr *expr, Mem *mem) {
         } break;
 
         case EXPR_PTR: {
-            vm_expr(EPTR(expr)->base, mem);
+            vm_expr(EPTR(expr)->base, mem, true);
         } break;
 
         case EXPR_STR: {
@@ -1222,15 +1234,10 @@ vm_stmt(Stmt *stmt, Mem *mem, char *proc_name) {
             uint32_t lhs_size = SASSIGN(stmt)->lhs->type->size;
             uint32_t rhs_size = SASSIGN(stmt)->rhs->type->size;
 
-            vm_expr(SASSIGN(stmt)->lhs, mem);
+            vm_expr(SASSIGN(stmt)->lhs, mem, true);
             vm_emit(vm_instr(stmt, OP_PUSH, operand_rax(lhs_size)));
 
             vm_expr(SASSIGN(stmt)->rhs, mem);
-            if ( SASSIGN(stmt)->rhs->op->is_const ) {
-                vm_emit(vm_instr(stmt, OP_MOV, operand_reg(REG_RAX, rhs_size), operand_reg(REG_RAX, rhs_size)));
-            } else {
-                vm_emit(vm_instr(stmt, OP_MOV, operand_reg(REG_RAX, rhs_size), operand_addr(REG_RAX, 0, rhs_size)));
-            }
 
             vm_emit(vm_instr(stmt, OP_POP, operand_rdi(4)));
             vm_emit(vm_instr(stmt, OP_MOV, operand_addr(REG_RDI, 0, 4), operand_rax(SASSIGN(stmt)->rhs->type->size)));
@@ -1291,9 +1298,6 @@ vm_stmt(Stmt *stmt, Mem *mem, char *proc_name) {
         case STMT_RET: {
             if ( SRET(stmt)->num_exprs ) {
                 vm_expr(SRET(stmt)->exprs[0], mem);
-
-                uint32_t size = SRET(stmt)->exprs[0]->type->size;
-                vm_emit(vm_instr(stmt, OP_MOV, operand_rax(size), operand_addr(REG_RAX, 0, size)));
             }
 
             assert(proc_name);

@@ -1,15 +1,10 @@
-Vec3 :: struktur {
-    x, y, z: u32;
-}
-
-a : u32;
-
 master :: proc() -> u32 {
-    b : u32;
+    a : u32;
+    b : *u32;
 
-    a = 15;
-    b = a;
+    b = *a;
+    @b = 10;
 
-    res b;
+    res @b;
 }
 
