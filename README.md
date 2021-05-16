@@ -33,7 +33,7 @@ master :: proc() -> s32 {
     e: u32 = 4;
     f: s32 = 7;
 
-    test(@f);
+    test(*f);
 
     ## if
     falls e > 1 && falsch {

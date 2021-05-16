@@ -3,10 +3,19 @@ Vec3 :: struktur {
 }
 
 master :: proc() -> u32 {
+    a : s32 = 5;
     v : Vec3;
 
-    v.y = 15;
+    falls a < 10 {
+        test(*v.y);
+    } oder {
+        res 33;
+    }
 
     res v.y;
+}
+
+test :: proc(x : *u32) {
+    @x = 25;
 }
 
