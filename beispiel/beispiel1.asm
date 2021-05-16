@@ -35,56 +35,81 @@ if.1:
     jmp   [+29]                          ; addr: 28
     lea   eax            , [ebp-8]          ; addr: 29
     push  eax                               ; addr: 30
-    lea   rax            , index            ; addr: 31
-    call  rax                               ; addr: 32
-    pop   edi                               ; addr: 33
-    mov   [edi+0]        , eax              ; addr: 34
-    lea   rax            , [rbp-32]         ; addr: 35
-    push  eax                               ; addr: 36
-    mov   eax            , [ebp-8]          ; addr: 37
-    mul   eax            , $8               ; addr: 38
-    pop   esi                               ; addr: 39
-    add   eax            , esi              ; addr: 40
+    mov   eax            , $1               ; addr: 31
+    push  eax                               ; addr: 32
+    pop   ecx                               ; addr: 33
+    lea   rax            , index            ; addr: 34
+    call  rax                               ; addr: 35
+    pop   edi                               ; addr: 36
+    mov   [edi+0]        , eax              ; addr: 37
+    lea   rax            , [rbp-32]         ; addr: 38
+    push  eax                               ; addr: 39
+    mov   eax            , $2               ; addr: 40
     push  eax                               ; addr: 41
-    mov   eax            , [ebp-8]          ; addr: 42
-    mul   eax            , $4               ; addr: 43
-    pop   esi                               ; addr: 44
-    add   eax            , esi              ; addr: 45
-    push  eax                               ; addr: 46
-    mov   eax            , $15              ; addr: 47
-    pop   edi                               ; addr: 48
-    mov   [edi+0]        , eax              ; addr: 49
-    lea   rax            , [rbp-32]         ; addr: 50
-    push  eax                               ; addr: 51
-    mov   eax            , [ebp-8]          ; addr: 52
-    mul   eax            , $8               ; addr: 53
-    pop   esi                               ; addr: 54
-    add   eax            , esi              ; addr: 55
-    push  eax                               ; addr: 56
-    mov   eax            , [ebp-8]          ; addr: 57
-    mul   eax            , $4               ; addr: 58
-    pop   esi                               ; addr: 59
-    add   eax            , esi              ; addr: 60
-    mov   eax            , [eax+0]          ; addr: 61
-    jmp   master.end                        ; res addr: 62
+    pop   ecx                               ; addr: 42
+    lea   rax            , index            ; addr: 43
+    call  rax                               ; addr: 44
+    mul   eax            , $8               ; addr: 45
+    pop   esi                               ; addr: 46
+    add   eax            , esi              ; addr: 47
+    push  eax                               ; addr: 48
+    mov   eax            , [ebp-8]          ; addr: 49
+    mul   eax            , $4               ; addr: 50
+    pop   esi                               ; addr: 51
+    add   eax            , esi              ; addr: 52
+    push  eax                               ; addr: 53
+    mov   eax            , $15              ; addr: 54
+    pop   edi                               ; addr: 55
+    mov   [edi+0]        , eax              ; addr: 56
+    lea   rax            , [rbp-32]         ; addr: 57
+    push  eax                               ; addr: 58
+    mov   eax            , $2               ; addr: 59
+    mul   eax            , $8               ; addr: 60
+    pop   esi                               ; addr: 61
+    add   eax            , esi              ; addr: 62
+    push  eax                               ; addr: 63
+    mov   eax            , [ebp-8]          ; addr: 64
+    mul   eax            , $4               ; addr: 65
+    pop   esi                               ; addr: 66
+    add   eax            , esi              ; addr: 67
+    mov   eax            , [eax+0]          ; addr: 68
+    jmp   master.end                        ; res addr: 69
 master.end:
-    leave                                   ; addr: 63
-    ret                                     ; addr: 64
+    leave                                   ; addr: 70
+    ret                                     ; addr: 71
 test:
-    enter $8                                ; addr: 65
-    mov   [rbp-8]        , rcx              ; addr: 66
-    mov   rax            , [rbp-8]          ; addr: 67
-    push  eax                               ; addr: 68
-    mov   eax            , $25              ; addr: 69
-    pop   edi                               ; addr: 70
-    mov   [edi+0]        , eax              ; addr: 71
+    enter $8                                ; addr: 72
+    mov   [rbp-8]        , rcx              ; addr: 73
+    mov   rax            , [rbp-8]          ; addr: 74
+    push  eax                               ; addr: 75
+    mov   eax            , $25              ; addr: 76
+    pop   edi                               ; addr: 77
+    mov   [edi+0]        , eax              ; addr: 78
 test.end:
-    leave                                   ; addr: 72
-    ret                                     ; addr: 73
+    leave                                   ; addr: 79
+    ret                                     ; addr: 80
 index:
-    enter $0                                ; addr: 74
-    mov   eax            , $1               ; addr: 75
-    jmp   index.end                         ; res addr: 76
+    enter $4                                ; addr: 81
+    mov   [ebp-4]        , ecx              ; addr: 82
+    mov   eax            , $1               ; addr: 83
+    push  eax                               ; addr: 84
+    mov   eax            , [ebp-4]          ; addr: 85
+    pop   edi                               ; addr: 86
+    cmp   al             , dil              ; addr: 87
+    sete  al                                ; addr: 88
+    cmp   al             , $1               ; addr: 89
+if.2:
+    jne   [+94]                             ; addr: 90
+    mov   eax            , $1               ; addr: 91
+    jmp   index.end                         ; res addr: 92
+    jmp   [+100]                         ; addr: 93
+    mov   al             , $1               ; addr: 94
+    cmp   al             , $1               ; addr: 95
+if.3:
+    jne   [+100]                            ; addr: 96
+    mov   eax            , $2               ; addr: 97
+    jmp   index.end                         ; res addr: 98
+    jmp   [+100]                         ; addr: 99
 index.end:
-    leave                                   ; addr: 77
-    ret                                     ; addr: 78
+    leave                                   ; addr: 100
+    ret                                     ; addr: 101

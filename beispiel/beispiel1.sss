@@ -16,17 +16,21 @@ master :: proc() -> u32 {
         res 33;
     }
 
-    b = index();
-    c[b][b] = 15;
+    b = index(1);
+    c[index(2)][b] = 15;
 
-    res c[b][b];
+    res c[2][b];
 }
 
 test :: proc(x : *u32) {
     @x = 25;
 }
 
-index :: proc() -> u32 {
-    res 1;
+index :: proc(i : u32) -> u32 {
+    falls i == 1 {
+        res 1;
+    } oder {
+        res 2;
+    }
 }
 
