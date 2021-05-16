@@ -1083,7 +1083,7 @@ vm_expr(Expr *expr, Mem *mem, bool assign) {
         } break;
 
         case EXPR_FIELD: {
-            vm_expr(EFIELD(expr)->base, mem);
+            vm_expr(EFIELD(expr)->base, mem, true);
             Type_Struct *type = TSTRUCT(EFIELD(expr)->base->type);
 
             Aggr_Field *field = NULL;
@@ -1098,7 +1098,10 @@ vm_expr(Expr *expr, Mem *mem, bool assign) {
 
             assert(field);
             vm_emit(vm_instr(expr, OP_ADD, operand_rax(field->type->size), operand_imm(value((int64_t)field->offset, 4), 4)));
-            vm_emit(vm_instr(expr, OP_LEA, operand_rax(field->type->size), operand_reg(REG_RAX, field->type->size)));
+
+            if ( !assign ) {
+                vm_emit(vm_instr(expr, OP_MOV, operand_rax(field->type->size), operand_addr(REG_RAX, 0, field->type->size)));
+            }
         } break;
 
         case EXPR_FLOAT: {
