@@ -66,6 +66,7 @@ enum Reg_Kind : uint8_t {
     REG_R15,
     REG_RIP,
     REG_RFLAGS,
+    REG_RDS,
 
     REG_COUNT,
 };
@@ -584,7 +585,7 @@ mem_read64(Mem *mem, uint32_t addr) {
 }
 
 Cpu *
-cpu_new(Instrs instrs, uint32_t offset, Mem *mem, uint32_t start = 0) {
+cpu_new(Instrs instrs, Mem *mem, uint32_t start = 0) {
     Cpu *result = urq_allocs(Cpu);
 
     result->instrs     = instrs;
@@ -593,7 +594,7 @@ cpu_new(Instrs instrs, uint32_t offset, Mem *mem, uint32_t start = 0) {
     result->stack_size = STACK_SIZE;
     result->mem        = mem;
 
-    reg_write64(result, REG_RIP, start - offset);
+    reg_write64(result, REG_RIP, start);
     reg_write64(result, REG_RSP, result->mem->size);
 
     return result;
@@ -844,7 +845,10 @@ vm_instr(Loc *loc, Vm_Op op, char *label = NULL, char *comment = NULL) {
 
 Instr *
 vm_instr_fetch(Cpu *cpu) {
-    Instr *result = cpu->instrs[reg_read64(cpu, REG_RIP)];
+    uint64_t rip            = reg_read64(cpu, REG_RIP);
+    uint64_t section_offset = reg_read64(cpu, REG_RDS);
+
+    Instr *result = cpu->instrs[rip - section_offset];
     reg_write64(cpu, REG_RIP, reg_read64(cpu, REG_RIP) + 1);
 
     return result;
@@ -1327,7 +1331,10 @@ vm_stmt(Stmt *stmt, Mem *mem, char *proc_name) {
 
 bool
 step(Cpu *cpu) {
-    if ( cpu->num_instrs <= reg_read64(cpu, REG_RIP) ) {
+    uint64_t section_offset = reg_read64(cpu, REG_RDS);
+    uint64_t num_instructions = cpu->num_instrs + section_offset;
+
+    if ( num_instructions <= reg_read64(cpu, REG_RIP) ) {
         return false;
     }
 
@@ -1786,7 +1793,9 @@ eval_section(Section *section, Mem *mem, bool use_entry_point) {
     if ( use_entry_point ) {
         uint32_t start_addr = addr_lookup(entry_point);
 
-        cpu = cpu_new(section->instrs, section->offset, mem, start_addr);
+        cpu = cpu_new(section->instrs, mem, start_addr);
+
+        reg_write64(cpu, REG_RDS, section->offset);
 
         stack_push(cpu, section->num_instrs + section->offset, 8);
         stack_push(cpu, reg_read64(cpu, REG_RBX), 8);
@@ -1798,7 +1807,7 @@ eval_section(Section *section, Mem *mem, bool use_entry_point) {
         stack_push(cpu, reg_read64(cpu, REG_R14), 8);
         stack_push(cpu, reg_read64(cpu, REG_R15), 8);
     } else {
-        cpu = cpu_new(section->instrs, section->offset, mem, 0);
+        cpu = cpu_new(section->instrs, mem, 0);
     }
 
     for (;;) {
