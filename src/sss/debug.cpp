@@ -213,6 +213,10 @@ to_str(Instr *instr) {
             output = buf_printf(output, to_str_binop("cmp", instr));
         } break;
 
+        case OP_DIV: {
+            output = buf_printf(output, "div   %-33s", to_str(instr->dst));
+        } break;
+
         case OP_ENTER: {
             output = buf_printf(output, "enter %-33s", to_str(instr->operand1));
         } break;

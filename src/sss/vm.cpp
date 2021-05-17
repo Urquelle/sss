@@ -1494,6 +1494,25 @@ step(Cpu *cpu) {
             }
         } break;
 
+        case OP_DIV: {
+            uint64_t dividend = reg_read64(cpu, REG_RAX);
+            uint64_t divisor = 0;
+
+            if ( instr->operand1->kind == OPERAND_REG ) {
+                divisor = reg_read(cpu, instr->operand1);
+            } else if ( instr->operand1->kind == OPERAND_IMM ) {
+                divisor = instr->operand1->val.u64;
+            } else {
+                assert(0);
+            }
+
+            uint64_t quotient  = (uint64_t)(dividend / divisor);
+            uint64_t remainder = dividend % divisor;
+
+            reg_write64(cpu, REG_RAX, quotient);
+            reg_write64(cpu, REG_RDX, remainder);
+        } break;
+
         case OP_ENTER: {
             stack_push(cpu, reg_read64(cpu, REG_RBP), 8);
             reg_write64(cpu, REG_RBP, reg_read64(cpu, REG_RSP));

@@ -12,9 +12,10 @@ Wert :: union {
 
 master :: proc() -> u64 {
     a : Wert;
+    b : u32 = 15;
 
-    a.b.x = 30;
+    a.b.y = 30;
 
-    res a.b.x;
+    res (a.b.y + b) / 5;
 }
 

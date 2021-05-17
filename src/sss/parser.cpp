@@ -1190,6 +1190,10 @@ parse_expr_field(Token_List *tokens) {
     Token *curr = token_get(tokens);
     Expr *left = parse_expr_base(tokens);
 
+    if ( left->kind == EXPR_KEYWORD ) {
+        return left;
+    }
+
     while ( token_match(tokens, T_DOT) ) {
         Token *field = token_read(tokens);
         left = expr_field(curr, left, field->val_str);
@@ -1202,6 +1206,10 @@ Expr *
 parse_expr_index(Token_List *tokens) {
     Token *curr = token_get(tokens);
     Expr *left = parse_expr_field(tokens);
+
+    if ( left->kind == EXPR_KEYWORD ) {
+        return left;
+    }
 
     while ( token_is(tokens, T_LBRACKET) || token_is(tokens, T_LPAREN) ) {
         if ( token_match(tokens, T_LBRACKET) ) {
