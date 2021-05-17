@@ -2120,7 +2120,6 @@ parse_stmt_defer(Token_List *tokens) {
     Token *curr = token_get(tokens);
 
     Stmt_Defer *result = stmt_defer(curr, parse_stmt(tokens));
-    token_expect(tokens, T_SEMICOLON);
 
     return result;
 }

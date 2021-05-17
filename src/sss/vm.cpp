@@ -1251,8 +1251,34 @@ vm_stmt(Stmt *stmt, Mem *mem) {
         } break;
 
         case STMT_BLOCK: {
+            Stmt **deferred_stmts = NULL;
             for ( int i = 0; i < SBLOCK(stmt)->num_stmts; ++i ) {
-                vm_stmt(SBLOCK(stmt)->stmts[i], mem);
+                Stmt *s = SBLOCK(stmt)->stmts[i];
+
+                if ( s->kind == STMT_RET ) {
+                    continue;
+                }
+
+                if ( s->kind == STMT_DEFER ) {
+                    buf_push(deferred_stmts, s);
+                } else {
+                    vm_stmt(s, mem);
+                }
+            }
+
+            for ( int i = buf_len(deferred_stmts); i > 0; --i ) {
+                Stmt_Defer *s = SDEFER(deferred_stmts[i-1]);
+                vm_stmt(s->stmt, mem);
+            }
+
+            for ( int i = 0; i < SBLOCK(stmt)->num_stmts; ++i ) {
+                Stmt *s = SBLOCK(stmt)->stmts[i];
+
+                if ( s->kind != STMT_RET ) {
+                    continue;
+                }
+
+                vm_stmt(s, mem);
             }
         } break;
 

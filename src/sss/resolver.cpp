@@ -25,7 +25,8 @@ enum Scope_Flags {
     SCOPE_NONE,
     SCOPE_CAN_BREAK     = 1 << 0,
     SCOPE_CAN_CONTINUE  = 1 << 1,
-    SCOPE_PROC          = 1 << 2,
+    SCOPE_CAN_DEFER     = 1 << 2,
+    SCOPE_PROC          = 1 << 3,
 };
 struct Scope {
     char     * name;
@@ -1480,8 +1481,20 @@ resolve_stmt(Stmt *stmt, Types rets, uint32_t num_rets) {
         } break;
 
         case STMT_DEFER: {
-            if ( curr_scope == global_scope ) {
-                report_error(stmt, "%s kann nicht im globalen bereich verwendet werden", format_keyword(keyword_defer));
+            bool can_defer = false;
+            Scope *scope = curr_scope;
+
+            while ( scope ) {
+                if ( scope->flags & SCOPE_CAN_DEFER ) {
+                    can_defer = true;
+                    break;
+                }
+
+                scope = scope->parent;
+            }
+
+            if ( !can_defer ) {
+                report_error(stmt, "%s ist an dieser stelle nicht möglich. die anweisung muß sich innerhalb einer prozedur befinden", format_keyword(keyword_defer));
             }
 
             result = resolve_stmt(SDEFER(stmt)->stmt, rets, num_rets);
@@ -1888,8 +1901,7 @@ resolve_proc(Sym *sym) {
     assert(sym->state == SYMSTATE_RESOLVED);
     Proc_Sign *sign = decl->sign;
 
-    decl->scope = scope_enter(decl->name);
-    decl->scope->flags |= SCOPE_PROC;
+    decl->scope = scope_enter(decl->name, SCOPE_PROC | SCOPE_CAN_DEFER);
 
     for ( uint32_t i = 0; i < sign->num_params; ++i ) {
         Decl_Var *param = sign->params[i];
