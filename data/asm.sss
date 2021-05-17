@@ -1,23 +1,35 @@
-Richtung :: enum {
-    West;
-    Ost;
-    Nord;
-    Süd;
+#lade "W:/sss/data/expr.sss";
+
+Vec3 :: struktur {
+    x, y, z : u32;
 }
 
-master :: proc() -> s32 {
-    a := Richtung.Süd;
+master :: proc() -> u32 {
+    a : s32 = 5;
+    b : u32;
+    c : [3][3] u32;
+    v : Vec3;
 
-    zweig a {
-        Richtung.West: {
-            res 1;
-        },
-
-        Richtung.Süd: {
-            res 10;
-        }
+    wenn a < 10 {
+        test(*v.y);
+    } sonst {
+        res 33;
     }
 
-    res 25;
+    b = index(1);
+    c[index(2)][b] = 15;
+
+    res c[2][b];
 }
 
+test :: proc(x : *u32) {
+    @x = 25;
+}
+
+index :: proc(i : u32) -> u32 {
+    wenn i == 1 {
+        res 1;
+    } sonst {
+        res 2;
+    }
+}

@@ -4,9 +4,9 @@ endif
 
 syntax keyword sssAlignOf alignof
 syntax keyword sssApi api
-syntax keyword sssAs as
-syntax keyword sssCast als
-syntax keyword sssConst const
+syntax keyword sssAs als
+syntax keyword sssCast zu
+syntax keyword sssConst konst
 syntax keyword sssImpl impl
 syntax keyword sssMatch zweig
 syntax keyword sssNew new
@@ -25,15 +25,15 @@ syntax keyword sssUnion union
 syntax keyword sssEnum enum
 syntax keyword sssProc proc
 
-syntax keyword sssIf falls
+syntax keyword sssIf wenn
 syntax keyword sssThen then
-syntax keyword sssElse oder
+syntax keyword sssElse sonst
 syntax keyword sssFor iter
 syntax keyword sssWhile solange
-syntax keyword sssContinue continue
+syntax keyword sssContinue weiter
 syntax keyword sssBreak weg
 
-syntax keyword sssDataType void string char int float f32 f64 u8 u16 u32 u64 s8 s16 s32 s64 bool typeid
+syntax keyword sssDataType void string char f32 f64 u8 u16 u32 u64 s8 s16 s32 s64 bool typeid
 syntax keyword sssBool wahr falsch
 
 syntax keyword sssReturn res
