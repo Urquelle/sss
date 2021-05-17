@@ -1544,17 +1544,13 @@ resolve_stmt(Stmt *stmt, Types rets, uint32_t num_rets) {
         } break;
 
         case STMT_MATCH: {
-            /* @AUFGABE: match kann result setzen */
-            Operand *op = resolve_expr(SMATCH(stmt)->expr);
-
             for ( int i = 0; i < SMATCH(stmt)->num_lines; ++i ) {
                 Match_Line *line = SMATCH(stmt)->lines[i];
 
-                Operand *res_op = resolve_expr(line->resolution);
+                Operand *op = resolve_expr(line->cond);
 
-                operand_cast(op->type, res_op);
-                if ( op->type != res_op->type ) {
-                    report_error(line->resolution, "datentyp erwartet %s, bekommen %s", res_op->type->name, op->type->name);
+                if ( op->type != type_bool ) {
+                    report_error(line->cond, "datentyp erwartet %s, bekommen %s", type_bool, op->type->name);
                 }
 
                 resolve_stmt(line->stmt, rets, num_rets);

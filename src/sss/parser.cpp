@@ -349,12 +349,11 @@ struct Directive_Load : Directive {
 };
 
 struct Match_Line : Ast_Node {
-    Expr *resolution;
+    Expr *cond;
     Stmt *stmt;
 };
 
 struct Stmt_Match : Stmt {
-    Expr *expr;
     Match_Lines lines;
     size_t num_lines;
 };
@@ -1331,11 +1330,11 @@ proc_sign(Ast_Node *loc, Decl_Var **params, uint32_t num_params, Decl_Var **rets
 }
 
 Match_Line *
-match_line(Ast_Node *loc, Expr *resolution, Stmt *stmt) {
+match_line(Ast_Node *loc, Expr *cond, Stmt *stmt) {
     STRUCT(Match_Line);
 
-    result->resolution = resolution;
-    result->stmt       = stmt;
+    result->cond = cond;
+    result->stmt = stmt;
 
     return result;
 }
@@ -1556,10 +1555,9 @@ stmt_ret(Ast_Node *loc, Exprs exprs, uint32_t num_exprs) {
 }
 
 Stmt_Match *
-stmt_match(Ast_Node *loc, Expr *expr, Match_Lines lines, size_t num_lines) {
+stmt_match(Ast_Node *loc, Match_Lines lines, size_t num_lines) {
     STRUCTK(Stmt_Match, STMT_MATCH);
 
-    result->expr      = expr;
     result->lines     = (Match_Lines)MEMDUP(lines);
     result->num_lines = num_lines;
 
@@ -2079,8 +2077,6 @@ parse_stmt_if(Token_List *tokens) {
 
 Stmt_For *
 parse_stmt_for(Token_List *tokens) {
-    /* @AUFGABE: umstellen auf init, cond, step! auch wenn range als cond im code steht */
-
     Token *curr = token_get(tokens);
 
     Stmt *init = NULL;
@@ -2103,7 +2099,7 @@ parse_stmt_for(Token_List *tokens) {
 
     Expr *iter      = expr_ident(init, SDECL(init)->decl->name);
     Expr *step_expr = expr_bin(curr, BIN_ADD, iter, expr_int(curr, 1));
-    step = stmt_assign(curr, iter, token_new(T_EQL_ASSIGN, "", 0, 0), step_expr);
+               step = stmt_assign(curr, iter, token_new(T_EQL_ASSIGN, "", 0, 0), step_expr);
 
     Stmt *stmt = parse_stmt(tokens);
 
@@ -2129,9 +2125,11 @@ parse_stmt_ret(Token_List *tokens) {
     Token *curr = token_get(tokens);
     Exprs exprs = NULL;
 
-    while ( !token_is(tokens, T_SEMICOLON) ) {
-        buf_push(exprs, parse_expr(tokens));
-        token_match(tokens, T_COMMA);
+    if ( !token_is(tokens, T_SEMICOLON ) ) {
+        do {
+            buf_push(exprs, parse_expr(tokens));
+            token_match(tokens, T_COMMA);
+        } while( token_match(tokens, T_COMMA) );
     }
 
     token_expect(tokens, T_SEMICOLON);
@@ -2150,16 +2148,17 @@ parse_stmt_match(Token_List *tokens) {
     if ( !token_is(tokens, T_RBRACE) ) {
         do {
             Expr *resolution = parse_expr(tokens);
-            token_expect(tokens, T_FAT_ARROW);
+            token_expect(tokens, T_COLON);
             Stmt *stmt = parse_stmt(tokens);
 
-            buf_push(lines, match_line(resolution, resolution, stmt));
-        } while ( !token_is(tokens, T_RBRACE) );
+            Expr *cond = expr_bin(resolution, BIN_EQ, resolution, expr);
+            buf_push(lines, match_line(resolution, cond, stmt));
+        } while ( token_match(tokens, T_COMMA) );
     }
 
     token_expect(tokens, T_RBRACE);
 
-    return stmt_match(curr, expr, lines, buf_len(lines));
+    return stmt_match(curr, lines, buf_len(lines));
 }
 
 Stmt_Using *
@@ -2196,27 +2195,30 @@ parse_directive_import(Token_List *tokens) {
     token_match(tokens, T_LPAREN);
     bool wildcard = false;
     Module_Syms syms = NULL;
-    while ( !token_match(tokens, T_RPAREN) ) {
-        Token *sym = token_read(tokens);
 
-        if ( sym->kind == T_ASTERISK ) {
-            wildcard = true;
-            token_match(tokens, T_COMMA);
-            continue;
-        }
+    if ( !token_is(tokens, T_RPAREN) ) {
+        do {
+            Token *sym = token_read(tokens);
 
-        assert(sym->kind == T_IDENT);
+            if ( sym->kind == T_ASTERISK ) {
+                wildcard = true;
+                token_match(tokens, T_COMMA);
+                continue;
+            }
 
-        char *alias = NULL;
-        if ( keyword_matches(tokens, keyword_as) ) {
-            Token *t = token_read(tokens);
-            alias = t->val_str;
-        }
+            assert(sym->kind == T_IDENT);
 
-        buf_push(syms, module_sym(sym, sym->val_str, alias));
-        token_match(tokens, T_COMMA);
+            char *alias = NULL;
+            if ( keyword_matches(tokens, keyword_as) ) {
+                Token *t = token_read(tokens);
+                alias = t->val_str;
+            }
+
+            buf_push(syms, module_sym(sym, sym->val_str, alias));
+        } while ( token_match(tokens, T_COMMA) );
     }
 
+    token_expect(tokens, T_RPAREN);
     keyword_expect(tokens, keyword_from);
 
     Expr *module = parse_expr(tokens);
@@ -2286,8 +2288,7 @@ parse_directive_export(Token_List *tokens) {
             }
 
             buf_push(syms, module_sym(t, sym, alias));
-            token_match(tokens, T_COMMA);
-        } while ( !token_is(tokens, T_RBRACE) );
+        } while ( token_match(tokens, T_COMMA) );
     }
 
     token_expect(tokens, T_RBRACE);
@@ -2308,9 +2309,9 @@ parse_notes(Token_List *tokens) {
             if ( !token_is(tokens, T_RPAREN) ) {
                 do {
                     buf_push(exprs, parse_expr(tokens));
-                    token_match(tokens, T_COMMA);
-                } while (!token_is(tokens, T_RPAREN));
+                } while ( token_match(tokens, T_COMMA) );
             }
+
             token_expect(tokens, T_RPAREN);
         }
 

@@ -1338,6 +1338,25 @@ vm_stmt(Stmt *stmt, Mem *mem) {
             vm_instr_patch(jmp2_instr, buf_len(vm_instrs));
         } break;
 
+        case STMT_MATCH: {
+            int32_t *jmp_exit_instrs = NULL;
+
+            for ( int i = 0; i < SMATCH(stmt)->num_lines; ++i ) {
+                Match_Line *line = SMATCH(stmt)->lines[i];
+
+                vm_expr(line->cond, mem);
+                int32_t jmp_next = vm_emit(vm_instr(line, OP_JNZ, operand_addr(REG_NONE, 0, line->cond->type->size)));
+                vm_stmt(line->stmt, mem);
+                buf_push(jmp_exit_instrs, vm_emit(vm_instr(line, OP_JMP, operand_addr(REG_NONE, 0, line->cond->type->size))));
+                vm_instr_patch(jmp_next, buf_len(vm_instrs));
+            }
+
+            int32_t exit_addr = buf_len(vm_instrs);
+            for ( int i = 0; i < buf_len(jmp_exit_instrs); ++i ) {
+                vm_instr_patch(jmp_exit_instrs[i], exit_addr);
+            }
+        } break;
+
         case STMT_RET: {
             if ( SRET(stmt)->num_exprs ) {
                 vm_expr(SRET(stmt)->exprs[0], mem);

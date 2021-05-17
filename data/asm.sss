@@ -1,9 +1,16 @@
 master :: proc() -> u32 {
-    a : u32 = 0;
+    a := 10;
 
-    defer a *= 10;
-    a += 1;
+    zweig a {
+        0: {
+            res 0;
+        },
 
-    res a;
+        10: {
+            res 15;
+        }
+    }
+
+    res 50;
 }
 
