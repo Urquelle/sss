@@ -2151,7 +2151,16 @@ parse_stmt_match(Token_List *tokens) {
             token_expect(tokens, T_COLON);
             Stmt *stmt = parse_stmt(tokens);
 
-            Expr *cond = expr_bin(resolution, BIN_EQ, resolution, expr);
+            Expr *cond = NULL;
+            if ( resolution->kind == EXPR_RANGE ) {
+                Expr *left = expr_bin(resolution, BIN_GTE, expr, ERNG(resolution)->left);
+                Expr *right = expr_bin(resolution, BIN_LT, expr, ERNG(resolution)->right);
+
+                cond = expr_bin(resolution, BIN_AND, left, right);
+            } else {
+                cond = expr_bin(resolution, BIN_EQ, resolution, expr);
+            }
+
             buf_push(lines, match_line(resolution, cond, stmt));
         } while ( token_match(tokens, T_COMMA) );
     }
