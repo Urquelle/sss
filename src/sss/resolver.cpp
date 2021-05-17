@@ -1973,6 +1973,7 @@ register_global_syms(Stmts stmts) {
         switch ( decl->kind ) {
             case DECL_TYPE:
             case DECL_ENUM:
+            case DECL_UNION:
             case DECL_STRUCT: {
                 sym->kind = SYM_TYPE;
             } break;

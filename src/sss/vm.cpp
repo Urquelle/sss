@@ -1091,6 +1091,11 @@ vm_expr(Expr *expr, Mem *mem, bool assign) {
 
                 num_fields = (int32_t)type->num_fields;
                 fields     = type->fields;
+            } else if ( base->type->kind == TYPE_UNION ) {
+                Type_Union *type = TUNION(base->type);
+
+                num_fields = (int32_t)type->num_fields;
+                fields     = type->fields;
             } else {
                 assert(0);
             }
@@ -1120,6 +1125,10 @@ vm_expr(Expr *expr, Mem *mem, bool assign) {
                 }
 
                 vm_emit(vm_instr(expr, OP_MOV, operand_rax(field->type->size), operand_imm(value((int64_t)field->order, 4), field->type->size)));
+            } else if ( base->type->kind == TYPE_UNION ) {
+                if ( !assign ) {
+                    vm_emit(vm_instr(expr, OP_MOV, operand_rax(field->type->size), operand_addr(REG_RAX, 0, field->type->size)));
+                }
             } else {
                 assert(0);
             }
@@ -1224,6 +1233,7 @@ vm_decl(Decl *decl, Mem *mem) {
         } break;
 
         case DECL_ENUM:
+        case DECL_UNION:
         case DECL_STRUCT: {
             // nichts zu tun
         } break;

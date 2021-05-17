@@ -1363,26 +1363,13 @@ ast_valid(Ast_Node *elem) {
 }
 
 /* decl {{{ */
-Decl_Type *
-decl_type(Ast_Node *loc, char *name, Typespec *typespec) {
-    STRUCTK(Decl_Type, DECL_TYPE);
-
-    result->name     = name;
-    result->typespec = typespec;
-
-    return result;
-}
-
-Decl_Var *
-decl_var(Ast_Node *loc, char *name, Typespec *typespec, Expr *expr, bool has_using = false) {
-    STRUCTK(Decl_Var, DECL_VAR);
+Decl_Api *
+decl_api(Ast_Node *loc, char *name, Decls decls, size_t num_decls) {
+    STRUCTK(Decl_Api, DECL_API);
 
     result->name      = name;
-    result->typespec  = typespec;
-    result->expr      = expr;
-    result->offset    = 0;
-    result->is_global = false;
-    result->has_using = has_using;
+    result->decls     = decls;
+    result->num_decls = num_decls;
 
     return result;
 }
@@ -1412,13 +1399,14 @@ decl_enum(Ast_Node *loc, char *name, Aggr_Fields fields, size_t num_fields) {
     return result;
 }
 
-Decl_Struct *
-decl_struct(Loc *loc, char *name, Aggr_Fields fields, size_t num_fields) {
-    STRUCTK(Decl_Struct, DECL_STRUCT);
+Decl_Impl *
+decl_impl(Ast_Node *loc, char *name, Exprs exprs, size_t num_exprs, Stmt *block) {
+    STRUCTK(Decl_Impl, DECL_IMPL);
 
-    result->name       = name;
-    result->fields     = (Aggr_Fields)MEMDUP(fields);
-    result->num_fields = num_fields;
+    result->name      = name;
+    result->exprs     = (Exprs)MEMDUP(exprs);
+    result->num_exprs = num_exprs;
+    result->block     = block;
 
     return result;
 }
@@ -1435,25 +1423,48 @@ decl_proc(Ast_Node *loc, char *name, Typespec *typespec, Proc_Sign *sign, Stmt *
     return result;
 }
 
-Decl_Api *
-decl_api(Ast_Node *loc, char *name, Decls decls, size_t num_decls) {
-    STRUCTK(Decl_Api, DECL_API);
+Decl_Struct *
+decl_struct(Loc *loc, char *name, Aggr_Fields fields, size_t num_fields) {
+    STRUCTK(Decl_Struct, DECL_STRUCT);
 
-    result->name      = name;
-    result->decls     = decls;
-    result->num_decls = num_decls;
+    result->name       = name;
+    result->fields     = (Aggr_Fields)MEMDUP(fields);
+    result->num_fields = num_fields;
 
     return result;
 }
 
-Decl_Impl *
-decl_impl(Ast_Node *loc, char *name, Exprs exprs, size_t num_exprs, Stmt *block) {
-    STRUCTK(Decl_Impl, DECL_IMPL);
+Decl_Type *
+decl_type(Ast_Node *loc, char *name, Typespec *typespec) {
+    STRUCTK(Decl_Type, DECL_TYPE);
+
+    result->name     = name;
+    result->typespec = typespec;
+
+    return result;
+}
+
+Decl_Union *
+decl_union(Loc *loc, char *name, Aggr_Fields fields, size_t num_fields) {
+    STRUCTK(Decl_Union, DECL_UNION);
+
+    result->name       = name;
+    result->fields     = (Aggr_Fields)MEMDUP(fields);
+    result->num_fields = num_fields;
+
+    return result;
+}
+
+Decl_Var *
+decl_var(Ast_Node *loc, char *name, Typespec *typespec, Expr *expr, bool has_using = false) {
+    STRUCTK(Decl_Var, DECL_VAR);
 
     result->name      = name;
-    result->exprs     = (Exprs)MEMDUP(exprs);
-    result->num_exprs = num_exprs;
-    result->block     = block;
+    result->typespec  = typespec;
+    result->expr      = expr;
+    result->offset    = 0;
+    result->is_global = false;
+    result->has_using = has_using;
 
     return result;
 }
@@ -1889,6 +1900,15 @@ parse_decl_struct(Token_List *tokens, char *name) {
     return decl_struct(curr, name, fields, buf_len(fields));
 }
 
+Decl_Union *
+parse_decl_union(Token_List *tokens, char *name) {
+    Token *curr = token_get(tokens);
+
+    Aggr_Fields fields = parse_aggr_block(tokens);
+
+    return decl_union(curr, name, fields, buf_len(fields));
+}
+
 Decl_Proc *
 parse_decl_proc(Token_List *tokens, char *name, Typespec *typespec) {
     Token *curr = token_get(tokens);
@@ -1988,6 +2008,8 @@ parse_stmt_decl(Token_List *tokens, char *name) {
             decl = parse_decl_enum(tokens, name);
         } else if ( keyword_matches(tokens, keyword_struct) ) {
             decl = parse_decl_struct(tokens, name);
+        } else if ( keyword_matches(tokens, keyword_union) ) {
+            decl = parse_decl_union(tokens, name);
         } else if ( keyword_matches(tokens, keyword_const) ) {
             decl = parse_decl_const(tokens, name, typespec);
             token_expect(tokens, T_SEMICOLON);
