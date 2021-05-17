@@ -139,7 +139,6 @@ enum Operand_Kind : uint8_t {
     OPERAND_ADDR,
     OPERAND_IMM,
     OPERAND_LABEL,
-    OPERAND_PTR,
     OPERAND_REG,
 };
 struct Operand {
@@ -756,17 +755,6 @@ operand_imm(Value val, uint32_t size) {
 }
 
 Operand *
-operand_ptr(Operand *op) {
-    Operand *result = urq_allocs(Operand);
-
-    result->kind = OPERAND_PTR;
-    result->size = 8;
-    result->op   = op;
-
-    return result;
-}
-
-Operand *
 operand_reg(Reg_Kind reg, uint32_t size) {
     Operand *result = urq_allocs(Operand);
 
@@ -1088,11 +1076,28 @@ vm_expr(Expr *expr, Mem *mem, bool assign) {
 
         case EXPR_FIELD: {
             vm_expr(EFIELD(expr)->base, mem, true);
-            Type_Struct *type = TSTRUCT(EFIELD(expr)->base->type);
+
+            Expr *base = EFIELD(expr)->base;
+            int32_t num_fields = 0;
+            Aggr_Fields fields = NULL;
+
+            if ( base->type->kind == TYPE_STRUCT ) {
+                Type_Struct *type = TSTRUCT(base->type);
+
+                num_fields = (int32_t)type->num_fields;
+                fields     = type->fields;
+            } else if ( base->type->kind == TYPE_ENUM ) {
+                Type_Enum *type = TENUM(base->type);
+
+                num_fields = (int32_t)type->num_fields;
+                fields     = type->fields;
+            } else {
+                assert(0);
+            }
 
             Aggr_Field *field = NULL;
-            for ( int i = 0; i < type->num_fields; ++i ) {
-                Aggr_Field *f = type->fields[i];
+            for ( int i = 0; i < num_fields; ++i ) {
+                Aggr_Field *f = fields[i];
 
                 if ( f->name == EFIELD(expr)->field ) {
                     field = f;
@@ -1101,10 +1106,22 @@ vm_expr(Expr *expr, Mem *mem, bool assign) {
             }
 
             assert(field);
-            vm_emit(vm_instr(expr, OP_ADD, operand_rax(field->type->size), operand_imm(value((int64_t)field->offset, 4), 4)));
+            if ( base->type->kind == TYPE_STRUCT ) {
+                vm_emit(vm_instr(expr, OP_ADD, operand_rax(field->type->size), operand_imm(value((int64_t)field->offset, 4), 4)));
 
-            if ( !assign ) {
-                vm_emit(vm_instr(expr, OP_MOV, operand_rax(field->type->size), operand_addr(REG_RAX, 0, field->type->size)));
+                if ( !assign ) {
+                    vm_emit(vm_instr(expr, OP_MOV, operand_rax(field->type->size), operand_addr(REG_RAX, 0, field->type->size)));
+                }
+            } else if ( base->type->kind == TYPE_ENUM ) {
+                assert(!assign);
+
+                if ( field->value ) {
+                    report_error(field, "aktuell werden enum-feldern zugewiesene werte durch die vm nicht unterstützt");
+                }
+
+                vm_emit(vm_instr(expr, OP_MOV, operand_rax(field->type->size), operand_imm(value((int64_t)field->order, 4), field->type->size)));
+            } else {
+                assert(0);
             }
         } break;
 
@@ -1177,7 +1194,7 @@ vm_expr(Expr *expr, Mem *mem, bool assign) {
             expr->offset = mem_alloc(mem, str_size);
             mem_copy(mem, expr->offset, str_size, ESTR(expr)->val);
 
-            vm_emit(vm_instr(expr, OP_MOV, operand_rax(expr->type->size), operand_ptr(operand_addr(REG_NONE, expr->offset, expr->type->size))));
+            vm_emit(vm_instr(expr, OP_LEA, operand_rax(expr->type->size), operand_addr(REG_NONE, expr->offset, expr->type->size)));
         } break;
 
         default: {
@@ -1206,6 +1223,7 @@ vm_decl(Decl *decl, Mem *mem) {
             vm_emit(vm_instr(decl, OP_RET));
         } break;
 
+        case DECL_ENUM:
         case DECL_STRUCT: {
             // nichts zu tun
         } break;
@@ -1582,16 +1600,7 @@ step(Cpu *cpu) {
                 } else if ( instr->src->kind == OPERAND_ADDR ) {
                     reg_write(cpu, instr->dst, effective_addr(cpu, instr->src));
                 } else {
-                    assert(instr->src->kind == OPERAND_PTR );
-                    Operand *op = instr->src->op;
-
-                    if ( op->kind == OPERAND_REG ) {
-                        assert(0);
-                    } else if ( op->kind == OPERAND_ADDR ) {
-                        reg_write(cpu, instr->dst, mem_read(cpu->mem, effective_addr(cpu, op), op->size));
-                    } else {
-                        assert(0);
-                    }
+                    assert(0);
                 }
             } else {
                 assert(0);
@@ -1609,29 +1618,8 @@ step(Cpu *cpu) {
                     reg_write(cpu, instr->dst, instr->src->val.u64);
                 } else if ( instr->src->kind == OPERAND_REG ) {
                     reg_write(cpu, instr->dst, reg_read(cpu, instr->src));
-                } else if ( instr->src->kind == OPERAND_PTR ) {
-                    Operand *op = instr->src->op;
-
-                    if ( op->kind == OPERAND_REG ) {
-                        reg_write(cpu, instr->dst, reg_read(cpu, op));
-                    } else if ( op->kind == OPERAND_ADDR ) {
-                        reg_write(cpu, instr->dst, mem_read(cpu->mem, effective_addr(cpu, op), op->size));
-                    } else {
-                        assert(0);
-                    }
                 } else if ( instr->src->kind == OPERAND_ADDR ) {
                     reg_write(cpu, instr->dst, mem_read(cpu->mem, effective_addr(cpu, instr->src), instr->src->size));
-                } else {
-                    assert(0);
-                }
-            } else if ( instr->dst->kind == OPERAND_PTR ) {
-                Operand *op = instr->dst->op;
-
-                if ( op->kind == OPERAND_REG ) {
-                    assert(instr->src->kind == OPERAND_REG);
-                    mem_write(cpu->mem, (uint64_t)reg_read(cpu, op), reg_read(cpu, instr->src), instr->src->size);
-                } else if ( op->kind == OPERAND_ADDR ) {
-                    mem_write(cpu->mem, effective_addr(cpu, op), reg_read(cpu, instr->src), instr->src->size);
                 } else {
                     assert(0);
                 }

@@ -165,10 +165,6 @@ to_str(Urq::Sss::Vm::Operand *op) {
             result = buf_printf(result, "$%d", op->val.u64);
         } break;
 
-        case OPERAND_PTR: {
-            result = buf_printf(result, "ptr %s", to_str(op->op));
-        } break;
-
         case OPERAND_REG: {
             result = buf_printf(result, "%s", to_str(op->reg.kind, op->size));
         } break;

@@ -1811,6 +1811,7 @@ type_complete_enum(Type_Enum *type) {
 
         Operand *op = NULL;
         if ( field->value ) {
+            /* @AUFGABE: scope vorübergehend mit dem äußeren scope verbinden um den wert aufzulösen */
             op = resolve_expr(field->value, type_s32);
         }
 
@@ -1822,8 +1823,9 @@ type_complete_enum(Type_Enum *type) {
             op = operand(type_s32);
         }
 
-        field->type = type_s32;
+        field->type    = type_s32;
         field->operand = op;
+        field->order   = (int32_t)i;
 
         sym_push_var(field, field->name, type_s32);
     }
@@ -1831,12 +1833,8 @@ type_complete_enum(Type_Enum *type) {
     scope_leave();
     type->kind = TYPE_ENUM;
 
-    uint32_t align = 0;
-
-    for ( uint32_t i = 0; i < DENUM(decl)->num_fields; ++i ) {
-        type->size += DENUM(decl)->fields[i]->type->size;
-        type->align = MAX(type->size, DENUM(decl)->fields[i]->type->align);
-    }
+    type->size  = type_s32->size;
+    type->align = type_s32->align;
 
     TENUM(type)->fields     = DENUM(decl)->fields;
     TENUM(type)->num_fields = DENUM(decl)->num_fields;

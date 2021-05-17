@@ -367,6 +367,7 @@ struct Aggr_Field : Ast_Node {
     Operand  * operand;
     int32_t    offset;
     bool       has_using;
+    int32_t    order;
 };
 
 struct Stmt_Ret : Stmt {
@@ -2417,20 +2418,20 @@ parse(Token_List *tokens) {
 #define KEYWORD_K(Key, Var) keyword_##Var = intern_str(#Key); buf_push(keywords, keyword_##Var)
 #define KEYWORD(Key) KEYWORD_K(Key, Key)
     KEYWORD(api);
-    KEYWORD(as);
+    KEYWORD_K(als, as);
     KEYWORD_K(weg, break);
-    KEYWORD_K(als, cast);
-    KEYWORD(const);
+    KEYWORD_K(zu, cast);
+    KEYWORD_K(konst, const);
     KEYWORD_K(weiter, continue);
     KEYWORD_K(defer, defer);
     KEYWORD(enum);
-    KEYWORD_K(oder, else);
+    KEYWORD_K(sonst, else);
     KEYWORD(export);
     KEYWORD_K(falsch, false);
     KEYWORD_K(iter, for);
     KEYWORD(free);
     KEYWORD_K(aus, from);
-    KEYWORD_K(falls, if);
+    KEYWORD_K(wenn, if);
     KEYWORD(impl);
     KEYWORD(import);
     KEYWORD_K(lade, load);
