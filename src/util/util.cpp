@@ -187,6 +187,15 @@ loc_copy(Loc *from, Loc *to) {
     to->col  = from->col;
 }
 
+char *
+format_keyword(char *keyword) {
+    char *result = NULL;
+
+    result = buf_printf(result, "\x1b[95m%s\x1b[0m", keyword);
+
+    return result;
+}
+
 void
 report_error(Loc *loc, char *fmt, ...) {
     using namespace Urq::Os::api;

@@ -1,78 +1,77 @@
 Map interns;
 
-struct Ast_Elem : Loc {
+struct Ast_Node : Loc {
     bool   has_error;
     char * error_msg;
     bool   dump_ir;
 };
 
+#define TOKENS                        \
+    X(T_NONE)                         \
+    X(T_AT)                           \
+    X(T_HASH)                         \
+    X(T_COMMA)                        \
+    X(T_COLON)                        \
+    X(T_DOT)                          \
+    X(T_BANG)                         \
+    X(T_SEMICOLON)                    \
+    X(T_NOTE)                         \
+    X(T_NOT)                          \
+    X(T_LPAREN)                       \
+    X(T_RPAREN)                       \
+    X(T_LBRACKET)                     \
+    X(T_RBRACKET)                     \
+    X(T_LBRACE)                       \
+    X(T_RBRACE)                       \
+    X(T_PLUS)                         \
+    X(T_MINUS)                        \
+    X(T_ASTERISK)                     \
+    X(T_SLASH)                        \
+    X(T_OR)                           \
+    X(T_AND)                          \
+    X(T_XOR)                          \
+    X(T_MODULO)                       \
+    X(T_BIT_AND)                      \
+    X(T_BIT_OR)                       \
+    X(T_RANGE)                        \
+    X(T_ELLIPSIS)                     \
+    X(T_ARROW)                        \
+    X(T_FAT_ARROW)                    \
+    X(T_FIRST_CMP)                    \
+    X(T_LTE)                          \
+    X(T_GT)                           \
+    X(T_GTE)                          \
+    X(T_EQ)                           \
+    X(T_NEQ)                          \
+    X(T_EQL_ASSIGN)                   \
+    X(T_PLUS_ASSIGN)                  \
+    X(T_MINUS_ASSIGN)                 \
+    X(T_OR_ASSIGN)                    \
+    X(T_AND_ASSIGN)                   \
+    X(T_XOR_ASSIGN)                   \
+    X(T_MODULO_ASSIGN)                \
+    X(T_ASTERISK_ASSIGN)              \
+    X(T_SLASH_ASSIGN)                 \
+    X(T_LSHIFT)                       \
+    X(T_RSHIFT)                       \
+    X(T_CHAR)                         \
+    X(T_INT)                          \
+    X(T_FLOAT)                        \
+    X(T_STR)                          \
+    X(T_IDENT)
+
 enum Token_Kind {
-    T_NONE,
+#define X(Elem) Elem,
+    TOKENS
+#undef X
 
-    T_AT,
-    T_HASH,
-    T_COMMA,
-    T_COLON,
-    T_DOT,
-    T_BANG,
-    T_SEMICOLON,
-    T_NOTE,
-    T_NOT,
-
-    T_LPAREN,
-    T_RPAREN,
-    T_LBRACKET,
-    T_RBRACKET,
-    T_LBRACE,
-    T_RBRACE,
-
-    T_PLUS,
-    T_MINUS,
-    T_ASTERISK,
-    T_SLASH,
-    T_OR,
-    T_AND,
-    T_XOR,
-    T_MODULO,
-    T_BIT_AND,
-    T_BIT_OR,
-    T_RANGE,
-    T_ELLIPSIS,
-    T_ARROW,
-    T_FAT_ARROW,
-
-    T_FIRST_CMP,
     T_LT = T_FIRST_CMP,
-    T_LTE,
-    T_GT,
-    T_GTE,
-    T_EQ,
-    T_NEQ,
     T_LAST_CMP = T_NEQ,
-
-    T_EQL_ASSIGN,
     T_FIRST_ASSIGN = T_EQL_ASSIGN,
-    T_PLUS_ASSIGN,
-    T_MINUS_ASSIGN,
-    T_OR_ASSIGN,
-    T_AND_ASSIGN,
-    T_XOR_ASSIGN,
-    T_MODULO_ASSIGN,
-    T_ASTERISK_ASSIGN,
-    T_SLASH_ASSIGN,
     T_LAST_ASSIGN = T_SLASH_ASSIGN,
-
-    T_LSHIFT,
-    T_RSHIFT,
-
-    T_CHAR,
-    T_INT,
-    T_FLOAT,
-    T_STR,
-    T_IDENT,
 };
 
-struct Token : Ast_Elem {
+struct Token : Ast_Node {
     Token_Kind kind;
     uint32_t   len;
 
@@ -83,7 +82,7 @@ struct Token : Ast_Elem {
 
 typedef Token ** Tokens;
 
-struct Token_List : Ast_Elem {
+struct Token_List : Ast_Node {
     Tokens list;
     size_t curr;
 };

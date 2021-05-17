@@ -4,6 +4,7 @@ char *keyword_as;
 char *keyword_break;
 char *keyword_cast;
 char *keyword_const;
+char *keyword_continue;
 char *keyword_defer;
 char *keyword_free;
 char *keyword_else;
@@ -80,7 +81,7 @@ memdup(void *src, size_t size) {
     return ptr;
 }
 
-struct Note : Ast_Elem {
+struct Note : Ast_Node {
     Exprs  exprs;
     size_t num_exprs;
 };
@@ -120,7 +121,7 @@ enum Expr_Kind {
 #undef X
 };
 
-struct Expr : Ast_Elem {
+struct Expr : Ast_Node {
     Expr_Kind   kind;
     Type      * type;
     Operand   * op;
@@ -245,36 +246,30 @@ struct Expr_Stmt : Expr {
     Stmt *stmt;
 };
 
-#define STMTS      \
-    X(STMT_NONE)   \
-    X(STMT_ASSIGN) \
-    X(STMT_BLOCK)  \
-    X(STMT_DECL)   \
-    X(STMT_DEFER)  \
-    X(STMT_EXPR)   \
-    X(STMT_FOR)    \
-    X(STMT_IF)     \
-    X(STMT_MATCH)  \
-    X(STMT_RET)    \
-    X(STMT_WHILE)  \
-    X(STMT_USING)  \
+#define STMTS        \
+    X(STMT_NONE)     \
+    X(STMT_ASSIGN)   \
+    X(STMT_BLOCK)    \
+    X(STMT_BREAK)    \
+    X(STMT_CONTINUE) \
+    X(STMT_DECL)     \
+    X(STMT_DEFER)    \
+    X(STMT_EXPR)     \
+    X(STMT_FOR)      \
+    X(STMT_IF)       \
+    X(STMT_MATCH)    \
+    X(STMT_RET)      \
+    X(STMT_WHILE)    \
+    X(STMT_USING)    \
 
 enum Stmt_Kind {
 #define X(Elem) Elem,
     STMTS
 #undef X
 };
-struct Stmt : Ast_Elem {
+struct Stmt : Ast_Node {
     Stmt_Kind kind;
     Notes notes;
-};
-
-struct Stmt_Expr : Stmt {
-    Expr *expr;
-};
-
-struct Stmt_Decl : Stmt {
-    Decl *decl;
 };
 
 struct Stmt_Assign : Stmt {
@@ -288,14 +283,28 @@ struct Stmt_Block : Stmt {
     size_t num_stmts;
 };
 
-struct Stmt_If : Stmt {
-    Expr *cond;
-    Stmt *stmt;
-    Stmt_If *stmt_else;
+struct Stmt_Break : Stmt {
+};
+
+struct Stmt_Continue : Stmt {
+};
+
+struct Stmt_Decl : Stmt {
+    Decl *decl;
 };
 
 struct Stmt_Defer : Stmt {
     Stmt *stmt;
+};
+
+struct Stmt_Expr : Stmt {
+    Expr *expr;
+};
+
+struct Stmt_If : Stmt {
+    Expr *cond;
+    Stmt *stmt;
+    Stmt_If *stmt_else;
 };
 
 struct Stmt_For : Stmt {
@@ -307,7 +316,7 @@ struct Stmt_For : Stmt {
     Stmt *stmt_else;
 };
 
-struct Module_Sym : Ast_Elem {
+struct Module_Sym : Ast_Node {
     char * name;
     char * alias;
 };
@@ -318,7 +327,7 @@ enum Directive_Kind {
     DIRECTIVE_IMPORT,
     DIRECTIVE_EXPORT,
 };
-struct Directive : Ast_Elem {
+struct Directive : Ast_Node {
     Directive_Kind kind;
 };
 
@@ -339,7 +348,7 @@ struct Directive_Load : Directive {
     Parsed_File *parsed_file;
 };
 
-struct Match_Line : Ast_Elem {
+struct Match_Line : Ast_Node {
     Expr *resolution;
     Stmt *stmt;
 };
@@ -350,7 +359,7 @@ struct Stmt_Match : Stmt {
     size_t num_lines;
 };
 
-struct Aggr_Field : Ast_Elem {
+struct Aggr_Field : Ast_Node {
     char     * name;
     Sym      * sym;
     Type     * type;
@@ -387,7 +396,7 @@ enum Decl_Kind {
     DECL_API,
     DECL_IMPL,
 };
-struct Decl : Ast_Elem {
+struct Decl : Ast_Node {
     Decl_Kind   kind;
     char      * name;
     Sym       * sym;
@@ -453,7 +462,7 @@ enum Typespec_Kind {
     TYPESPEC_VARIADIC,
     TYPESPEC_UNION,
 };
-struct Typespec : Ast_Elem {
+struct Typespec : Ast_Node {
     Typespec_Kind   kind;
     Type          * type;
 };
@@ -484,7 +493,7 @@ struct Typespec_Union : Typespec {
     uint32_t    num_fields;
 };
 
-struct Proc_Sign : Ast_Elem {
+struct Proc_Sign : Ast_Node {
     Decl_Var   ** params;
     uint32_t      num_params;
     Decl_Var   ** rets;
@@ -493,7 +502,7 @@ struct Proc_Sign : Ast_Elem {
     char        * sys_lib;
 };
 
-struct Compound_Elem : Ast_Elem {
+struct Compound_Elem : Ast_Node {
     char     * name;
     Sym      * sym;
     Typespec * typespec;
@@ -528,6 +537,20 @@ to_str(Expr *expr) {
     switch ( expr->kind ) {
 #define X(Expr) case Expr: return #Expr;
         EXPRS
+#undef X
+
+        default: {
+            assert(!"unbekannt");
+            return "<unbekannt>";
+        } break;
+    }
+}
+
+char *
+to_str(Token t) {
+    switch ( t.kind ) {
+#define X(T) case T: return #T;
+        TOKENS
 #undef X
 
         default: {
@@ -671,7 +694,7 @@ token_op(Token *t) {
 }
 
 Module_Sym *
-module_sym(Ast_Elem *loc, char *name, char *alias) {
+module_sym(Ast_Node *loc, char *name, char *alias) {
     STRUCT(Module_Sym);
 
     result->name  = name;
@@ -695,13 +718,13 @@ keyword_matches(Token_List *tokens, char *keyword) {
 void
 keyword_expect(Token_List *tokens, char *keyword) {
     if ( !keyword_matches(tokens, keyword) ) {
-        report_error(token_get(tokens), "keyword %s erwartet", keyword);
+        report_error(token_get(tokens), "keyword %s erwartet", format_keyword(keyword));
         return;
     }
 }
 
 Compound_Elem *
-compound_elem(Ast_Elem *loc, char *name, Typespec *typespec, Expr *value) {
+compound_elem(Ast_Node *loc, char *name, Typespec *typespec, Expr *value) {
     Compound_Elem *result = urq_allocs(Compound_Elem);
 
     loc_copy(loc, result);
@@ -715,7 +738,7 @@ compound_elem(Ast_Elem *loc, char *name, Typespec *typespec, Expr *value) {
 }
 
 Note *
-note_create(Ast_Elem *loc, Exprs exprs, size_t num_exprs) {
+note_create(Ast_Node *loc, Exprs exprs, size_t num_exprs) {
     STRUCT(Note);
 
     result->exprs     = (Exprs)MEMDUP(exprs);
@@ -738,7 +761,7 @@ expr_print(Expr *expr) {
 }
 
 Expr_Deref *
-expr_deref(Ast_Elem *loc, Expr *base) {
+expr_deref(Ast_Node *loc, Expr *base) {
     STRUCTK(Expr_Deref, EXPR_DEREF);
 
     result->base = base;
@@ -747,7 +770,7 @@ expr_deref(Ast_Elem *loc, Expr *base) {
 }
 
 Expr_Int *
-expr_int(Ast_Elem *loc, int64_t val) {
+expr_int(Ast_Node *loc, int64_t val) {
     STRUCTK(Expr_Int, EXPR_INT);
 
     result->val  = val;
@@ -765,7 +788,7 @@ expr_char(Loc *loc, char val) {
 }
 
 Expr_Float *
-expr_float(Ast_Elem *loc, float val) {
+expr_float(Ast_Node *loc, float val) {
     STRUCTK(Expr_Float, EXPR_FLOAT);
 
     result->val  = val;
@@ -774,7 +797,7 @@ expr_float(Ast_Elem *loc, float val) {
 }
 
 Expr_Bool *
-expr_bool(Ast_Elem *loc, bool val) {
+expr_bool(Ast_Node *loc, bool val) {
     STRUCTK(Expr_Bool, EXPR_BOOL);
 
     result->val = val;
@@ -783,7 +806,7 @@ expr_bool(Ast_Elem *loc, bool val) {
 }
 
 Expr_Str *
-expr_str(Ast_Elem *loc, char *val) {
+expr_str(Ast_Node *loc, char *val) {
     STRUCTK(Expr_Str, EXPR_STR);
 
     result->val = val;
@@ -792,7 +815,7 @@ expr_str(Ast_Elem *loc, char *val) {
 }
 
 Expr_Ident *
-expr_ident(Ast_Elem *loc, char *val) {
+expr_ident(Ast_Node *loc, char *val) {
     STRUCTK(Expr_Ident, EXPR_IDENT);
 
     result->sym = NULL;
@@ -802,7 +825,7 @@ expr_ident(Ast_Elem *loc, char *val) {
 }
 
 Expr_New *
-expr_new(Ast_Elem *loc, Expr *expr) {
+expr_new(Ast_Node *loc, Expr *expr) {
     STRUCTK(Expr_New, EXPR_NEW);
 
     result->expr = expr;
@@ -811,7 +834,7 @@ expr_new(Ast_Elem *loc, Expr *expr) {
 }
 
 Expr_Not *
-expr_not(Ast_Elem *loc, Expr *expr) {
+expr_not(Ast_Node *loc, Expr *expr) {
     STRUCTK(Expr_Not, EXPR_NOT);
 
     result->expr = expr;
@@ -820,7 +843,7 @@ expr_not(Ast_Elem *loc, Expr *expr) {
 }
 
 Expr_Run *
-expr_run(Ast_Elem *loc, Expr *expr) {
+expr_run(Ast_Node *loc, Expr *expr) {
     STRUCTK(Expr_Run, EXPR_RUN);
 
     result->expr = expr;
@@ -829,7 +852,7 @@ expr_run(Ast_Elem *loc, Expr *expr) {
 }
 
 Expr_Keyword *
-expr_keyword(Ast_Elem *loc, char *val) {
+expr_keyword(Ast_Node *loc, char *val) {
     STRUCTK(Expr_Keyword, EXPR_KEYWORD);
 
     result->val = val;
@@ -838,7 +861,7 @@ expr_keyword(Ast_Elem *loc, char *val) {
 }
 
 Expr_Call *
-expr_call(Ast_Elem *loc, Expr *base, Exprs args, size_t num_args) {
+expr_call(Ast_Node *loc, Expr *base, Exprs args, size_t num_args) {
     STRUCTK(Expr_Call, EXPR_CALL);
 
     result->base     = base;
@@ -849,7 +872,7 @@ expr_call(Ast_Elem *loc, Expr *base, Exprs args, size_t num_args) {
 }
 
 Expr_Unary *
-expr_unary(Ast_Elem *loc, Bin_Kind op, Expr *expr) {
+expr_unary(Ast_Node *loc, Bin_Kind op, Expr *expr) {
     STRUCTK(Expr_Unary, EXPR_UNARY);
 
     result->op   = op;
@@ -859,7 +882,7 @@ expr_unary(Ast_Elem *loc, Bin_Kind op, Expr *expr) {
 }
 
 Expr_Bin *
-expr_bin(Ast_Elem *loc, Bin_Kind op, Expr *left, Expr *right) {
+expr_bin(Ast_Node *loc, Bin_Kind op, Expr *left, Expr *right) {
     STRUCTK(Expr_Bin, EXPR_BIN);
 
     result->op    = op;
@@ -870,7 +893,7 @@ expr_bin(Ast_Elem *loc, Bin_Kind op, Expr *left, Expr *right) {
 }
 
 Expr_Field *
-expr_field(Ast_Elem *loc, Expr *base, char *field) {
+expr_field(Ast_Node *loc, Expr *base, char *field) {
     STRUCTK(Expr_Field, EXPR_FIELD);
 
     result->base  = base;
@@ -880,7 +903,7 @@ expr_field(Ast_Elem *loc, Expr *base, char *field) {
 }
 
 Expr_Index *
-expr_index(Ast_Elem *loc, Expr *base, Expr *index) {
+expr_index(Ast_Node *loc, Expr *base, Expr *index) {
     STRUCTK(Expr_Index, EXPR_INDEX);
 
     result->base  = base;
@@ -890,7 +913,7 @@ expr_index(Ast_Elem *loc, Expr *base, Expr *index) {
 }
 
 Expr_Paren *
-expr_paren(Ast_Elem *loc, Expr *expr) {
+expr_paren(Ast_Node *loc, Expr *expr) {
     STRUCTK(Expr_Paren, EXPR_PAREN);
 
     result->expr = expr;
@@ -899,7 +922,7 @@ expr_paren(Ast_Elem *loc, Expr *expr) {
 }
 
 Expr_Ptr *
-expr_ptr(Ast_Elem *loc, Expr *base) {
+expr_ptr(Ast_Node *loc, Expr *base) {
     STRUCTK(Expr_Ptr, EXPR_PTR);
 
     result->base = base;
@@ -908,7 +931,7 @@ expr_ptr(Ast_Elem *loc, Expr *base) {
 }
 
 Expr_Range *
-expr_range(Ast_Elem *loc, Expr *left, Expr *right) {
+expr_range(Ast_Node *loc, Expr *left, Expr *right) {
     STRUCTK(Expr_Range, EXPR_RANGE);
 
     result->left  = left;
@@ -918,7 +941,7 @@ expr_range(Ast_Elem *loc, Expr *left, Expr *right) {
 }
 
 Expr_Compound *
-expr_compound(Ast_Elem *loc, Compound_Elems elems, int32_t num_elems, bool is_named) {
+expr_compound(Ast_Node *loc, Compound_Elems elems, int32_t num_elems, bool is_named) {
     STRUCTK(Expr_Compound, EXPR_COMPOUND);
 
     result->elems     = (Compound_Elems)MEMDUP(elems);
@@ -929,7 +952,7 @@ expr_compound(Ast_Elem *loc, Compound_Elems elems, int32_t num_elems, bool is_na
 }
 
 Expr_Tuple *
-expr_tuple(Ast_Elem *loc, Exprs exprs, int32_t num_exprs) {
+expr_tuple(Ast_Node *loc, Exprs exprs, int32_t num_exprs) {
     STRUCTK(Expr_Tuple, EXPR_TUPLE);
 
     result->exprs     = (Exprs)MEMDUP(exprs);
@@ -939,7 +962,7 @@ expr_tuple(Ast_Elem *loc, Exprs exprs, int32_t num_exprs) {
 }
 
 Expr_Stmt *
-expr_stmt(Ast_Elem *loc, Stmt *stmt) {
+expr_stmt(Ast_Node *loc, Stmt *stmt) {
     STRUCTK(Expr_Stmt, EXPR_STMT);
 
     result->stmt = stmt;
@@ -948,7 +971,7 @@ expr_stmt(Ast_Elem *loc, Stmt *stmt) {
 }
 
 Expr_Cast *
-expr_cast(Ast_Elem *loc, Typespec *typespec, Expr *expr) {
+expr_cast(Ast_Node *loc, Typespec *typespec, Expr *expr) {
     STRUCTK(Expr_Cast, EXPR_CAST);
 
     result->typespec = typespec;
@@ -958,7 +981,7 @@ expr_cast(Ast_Elem *loc, Typespec *typespec, Expr *expr) {
 }
 
 Expr_Sizeof *
-expr_sizeof(Ast_Elem *loc, Typespec *typespec) {
+expr_sizeof(Ast_Node *loc, Typespec *typespec) {
     STRUCTK(Expr_Sizeof, EXPR_SIZEOF);
 
     result->typespec = typespec;
@@ -967,7 +990,7 @@ expr_sizeof(Ast_Elem *loc, Typespec *typespec) {
 }
 
 Expr_Typeinfo *
-expr_typeinfo(Ast_Elem *loc, Expr *expr) {
+expr_typeinfo(Ast_Node *loc, Expr *expr) {
     STRUCTK(Expr_Typeinfo, EXPR_TYPEINFO);
 
     result->expr = expr;
@@ -1294,7 +1317,7 @@ parse_expr(Token_List *tokens, bool with_stmt) {
 /* }}} */
 
 Proc_Sign *
-proc_sign(Ast_Elem *loc, Decl_Var **params, uint32_t num_params, Decl_Var **rets, uint32_t num_rets) {
+proc_sign(Ast_Node *loc, Decl_Var **params, uint32_t num_params, Decl_Var **rets, uint32_t num_rets) {
     STRUCT(Proc_Sign);
 
     result->params     = params;
@@ -1308,7 +1331,7 @@ proc_sign(Ast_Elem *loc, Decl_Var **params, uint32_t num_params, Decl_Var **rets
 }
 
 Match_Line *
-match_line(Ast_Elem *loc, Expr *resolution, Stmt *stmt) {
+match_line(Ast_Node *loc, Expr *resolution, Stmt *stmt) {
     STRUCT(Match_Line);
 
     result->resolution = resolution;
@@ -1333,7 +1356,7 @@ aggr_field(Loc *loc, char *name, Typespec *typespec, Expr *value, bool has_using
 }
 
 bool
-ast_valid(Ast_Elem *elem) {
+ast_valid(Ast_Node *elem) {
     bool result = ( elem && !elem->has_error );
 
     return result;
@@ -1341,7 +1364,7 @@ ast_valid(Ast_Elem *elem) {
 
 /* decl {{{ */
 Decl_Type *
-decl_type(Ast_Elem *loc, char *name, Typespec *typespec) {
+decl_type(Ast_Node *loc, char *name, Typespec *typespec) {
     STRUCTK(Decl_Type, DECL_TYPE);
 
     result->name     = name;
@@ -1351,7 +1374,7 @@ decl_type(Ast_Elem *loc, char *name, Typespec *typespec) {
 }
 
 Decl_Var *
-decl_var(Ast_Elem *loc, char *name, Typespec *typespec, Expr *expr, bool has_using = false) {
+decl_var(Ast_Node *loc, char *name, Typespec *typespec, Expr *expr, bool has_using = false) {
     STRUCTK(Decl_Var, DECL_VAR);
 
     result->name      = name;
@@ -1365,7 +1388,7 @@ decl_var(Ast_Elem *loc, char *name, Typespec *typespec, Expr *expr, bool has_usi
 }
 
 Decl_Const *
-decl_const(Ast_Elem *loc, char *name, Typespec *typespec, Expr *expr) {
+decl_const(Ast_Node *loc, char *name, Typespec *typespec, Expr *expr) {
     STRUCTK(Decl_Const, DECL_CONST);
 
     result->name      = name;
@@ -1379,7 +1402,7 @@ decl_const(Ast_Elem *loc, char *name, Typespec *typespec, Expr *expr) {
 }
 
 Decl_Enum *
-decl_enum(Ast_Elem *loc, char *name, Aggr_Fields fields, size_t num_fields) {
+decl_enum(Ast_Node *loc, char *name, Aggr_Fields fields, size_t num_fields) {
     STRUCTK(Decl_Enum, DECL_ENUM);
 
     result->name       = name;
@@ -1401,7 +1424,7 @@ decl_struct(Loc *loc, char *name, Aggr_Fields fields, size_t num_fields) {
 }
 
 Decl_Proc *
-decl_proc(Ast_Elem *loc, char *name, Typespec *typespec, Proc_Sign *sign, Stmt *block) {
+decl_proc(Ast_Node *loc, char *name, Typespec *typespec, Proc_Sign *sign, Stmt *block) {
     STRUCTK(Decl_Proc, DECL_PROC);
 
     result->name     = name;
@@ -1413,7 +1436,7 @@ decl_proc(Ast_Elem *loc, char *name, Typespec *typespec, Proc_Sign *sign, Stmt *
 }
 
 Decl_Api *
-decl_api(Ast_Elem *loc, char *name, Decls decls, size_t num_decls) {
+decl_api(Ast_Node *loc, char *name, Decls decls, size_t num_decls) {
     STRUCTK(Decl_Api, DECL_API);
 
     result->name      = name;
@@ -1424,7 +1447,7 @@ decl_api(Ast_Elem *loc, char *name, Decls decls, size_t num_decls) {
 }
 
 Decl_Impl *
-decl_impl(Ast_Elem *loc, char *name, Exprs exprs, size_t num_exprs, Stmt *block) {
+decl_impl(Ast_Node *loc, char *name, Exprs exprs, size_t num_exprs, Stmt *block) {
     STRUCTK(Decl_Impl, DECL_IMPL);
 
     result->name      = name;
@@ -1437,7 +1460,7 @@ decl_impl(Ast_Elem *loc, char *name, Exprs exprs, size_t num_exprs, Stmt *block)
 /* }}} */
 /* stmt {{{ */
 Stmt_Expr *
-stmt_expr(Ast_Elem *loc, Expr *expr) {
+stmt_expr(Ast_Node *loc, Expr *expr) {
     STRUCTK(Stmt_Expr, STMT_EXPR);
 
     result->expr = expr;
@@ -1446,7 +1469,7 @@ stmt_expr(Ast_Elem *loc, Expr *expr) {
 }
 
 Stmt_Decl *
-stmt_decl(Ast_Elem *loc, Decl *decl) {
+stmt_decl(Ast_Node *loc, Decl *decl) {
     STRUCTK(Stmt_Decl, STMT_DECL);
 
     result->decl = decl;
@@ -1455,7 +1478,7 @@ stmt_decl(Ast_Elem *loc, Decl *decl) {
 }
 
 Stmt_Defer *
-stmt_defer(Ast_Elem *loc, Stmt *stmt) {
+stmt_defer(Ast_Node *loc, Stmt *stmt) {
     STRUCTK(Stmt_Defer, STMT_DEFER);
 
     result->stmt = stmt;
@@ -1464,7 +1487,7 @@ stmt_defer(Ast_Elem *loc, Stmt *stmt) {
 }
 
 Stmt_Assign *
-stmt_assign(Ast_Elem *loc, Expr *lhs, Token *op, Expr *rhs) {
+stmt_assign(Ast_Node *loc, Expr *lhs, Token *op, Expr *rhs) {
     STRUCTK(Stmt_Assign, STMT_ASSIGN);
 
     result->op  = op;
@@ -1475,7 +1498,7 @@ stmt_assign(Ast_Elem *loc, Expr *lhs, Token *op, Expr *rhs) {
 }
 
 Stmt_If *
-stmt_if(Ast_Elem *loc, Expr *cond, Stmt *stmt, Stmt_If *stmt_else) {
+stmt_if(Ast_Node *loc, Expr *cond, Stmt *stmt, Stmt_If *stmt_else) {
     STRUCTK(Stmt_If, STMT_IF);
 
     result->cond = cond;
@@ -1486,7 +1509,7 @@ stmt_if(Ast_Elem *loc, Expr *cond, Stmt *stmt, Stmt_If *stmt_else) {
 }
 
 Stmt_For *
-stmt_for(Ast_Elem *loc, Stmt *init, Expr *cond, Stmt *step, Stmt *block, Stmt *stmt_else) {
+stmt_for(Ast_Node *loc, Stmt *init, Expr *cond, Stmt *step, Stmt *block, Stmt *stmt_else) {
     STRUCTK(Stmt_For, STMT_FOR);
 
     result->init      = init;
@@ -1499,7 +1522,7 @@ stmt_for(Ast_Elem *loc, Stmt *init, Expr *cond, Stmt *step, Stmt *block, Stmt *s
 }
 
 Stmt_Block *
-stmt_block(Ast_Elem *loc, Stmts stmts, size_t num_stmts) {
+stmt_block(Ast_Node *loc, Stmts stmts, size_t num_stmts) {
     STRUCTK(Stmt_Block, STMT_BLOCK);
 
     result->stmts     = (Stmts)MEMDUP(stmts);
@@ -1508,8 +1531,22 @@ stmt_block(Ast_Elem *loc, Stmts stmts, size_t num_stmts) {
     return result;
 }
 
+Stmt_Break *
+stmt_break(Ast_Node *loc) {
+    STRUCTK(Stmt_Break, STMT_BREAK);
+
+    return result;
+}
+
+Stmt_Continue *
+stmt_continue(Ast_Node *loc) {
+    STRUCTK(Stmt_Continue, STMT_CONTINUE);
+
+    return result;
+}
+
 Stmt_Ret *
-stmt_ret(Ast_Elem *loc, Exprs exprs, uint32_t num_exprs) {
+stmt_ret(Ast_Node *loc, Exprs exprs, uint32_t num_exprs) {
     STRUCTK(Stmt_Ret, STMT_RET);
 
     result->exprs     = exprs;
@@ -1519,7 +1556,7 @@ stmt_ret(Ast_Elem *loc, Exprs exprs, uint32_t num_exprs) {
 }
 
 Stmt_Match *
-stmt_match(Ast_Elem *loc, Expr *expr, Match_Lines lines, size_t num_lines) {
+stmt_match(Ast_Node *loc, Expr *expr, Match_Lines lines, size_t num_lines) {
     STRUCTK(Stmt_Match, STMT_MATCH);
 
     result->expr      = expr;
@@ -1530,7 +1567,7 @@ stmt_match(Ast_Elem *loc, Expr *expr, Match_Lines lines, size_t num_lines) {
 }
 
 Stmt_While *
-stmt_while(Ast_Elem *loc, Expr *cond, Stmt *block) {
+stmt_while(Ast_Node *loc, Expr *cond, Stmt *block) {
     STRUCTK(Stmt_While, STMT_WHILE);
 
     result->cond  = cond;
@@ -1540,7 +1577,7 @@ stmt_while(Ast_Elem *loc, Expr *cond, Stmt *block) {
 }
 
 Stmt_Using *
-stmt_using(Ast_Elem *loc, Expr *expr) {
+stmt_using(Ast_Node *loc, Expr *expr) {
     STRUCTK(Stmt_Using, STMT_USING);
 
     result->expr = expr;
@@ -1550,7 +1587,7 @@ stmt_using(Ast_Elem *loc, Expr *expr) {
 /* }}} */
 /* directives {{{ */
 Directive_Import *
-directive_import(Ast_Elem *loc, char *scope_name, bool wildcard, Module_Syms syms,
+directive_import(Ast_Node *loc, char *scope_name, bool wildcard, Module_Syms syms,
         size_t num_syms, Parsed_File *parsed_file)
 {
     STRUCTK(Directive_Import, DIRECTIVE_IMPORT);
@@ -1565,7 +1602,7 @@ directive_import(Ast_Elem *loc, char *scope_name, bool wildcard, Module_Syms sym
 }
 
 Directive_Export *
-directive_export(Ast_Elem *loc, Module_Syms syms, size_t num_syms) {
+directive_export(Ast_Node *loc, Module_Syms syms, size_t num_syms) {
     STRUCTK(Directive_Export, DIRECTIVE_EXPORT);
 
     result->syms       = (Module_Syms)MEMDUP(syms);
@@ -1575,7 +1612,7 @@ directive_export(Ast_Elem *loc, Module_Syms syms, size_t num_syms) {
 }
 
 Directive_Load *
-directive_load(Ast_Elem *loc, Parsed_File *parsed_file) {
+directive_load(Ast_Node *loc, Parsed_File *parsed_file) {
     STRUCTK(Directive_Load, DIRECTIVE_LOAD);
 
     result->parsed_file = parsed_file;
@@ -1585,7 +1622,7 @@ directive_load(Ast_Elem *loc, Parsed_File *parsed_file) {
 /* }}} */
 /* typespec {{{ */
 Typespec_Name *
-typespec_name(Ast_Elem *loc, char *name) {
+typespec_name(Ast_Node *loc, char *name) {
     STRUCTK(Typespec_Name, TYPESPEC_NAME);
 
     result->name = name;
@@ -1594,7 +1631,7 @@ typespec_name(Ast_Elem *loc, char *name) {
 }
 
 Typespec_Ptr *
-typespec_ptr(Ast_Elem *loc, Typespec *base) {
+typespec_ptr(Ast_Node *loc, Typespec *base) {
     STRUCTK(Typespec_Ptr, TYPESPEC_PTR);
 
     result->base = base;
@@ -1603,14 +1640,14 @@ typespec_ptr(Ast_Elem *loc, Typespec *base) {
 }
 
 Typespec *
-typespec_variadic(Ast_Elem *loc) {
+typespec_variadic(Ast_Node *loc) {
     STRUCTK(Typespec, TYPESPEC_VARIADIC);
 
     return result;
 }
 
 Typespec_Array *
-typespec_array(Ast_Elem *loc, Typespec *base, Expr *num_elems) {
+typespec_array(Ast_Node *loc, Typespec *base, Expr *num_elems) {
     STRUCTK(Typespec_Array, TYPESPEC_ARRAY);
 
     result->base = base;
@@ -1620,7 +1657,7 @@ typespec_array(Ast_Elem *loc, Typespec *base, Expr *num_elems) {
 }
 
 Typespec_Proc *
-typespec_proc(Ast_Elem *loc, Decls params, uint32_t num_params, Decls rets, uint32_t num_rets) {
+typespec_proc(Ast_Node *loc, Decls params, uint32_t num_params, Decls rets, uint32_t num_rets) {
     STRUCTK(Typespec_Proc, TYPESPEC_PROC);
 
     result->params     = (Decl_Var **)MEMDUP(params);
@@ -1868,7 +1905,7 @@ parse_decl_proc(Token_List *tokens, char *name, Typespec *typespec) {
         } else if ( dir == intern_str("dump_ir") ) {
             sign->dump_ir = true;
         } else {
-            report_error(curr, "unbekannte direktive");
+            report_error(curr, "unbekannte direktive %s", format_keyword(curr->val_str));
         }
     }
 
@@ -2001,6 +2038,26 @@ parse_stmt_assign(Token_List *tokens, Token *op, Expr *expr) {
     return result;
 }
 
+Stmt_Break *
+parse_stmt_break(Token_List *tokens) {
+    Token *curr = token_get(tokens);
+
+    token_expect(tokens, T_SEMICOLON);
+    Stmt_Break *result = stmt_break(curr);
+
+    return result;
+}
+
+Stmt_Continue *
+parse_stmt_continue(Token_List *tokens) {
+    Token *curr = token_get(tokens);
+
+    token_expect(tokens, T_SEMICOLON);
+    Stmt_Continue *result = stmt_continue(curr);
+
+    return result;
+}
+
 Stmt_If *
 parse_stmt_if(Token_List *tokens) {
     Token *curr = token_get(tokens);
@@ -2063,6 +2120,7 @@ parse_stmt_defer(Token_List *tokens) {
     Token *curr = token_get(tokens);
 
     Stmt_Defer *result = stmt_defer(curr, parse_stmt(tokens));
+    token_expect(tokens, T_SEMICOLON);
 
     return result;
 }
@@ -2163,7 +2221,9 @@ parse_directive_import(Token_List *tokens) {
     keyword_expect(tokens, keyword_from);
 
     Expr *module = parse_expr(tokens);
-    assert(module->kind == EXPR_IDENT);
+    if ( module->kind != EXPR_IDENT ) {
+        report_error(curr, "modulname muß als bezeichner angegeben werden. stattdessen %s erhalten", to_str(module));
+    }
 
     token_expect(tokens, T_SEMICOLON);
 
@@ -2271,6 +2331,9 @@ parse_directive(Token_List *tokens) {
         result = parse_directive_load(tokens);
     } else if ( keyword_matches(tokens, keyword_export) ) {
         result = parse_directive_export(tokens);
+    } else {
+        Token *curr = token_get(tokens);
+        report_error(curr, "unbekannte direktive %s", format_keyword(curr->val_str));
     }
 
     return result;
@@ -2292,20 +2355,24 @@ parse_stmt(Token_List *tokens) {
             if ( expr->kind == EXPR_KEYWORD ) {
                 Expr_Keyword *keyword = (Expr_Keyword *)expr;
 
-                if ( keyword->val == keyword_if ) {
-                    result = parse_stmt_if(tokens);
-                } else if ( keyword->val == keyword_for ) {
-                    result = parse_stmt_for(tokens);
-                } else if ( keyword->val == keyword_return ) {
-                    result = parse_stmt_ret(tokens);
-                } else if ( keyword->val == keyword_while ) {
-                    result = parse_stmt_while(tokens);
+                if ( keyword->val == keyword_break ) {
+                    result = parse_stmt_break(tokens);
+                } else if ( keyword->val == keyword_continue ) {
+                    result = parse_stmt_continue(tokens);
                 } else if ( keyword->val == keyword_defer ) {
                     result = parse_stmt_defer(tokens);
+                } else if ( keyword->val == keyword_for ) {
+                    result = parse_stmt_for(tokens);
+                } else if ( keyword->val == keyword_if ) {
+                    result = parse_stmt_if(tokens);
                 } else if ( keyword->val == keyword_match ) {
                     result = parse_stmt_match(tokens);
+                } else if ( keyword->val == keyword_return ) {
+                    result = parse_stmt_ret(tokens);
                 } else if ( keyword->val == keyword_using ) {
                     result = parse_stmt_using(tokens);
+                } else if ( keyword->val == keyword_while ) {
+                    result = parse_stmt_while(tokens);
                 }
             } else {
                 if ( token_is(tokens, T_COLON) ) {
@@ -2316,7 +2383,8 @@ parse_stmt(Token_List *tokens) {
                     result = stmt_expr(expr, expr);
                 } else {
                     if ( !token_is_assign(tokens) ) {
-                        report_error(token_get(tokens), "unerwartetes token");
+                        Token *t = token_get(tokens);
+                        report_error(t, "unerwartetes token %s", to_str(*t));
                     }
 
                     Token *op = token_read(tokens);
@@ -2341,9 +2409,10 @@ parse(Token_List *tokens) {
 #define KEYWORD(Key) KEYWORD_K(Key, Key)
     KEYWORD(api);
     KEYWORD(as);
-    KEYWORD_K(raus, break);
+    KEYWORD_K(weg, break);
     KEYWORD_K(als, cast);
     KEYWORD(const);
+    KEYWORD_K(weiter, continue);
     KEYWORD_K(defer, defer);
     KEYWORD(enum);
     KEYWORD_K(oder, else);
@@ -2355,7 +2424,7 @@ parse(Token_List *tokens) {
     KEYWORD_K(falls, if);
     KEYWORD(impl);
     KEYWORD(import);
-    KEYWORD(load);
+    KEYWORD_K(lade, load);
     KEYWORD_K(zweig, match);
     KEYWORD(new);
     KEYWORD(note);

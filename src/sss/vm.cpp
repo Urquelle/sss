@@ -7,7 +7,7 @@ struct Operand;
 struct Mem;
 
 void      vm_expr(Expr *expr, Mem *mem, bool assign = false);
-void      vm_stmt(Stmt *stmt, Mem *mem, char *proc_name = NULL);
+void      vm_stmt(Stmt *stmt, Mem *mem);
 
 enum Vm_Op : uint8_t {
     OP_HLT,
@@ -1201,7 +1201,7 @@ vm_decl(Decl *decl, Mem *mem) {
                 }
             }
 
-            vm_stmt(DPROC(decl)->block, mem, decl->name);
+            vm_stmt(DPROC(decl)->block, mem);
             vm_emit(vm_instr(decl, OP_LEAVE, make_label("%s.end", decl->name)));
             vm_emit(vm_instr(decl, OP_RET));
         } break;
@@ -1235,7 +1235,7 @@ vm_decl(Decl *decl, Mem *mem) {
 }
 
 void
-vm_stmt(Stmt *stmt, Mem *mem, char *proc_name) {
+vm_stmt(Stmt *stmt, Mem *mem) {
     switch ( stmt->kind ) {
         case STMT_ASSIGN: {
             uint32_t lhs_size = SASSIGN(stmt)->lhs->type->size;
@@ -1252,8 +1252,18 @@ vm_stmt(Stmt *stmt, Mem *mem, char *proc_name) {
 
         case STMT_BLOCK: {
             for ( int i = 0; i < SBLOCK(stmt)->num_stmts; ++i ) {
-                vm_stmt(SBLOCK(stmt)->stmts[i], mem, proc_name);
+                vm_stmt(SBLOCK(stmt)->stmts[i], mem);
             }
+        } break;
+
+        case STMT_BREAK: {
+            report_error(stmt, "%s wird noch nicht in der vm unterstützt", format_keyword(keyword_break));
+            // vm_emit(vm_instr(stmt, OP_JMP, operand_addr(REG_NONE, ???, 4), (char *)NULL, "break"));
+        } break;
+
+        case STMT_CONTINUE: {
+            report_error(stmt, "%s wird noch nicht in der vm unterstützt", format_keyword(keyword_continue));
+            // vm_emit(vm_instr(stmt, OP_JMP, operand_addr(REG_NONE, ???, 4), (char *)NULL, "continue"));
         } break;
 
         case STMT_DECL: {
@@ -1265,22 +1275,22 @@ vm_stmt(Stmt *stmt, Mem *mem, char *proc_name) {
         } break;
 
         case STMT_FOR: {
-            vm_stmt(SFOR(stmt)->init, mem, proc_name);
+            vm_stmt(SFOR(stmt)->init, mem);
             int32_t loop_start = buf_len(vm_instrs);
             vm_expr(SFOR(stmt)->cond, mem);
             vm_emit(vm_instr(stmt, OP_CMP, operand_rax(SFOR(stmt)->cond->type->size), operand_imm(value1, SFOR(stmt)->cond->type->size)));
             int32_t jmpnz_instr = vm_emit(vm_instr(stmt, OP_JNZ, operand_addr(REG_NONE, 0, SFOR(stmt)->cond->type->size)));
-            vm_stmt(SFOR(stmt)->block, mem, proc_name);
-            vm_stmt(SFOR(stmt)->step, mem, proc_name);
+            vm_stmt(SFOR(stmt)->block, mem);
+            vm_stmt(SFOR(stmt)->step, mem);
             vm_emit(vm_instr(stmt, OP_JMP, operand_addr(REG_NONE, loop_start, SFOR(stmt)->cond->type->size)));
 
             /* @AUFGABE: sonst zweig für schleife */
-#if 0
             if ( SFOR(stmt)->stmt_else ) {
+                report_error(stmt, "%s wird für die %s schleife noch nicht unterstützt", keyword_else, keyword_for);
             }
-#endif
 
-            vm_instr_patch(jmpnz_instr, buf_len(vm_instrs));
+            int32_t loop_end = buf_len(vm_instrs);
+            vm_instr_patch(jmpnz_instr, loop_end);
         } break;
 
         case STMT_IF: {
@@ -1290,13 +1300,13 @@ vm_stmt(Stmt *stmt, Mem *mem, char *proc_name) {
             vm_expr(SIF(stmt)->cond, mem);
             vm_emit(vm_instr(stmt, OP_CMP, operand_rax(SIF(stmt)->cond->type->size), operand_imm(value1, SIF(stmt)->cond->type->size)));
             int32_t jmp1_instr = vm_emit(vm_instr(stmt, OP_JNE, operand_addr(REG_NONE, 0, SIF(stmt)->cond->type->size), label));
-            vm_stmt(SIF(stmt)->stmt, mem, proc_name);
+            vm_stmt(SIF(stmt)->stmt, mem);
             int32_t jmp2_instr = vm_emit(vm_instr(stmt, OP_JMP, operand_addr(REG_NONE, 0, SIF(stmt)->cond->type->size)));
 
             vm_instr_patch(jmp1_instr, buf_len(vm_instrs));
 
             if ( SIF(stmt)->stmt_else ) {
-                vm_stmt(SIF(stmt)->stmt_else, mem, proc_name);
+                vm_stmt(SIF(stmt)->stmt_else, mem);
             }
 
             vm_instr_patch(jmp2_instr, buf_len(vm_instrs));
@@ -1307,9 +1317,8 @@ vm_stmt(Stmt *stmt, Mem *mem, char *proc_name) {
                 vm_expr(SRET(stmt)->exprs[0], mem);
             }
 
-            assert(proc_name);
-            char *label = make_label("%s.end", proc_name);
-            vm_emit(vm_instr(stmt, OP_JMP, operand_label(label), (char *)NULL, "res"));
+            vm_emit(vm_instr(stmt, OP_LEAVE));
+            vm_emit(vm_instr(stmt, OP_RET));
         } break;
 
         case STMT_WHILE: {
@@ -1317,7 +1326,7 @@ vm_stmt(Stmt *stmt, Mem *mem, char *proc_name) {
             vm_expr(SWHILE(stmt)->cond, mem);
             vm_emit(vm_instr(stmt, OP_CMP, operand_rax(SWHILE(stmt)->cond->type->size), operand_imm(value0, SWHILE(stmt)->cond->type->size)));
             int32_t jmp_instr = vm_emit(vm_instr(stmt, OP_JZ, operand_addr(REG_NONE, 0, SWHILE(stmt)->cond->type->size), operand_imm(value1, SWHILE(stmt)->cond->type->size)));
-            vm_stmt(SWHILE(stmt)->block, mem, proc_name);
+            vm_stmt(SWHILE(stmt)->block, mem);
             vm_emit(vm_instr(stmt, OP_JMP, operand_addr(REG_NONE, loop_start, SWHILE(stmt)->cond->type->size)));
 
             vm_instr_patch(jmp_instr, buf_len(vm_instrs));

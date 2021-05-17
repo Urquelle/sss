@@ -21,13 +21,19 @@ struct Sym : Loc {
     Type *type;
 };
 
+enum Scope_Flags {
+    SCOPE_NONE,
+    SCOPE_CAN_BREAK     = 1 << 0,
+    SCOPE_CAN_CONTINUE  = 1 << 1,
+    SCOPE_PROC          = 1 << 2,
+};
 struct Scope {
     char     * name;
     Map        syms;
     Sym     ** sym_list;
     Scope    * parent;
     int32_t    frame_size;
-    bool       is_proc;
+    uint32_t   flags;
 
     Module_Syms export_syms;
     size_t      num_export_syms;
@@ -576,7 +582,6 @@ scope_new(char *name, Scope *parent) {
     result->num_export_syms = 0;
     result->parent          = parent;
     result->frame_size      = 0;
-    result->is_proc         = false;
 
     return result;
 }
@@ -590,10 +595,21 @@ scope_set(Scope *scope) {
 }
 
 Scope *
-scope_enter(char *name = NULL) {
+scope_enter(char *name = NULL, uint32_t flags = SCOPE_NONE) {
     Scope *result = scope_new(name, curr_scope);
 
     curr_scope = result;
+    result->flags = flags;
+
+    return result;
+}
+
+Scope *
+scope_enter(uint32_t flags) {
+    Scope *result = scope_new(NULL, curr_scope);
+
+    curr_scope = result;
+    result->flags = flags;
 
     return result;
 }
@@ -1320,7 +1336,7 @@ resolve_decl_var(Decl *decl) {
     if ( curr_scope != global_scope ) {
         Scope *scope = curr_scope;
 
-        while ( scope && !scope->is_proc ) {
+        while ( scope && !(scope->flags & SCOPE_PROC) ) {
             scope = scope->parent;
         }
 
@@ -1409,6 +1425,44 @@ resolve_stmt(Stmt *stmt, Types rets, uint32_t num_rets) {
             }
         } break;
 
+        case STMT_BREAK: {
+            /* @INFO: scopes nach oben durchgehen und prüfen ob wir uns in einem abbrechbaren scope befinden */
+            bool can_break = false;
+            Scope *scope = curr_scope;
+
+            while ( scope ) {
+                if ( scope->flags & SCOPE_CAN_BREAK ) {
+                    can_break = true;
+                    break;
+                }
+
+                scope = scope->parent;
+            }
+
+            if ( !can_break ) {
+                report_error(stmt, "%s ist an dieser stelle nicht möglich. es muß sich um einen abbrechbaren bereich wie %s, oder %s handeln", format_keyword(keyword_break), format_keyword(keyword_for), format_keyword(keyword_while));
+            }
+        } break;
+
+        case STMT_CONTINUE: {
+            /* @INFO: scopes nach oben durchgehen und prüfen ob wir uns in einem abbrechbaren scope befinden */
+            bool can_continue = false;
+            Scope *scope = curr_scope;
+
+            while ( scope ) {
+                if ( scope->flags & SCOPE_CAN_CONTINUE ) {
+                    can_continue = true;
+                    break;
+                }
+
+                scope = scope->parent;
+            }
+
+            if ( !can_continue ) {
+                report_error(stmt, "%s ist an dieser stelle nicht möglich. es muß sich um einen fortsetzbaren bereich wie %s, oder %s handeln", format_keyword(keyword_continue), format_keyword(keyword_for), format_keyword(keyword_while));
+            }
+        } break;
+
         case STMT_DECL: {
             Decl *decl = SDECL(stmt)->decl;
 
@@ -1425,12 +1479,20 @@ resolve_stmt(Stmt *stmt, Types rets, uint32_t num_rets) {
             }
         } break;
 
+        case STMT_DEFER: {
+            if ( curr_scope == global_scope ) {
+                report_error(stmt, "%s kann nicht im globalen bereich verwendet werden", format_keyword(keyword_defer));
+            }
+
+            result = resolve_stmt(SDEFER(stmt)->stmt, rets, num_rets);
+        } break;
+
         case STMT_EXPR: {
             Operand *operand = resolve_expr(SEXPR(stmt)->expr);
         } break;
 
         case STMT_FOR: {
-            scope_enter("for-loop");
+            scope_enter("for-loop", SCOPE_CAN_BREAK | SCOPE_CAN_CONTINUE);
 
             resolve_stmt(SFOR(stmt)->init, rets, num_rets);
             resolve_stmt(SFOR(stmt)->step, rets, num_rets);
@@ -1442,12 +1504,12 @@ resolve_stmt(Stmt *stmt, Types rets, uint32_t num_rets) {
                 type = TARRAY(type)->base;
             }
 
-            resolve_stmt(SFOR(stmt)->block, rets, num_rets);
+            result = resolve_stmt(SFOR(stmt)->block, rets, num_rets);
             scope_leave();
 
             if ( SFOR(stmt)->stmt_else ) {
                 scope_enter("for-else");
-                resolve_stmt(SFOR(stmt)->stmt_else, rets, num_rets);
+                result = resolve_stmt(SFOR(stmt)->stmt_else, rets, num_rets) && result;
                 scope_leave();
             }
         } break;
@@ -1466,15 +1528,6 @@ resolve_stmt(Stmt *stmt, Types rets, uint32_t num_rets) {
             if ( SIF(stmt)->stmt_else ) {
                 result = resolve_stmt(SIF(stmt)->stmt_else, rets, num_rets) && result;
             }
-        } break;
-
-        case STMT_WHILE: {
-            Operand *cond = resolve_expr(SWHILE(stmt)->cond);
-            assert(cond->type->kind == TYPE_BOOL);
-
-            scope_enter();
-            resolve_stmt(SWHILE(stmt)->block, rets, num_rets);
-            scope_leave();
         } break;
 
         case STMT_MATCH: {
@@ -1534,12 +1587,13 @@ resolve_stmt(Stmt *stmt, Types rets, uint32_t num_rets) {
             }
         } break;
 
-        case STMT_DEFER: {
-            if ( curr_scope == global_scope ) {
-                report_error(stmt, "defer kann nicht im globalen bereich verwendet werden");
-            }
+        case STMT_WHILE: {
+            Operand *cond = resolve_expr(SWHILE(stmt)->cond);
+            assert(cond->type->kind == TYPE_BOOL);
 
-            resolve_stmt(SDEFER(stmt)->stmt, rets, num_rets);
+            scope_enter(SCOPE_CAN_BREAK | SCOPE_CAN_CONTINUE);
+            result = resolve_stmt(SWHILE(stmt)->block, rets, num_rets);
+            scope_leave();
         } break;
 
         default: {
@@ -1835,7 +1889,7 @@ resolve_proc(Sym *sym) {
     Proc_Sign *sign = decl->sign;
 
     decl->scope = scope_enter(decl->name);
-    decl->scope->is_proc = true;
+    decl->scope->flags |= SCOPE_PROC;
 
     for ( uint32_t i = 0; i < sign->num_params; ++i ) {
         Decl_Var *param = sign->params[i];

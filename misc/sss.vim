@@ -2,38 +2,41 @@ if exists("b:current_syntax")
   finish
 endif
 
-syntax keyword sssUsing using
-syntax keyword sssNew new
-syntax keyword sssRemove remove
-syntax keyword sssCast cast
-syntax keyword sssSizeOf sizeof
-syntax keyword sssTypeOf typeof
-syntax keyword sssTypeinfo typeinfo
-syntax keyword sssTypedef typedef
 syntax keyword sssAlignOf alignof
+syntax keyword sssApi api
+syntax keyword sssAs as
+syntax keyword sssCast als
+syntax keyword sssConst const
+syntax keyword sssImpl impl
+syntax keyword sssMatch zweig
+syntax keyword sssNew new
 syntax keyword sssOffsetOf offsetof
-syntax keyword sssSwitch zweig
-syntax keyword sssOn on
-syntax keyword sssDefault default
+syntax keyword sssRemove remove
+syntax keyword sssSizeOf sizeof
+syntax keyword sssType type
+syntax keyword sssTypeOf typeof
+syntax keyword sssTypedef typedef
+syntax keyword sssTypeinfo typeinfo
+syntax keyword sssUsing mit
+syntax keyword sssFrom aus
 
-syntax keyword sssStruct struct
+syntax keyword sssStruct struktur
 syntax keyword sssUnion union
 syntax keyword sssEnum enum
 syntax keyword sssProc proc
 
-syntax keyword sssIf if
+syntax keyword sssIf falls
 syntax keyword sssThen then
-syntax keyword sssElse else
-syntax keyword sssFor for
-syntax keyword sssWhile while
+syntax keyword sssElse oder
+syntax keyword sssFor iter
+syntax keyword sssWhile solange
 syntax keyword sssContinue continue
-syntax keyword sssBreak break
+syntax keyword sssBreak weg
 
 syntax keyword sssDataType void string char int float f32 f64 u8 u16 u32 u64 s8 s16 s32 s64 bool typeid
-syntax keyword sssBool true false
-syntax keyword sssNull nil
+syntax keyword sssBool wahr falsch
 
-syntax keyword sssReturn return
+syntax keyword sssReturn res
 syntax keyword sssDefer defer
 syntax keyword sssFree free
 syntax keyword sssAssert assert
@@ -54,7 +57,7 @@ syntax match sssDynamicFunction "\v<\w*(\s*:\=\s*\(.*\))@="
 
 syntax match sssTagNote "#note \<\w\+\>" display
 
-syntax match sssClass "\v<[A-Z]\w+>" display
+syntax match sssStruct "\v<[A-Z]\w+>" display
 syntax match sssConstant "\v<[A-Z0-9,_]+>" display
 syntax match sssRange "\.\." display
 syntax match sssEllipsis "\.\.\." display
@@ -68,14 +71,15 @@ syntax match sssNoInit "---" display
 
 syntax match sssInteger "\-\?\<_*\d\+\>" display
 syntax match sssFloat "\-\?\<[0-9][0-9_]*\%(\.[0-9][0-9_]*\)\%([eE][+-]\=[0-9_]\+\)\=" display
-syntax match sssFloatHex "\-\?\<0[h][0-9A-Fa-f]\+\>" display
+syntax match sssFloatHex "\-\?\<16[b][0-9A-Fa-f]\+\>" display
 syntax match sssHex "\-\?\<16b[_0-9A-Fa-f]\+\>" display
-syntax match sssBin "\-\?\<2b[_0-1]\+\>" display
+syntax match sssDec "\-\?\<10b[_0-9]\+\>" display
 syntax match sssOct "\-\?\<8b[_0-7]\+\>" display
+syntax match sssBin "\-\?\<2b[_0-1]\+\>" display
 
 syntax match sssMacro "#\<\w\+\>" display
 syntax match sssTemplate "$\<\w\+\>"
-syntax match sssCommentNote "@\<\w\+\>" contained display
+syntax match sssCommentNote "#note \<\w\+\>" contained display
 
 syntax match sssLineComment "##.*\n" contains=sssCommentNote
 syntax region sssBlockComment start=/##(/ end=/##)/ contains=sssBlockComment, sssCommentNote
@@ -84,22 +88,26 @@ highlight link sssIt Keyword
 highlight link sssFree Keyword
 highlight link sssItIndex Keyword
 highlight link sssUsing Keyword
+highlight link sssFrom Keyword
 highlight link sssNew Keyword
 highlight link sssCast Keyword
-highlight link sssSwitch Keyword
-highlight link sssOn Keyword
-highlight link sssDefault Keyword
+highlight link sssMatch Keyword
+highlight link sssApi Keyword
+highlight link sssImpl Keyword
 highlight link sssSizeOf Keyword
 highlight link sssTypeOf Keyword
 highlight link sssTypeinfo Keyword
 highlight link sssTypedef Keyword
 highlight link sssAlignOf Keyword
+highlight link sssAs Keyword
 highlight link sssOffsetOf Keyword
 highlight link sssAutoCast Keyword
 highlight link sssReturn Keyword
 highlight link sssRemove Keyword
 highlight link sssContinue Keyword
 highlight link sssBreak Keyword
+highlight link sssConst Keyword
+highlight link sssType Keyword
 
 highlight link sssPointer Operator
 highlight link sssDeref Operator
@@ -138,7 +146,7 @@ highlight link sssLineComment Comment
 highlight link sssBlockComment Comment
 highlight link sssCommentNote Todo
 
-highlight link sssClass Type
+highlight link sssStruct Type
 
 highlight link sssTemplate Constant
 
