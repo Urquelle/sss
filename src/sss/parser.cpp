@@ -203,9 +203,9 @@ struct Expr_Unary : Expr {
 };
 
 struct Expr_Call : Expr {
-    Expr  *base;
-    Exprs  args;
-    size_t num_args;
+    Expr   * base;
+    Exprs    args;
+    size_t   num_args;
 };
 
 struct Expr_Field : Expr {

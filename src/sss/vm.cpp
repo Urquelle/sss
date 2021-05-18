@@ -28,6 +28,7 @@ enum Vm_Op : uint8_t {
     OP_LEAVE,
     OP_MOV,
     OP_MUL,
+    OP_NEG,
     OP_NOP,
     OP_NOT,
     OP_POP,
@@ -1013,13 +1014,13 @@ vm_expr(Expr *expr, Mem *mem, bool assign) {
                 } else if ( EBIN(expr)->op == BIN_SUB ) {
                     vm_emit(vm_instr(expr, OP_SUB, operand_rax(expr->type->size), operand_rdi(expr->type->size)));
                 } else if ( EBIN(expr)->op == BIN_MUL ) {
-                    if ( expr->type->is_signed ) {
+                    if ( type_issigned(expr->type) ) {
                         vm_emit(vm_instr(expr, OP_IMUL, operand_rax(expr->type->size), operand_rdi(expr->type->size)));
                     } else {
                         vm_emit(vm_instr(expr, OP_MUL, operand_rax(expr->type->size), operand_rdi(expr->type->size)));
                     }
                 } else if ( EBIN(expr)->op == BIN_DIV ) {
-                    if ( EBIN(expr)->right->type->is_signed ) {
+                    if ( type_issigned(EBIN(expr)->right->type) ) {
                         vm_emit(vm_instr(expr, OP_DIV, operand_rdi(expr->type->size)));
                     } else {
                         vm_emit(vm_instr(expr, OP_IDIV, operand_rdi(expr->type->size)));
@@ -1063,7 +1064,12 @@ vm_expr(Expr *expr, Mem *mem, bool assign) {
             }
 
             vm_expr(ECALL(expr)->base, mem);
-            vm_emit(vm_instr(expr, OP_CALL, operand_reg(REG_RAX, 8)));
+
+            if ( ECALL(expr)->base->type->flags & TYPE_FLAG_SYS_CALL ) {
+                report_error(expr, "syscalls werden in der vm noch nicht unterstützt");
+            } else {
+                vm_emit(vm_instr(expr, OP_CALL, operand_reg(REG_RAX, 8)));
+            }
         } break;
 
         case EXPR_DEREF: {
@@ -1144,7 +1150,9 @@ vm_expr(Expr *expr, Mem *mem, bool assign) {
 
             if (sym->decl->is_global) {
                 if ( sym->decl->kind == DECL_PROC ) {
-                    vm_emit(vm_instr(expr, OP_LEA, operand_rax(sym->type->size), operand_label(sym->name)));
+                    if ( !(sym->decl->type->flags & TYPE_FLAG_SYS_CALL) ) {
+                        vm_emit(vm_instr(expr, OP_LEA, operand_rax(sym->type->size), operand_label(sym->name)));
+                    }
                 } else {
                     vm_emit(vm_instr(expr, OP_LEA, operand_rax(sym->type->size), operand_addr(REG_NONE, sym->decl->offset, sym->type->size)));
                 }
@@ -1177,7 +1185,7 @@ vm_expr(Expr *expr, Mem *mem, bool assign) {
         } break;
 
         case EXPR_INT: {
-            if ( expr->type->is_signed ) {
+            if ( type_issigned(expr->type) ) {
                 vm_emit(vm_instr(expr, OP_MOV, operand_rax(expr->type->size), operand_imm(value((int64_t)EINT(expr)->val, expr->type->size), expr->type->size)));
             } else {
                 vm_emit(vm_instr(expr, OP_MOV, operand_rax(expr->type->size), operand_imm(value((uint64_t)EINT(expr)->val, expr->type->size), expr->type->size)));
@@ -1206,6 +1214,11 @@ vm_expr(Expr *expr, Mem *mem, bool assign) {
             vm_emit(vm_instr(expr, OP_LEA, operand_rax(expr->type->size), operand_addr(REG_NONE, expr->offset, expr->type->size)));
         } break;
 
+        case EXPR_UNARY: {
+            vm_expr(EUNARY(expr)->expr, mem);
+            vm_emit(vm_instr(expr, OP_NEG, operand_rax(expr->type->size)));
+        } break;
+
         default: {
             assert(0);
         } break;
@@ -1216,6 +1229,10 @@ void
 vm_decl(Decl *decl, Mem *mem) {
     switch ( decl->kind ) {
         case DECL_PROC: {
+            if ( DPROC(decl)->sign->sys_call ) {
+                return;
+            }
+
             vm_emit(vm_instr(decl, OP_ENTER, operand_imm(value((uint64_t)DPROC(decl)->scope->frame_size, 4), 4), decl->name));
 
             uint8_t reg = 0;
@@ -1233,8 +1250,10 @@ vm_decl(Decl *decl, Mem *mem) {
         } break;
 
         case DECL_ENUM:
+        case DECL_STRUCT:
+        case DECL_TYPE:
         case DECL_UNION:
-        case DECL_STRUCT: {
+        {
             // nichts zu tun
         } break;
 
@@ -1655,6 +1674,10 @@ step(Cpu *cpu) {
             } else if ( instr->dst->kind == OPERAND_ADDR ) {
                 if ( instr->src->kind == OPERAND_REG ) {
                     mem_write(cpu->mem, effective_addr(cpu, instr->dst), reg_read(cpu, instr->src), instr->src->size);
+                } else if ( instr->src->kind == OPERAND_IMM ) {
+                    mem_write(cpu->mem, effective_addr(cpu, instr->dst), instr->src->val.u64, instr->src->size);
+                } else if ( instr->src->kind == OPERAND_ADDR ) {
+                    mem_write(cpu->mem, effective_addr(cpu, instr->dst), mem_read(cpu->mem, effective_addr(cpu, instr->src), instr->src->size));
                 } else {
                     assert(0);
                 }
@@ -1689,6 +1712,23 @@ step(Cpu *cpu) {
             flags_clear(cpu);
             if ( result == 0 ) {
                 flags_set(cpu, RFLAG_ZF);
+            }
+        } break;
+
+        case OP_NEG: {
+            flags_clear(cpu);
+
+            if ( instr->operand1->kind == OPERAND_REG ) {
+                int64_t val = reg_read(cpu, instr->operand1);
+                reg_write(cpu, instr->operand1, -val);
+
+                if ( val == 0 ) {
+                    flags_set(cpu, RFLAG_ZF);
+                } else {
+                    flags_set(cpu, RFLAG_CF);
+                }
+            } else {
+                assert(0);
             }
         } break;
 

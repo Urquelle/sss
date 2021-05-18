@@ -72,6 +72,13 @@ struct Operand {
     Value  val;
 };
 
+enum Type_Flag {
+    TYPE_FLAG_NONE,
+    TYPE_FLAG_IS_CALLABLE = 1 << 0,
+    TYPE_FLAG_IS_SIGNED   = 1 << 1,
+    TYPE_FLAG_SYS_CALL    = 1 << 2,
+};
+
 enum Type_Kind {
     TYPE_NONE,
     TYPE_INCOMPLETE,
@@ -112,7 +119,8 @@ struct Type {
     uint32_t size;
     uint32_t align;
     uint16_t id;
-    bool     is_signed;
+
+    uint32_t flags;
 
     Sym   * sym;
     char  * name;
@@ -259,7 +267,7 @@ val_bool(bool val) {
 }
 
 Type *
-type_new( uint32_t size, Type_Kind kind, bool is_signed = false ) {
+type_new( uint32_t size, Type_Kind kind, uint32_t flags = TYPE_FLAG_NONE ) {
     Type *result = urq_allocs(Type);
 
     result->kind      = kind;
@@ -267,7 +275,7 @@ type_new( uint32_t size, Type_Kind kind, bool is_signed = false ) {
     result->size      = size;
     result->align     = 0;
     result->id        = global_type_id++;
-    result->is_signed = is_signed;
+    result->flags     = flags;
     result->scope     = scope_new("type");
 
     buf_push(types, result);
@@ -393,7 +401,7 @@ type_isnum(Type *type) {
 
 bool
 type_isint(Type *type) {
-    bool result = type->kind >= TYPE_U8 && type->kind <= TYPE_S64;
+    bool result = type->kind >= TYPE_U8 && type->kind <= TYPE_S64 || type->kind == TYPE_ENUM;
 
     return result;
 }
@@ -407,7 +415,7 @@ type_isptr(Type *type) {
 
 bool
 type_issigned(Type *type) {
-    bool result = type->kind >= TYPE_S8 && type->kind <= TYPE_S64;
+    bool result = type->flags & TYPE_FLAG_IS_SIGNED;
 
     return result;
 }
@@ -560,6 +568,7 @@ type_proc(Decl_Var **params, uint32_t num_params, Decl_Var **rets, uint32_t num_
     result->num_params = num_params;
     result->rets       = (Decl_Var **)MEMDUP(rets);
     result->num_rets   = num_rets;
+    result->flags      = TYPE_FLAG_IS_CALLABLE;
 
     return result;
 }
@@ -1039,7 +1048,14 @@ resolve_expr(Expr *expr, Type *given_type = NULL) {
         case EXPR_CALL: {
             Operand *op = resolve_expr(ECALL(expr)->base);
             type_complete(op->type);
-            assert(op->type && op->type->kind == TYPE_PROC);
+
+            if ( !op->type ) {
+                report_error(expr, "datentyp konnte nicht ermittelt werden");
+            }
+
+            if ( !(op->type->flags & TYPE_FLAG_IS_CALLABLE) ) {
+                report_error(expr, "kann nicht aufgerufen werden");
+            }
 
             Type_Proc *op_type = TPROC(op->type);
 
@@ -1831,7 +1847,9 @@ type_complete_enum(Type_Enum *type) {
     }
 
     scope_leave();
-    type->kind = TYPE_ENUM;
+
+    type->kind  = TYPE_ENUM;
+    type->flags = TYPE_FLAG_IS_SIGNED;
 
     type->size  = type_s32->size;
     type->align = type_s32->align;
@@ -1937,6 +1955,10 @@ resolve_proc(Sym *sym) {
     for ( uint32_t i = 0; i < sign->num_rets; ++i ) {
         sign->rets[i]->type = resolve_typespec(sign->rets[i]->typespec);
         buf_push(ret_types, sign->rets[i]->type);
+    }
+
+    if ( sign->sys_call ) {
+        TPROC(sym->type)->flags |= TYPE_FLAG_SYS_CALL;
     }
 
     bool returns = false;
@@ -2097,10 +2119,10 @@ resolver_init() {
     type_u16      = type_new(2, TYPE_U16);
     type_u32      = type_new(4, TYPE_U32);
     type_u64      = type_new(8, TYPE_U64);
-    type_s8       = type_new(1, TYPE_S8,  true);
-    type_s16      = type_new(2, TYPE_S16, true);
-    type_s32      = type_new(4, TYPE_S32, true);
-    type_s64      = type_new(8, TYPE_S64, true);
+    type_s8       = type_new(1, TYPE_S8,  TYPE_FLAG_IS_SIGNED);
+    type_s16      = type_new(2, TYPE_S16, TYPE_FLAG_IS_SIGNED);
+    type_s32      = type_new(4, TYPE_S32, TYPE_FLAG_IS_SIGNED);
+    type_s64      = type_new(8, TYPE_S64, TYPE_FLAG_IS_SIGNED);
     type_f32      = type_new(4, TYPE_F32);
     type_f64      = type_new(8, TYPE_F64);
     type_bool     = type_new(1, TYPE_BOOL);

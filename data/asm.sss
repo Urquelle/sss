@@ -12,10 +12,18 @@ Wert :: union {
 
 master :: proc() -> u64 {
     a : Wert;
-    b : u32 = 15;
+    b : u32 = 0;
 
     a.b.y = 30;
 
-    res (a.b.y + b) / 5;
+    iter 1..16 {
+        b += 1;
+    }
+
+    res (a.b.y + b) / 5 + test();
+}
+
+test :: proc() -> s32 {
+    res 10;
 }
 

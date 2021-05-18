@@ -265,6 +265,10 @@ to_str(Instr *instr) {
             output = buf_printf(output, to_str_binop("mul", instr));
         } break;
 
+        case OP_NEG: {
+            output = buf_printf(output, "neg   %-33s", to_str(instr->operand1));
+        } break;
+
         case OP_NOP: {
             output = buf_printf(output, "%-36s", "nop");
         } break;
