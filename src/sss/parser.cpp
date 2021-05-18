@@ -1190,10 +1190,6 @@ parse_expr_field(Token_List *tokens) {
     Token *curr = token_get(tokens);
     Expr *left = parse_expr_base(tokens);
 
-    if ( left->kind == EXPR_KEYWORD ) {
-        return left;
-    }
-
     while ( token_match(tokens, T_DOT) ) {
         Token *field = token_read(tokens);
         left = expr_field(curr, left, field->val_str);
@@ -1206,10 +1202,6 @@ Expr *
 parse_expr_index(Token_List *tokens) {
     Token *curr = token_get(tokens);
     Expr *left = parse_expr_field(tokens);
-
-    if ( left->kind == EXPR_KEYWORD ) {
-        return left;
-    }
 
     while ( token_is(tokens, T_LBRACKET) || token_is(tokens, T_LPAREN) ) {
         if ( token_match(tokens, T_LBRACKET) ) {
@@ -2389,32 +2381,28 @@ parse_stmt(Token_List *tokens) {
     if ( token_is(tokens, T_LBRACE) ) {
         result = parse_stmt_block(tokens);
     } else if ( !token_end(tokens) ) {
-        Expr *expr = parse_expr(tokens);
+        if ( keyword_matches(tokens, keyword_break) ) {
+            result = parse_stmt_break(tokens);
+        } else if ( keyword_matches(tokens, keyword_continue) ) {
+            result = parse_stmt_continue(tokens);
+        } else if ( keyword_matches(tokens, keyword_defer) ) {
+            result = parse_stmt_defer(tokens);
+        } else if ( keyword_matches(tokens, keyword_for) ) {
+            result = parse_stmt_for(tokens);
+        } else if ( keyword_matches(tokens, keyword_if) ) {
+            result = parse_stmt_if(tokens);
+        } else if ( keyword_matches(tokens, keyword_match) ) {
+            result = parse_stmt_match(tokens);
+        } else if ( keyword_matches(tokens, keyword_return) ) {
+            result = parse_stmt_ret(tokens);
+        } else if ( keyword_matches(tokens, keyword_using) ) {
+            result = parse_stmt_using(tokens);
+        } else if ( keyword_matches(tokens, keyword_while) ) {
+            result = parse_stmt_while(tokens);
+        } else {
+            Expr *expr = parse_expr(tokens);
 
-        if ( expr ) {
-            if ( expr->kind == EXPR_KEYWORD ) {
-                Expr_Keyword *keyword = (Expr_Keyword *)expr;
-
-                if ( keyword->val == keyword_break ) {
-                    result = parse_stmt_break(tokens);
-                } else if ( keyword->val == keyword_continue ) {
-                    result = parse_stmt_continue(tokens);
-                } else if ( keyword->val == keyword_defer ) {
-                    result = parse_stmt_defer(tokens);
-                } else if ( keyword->val == keyword_for ) {
-                    result = parse_stmt_for(tokens);
-                } else if ( keyword->val == keyword_if ) {
-                    result = parse_stmt_if(tokens);
-                } else if ( keyword->val == keyword_match ) {
-                    result = parse_stmt_match(tokens);
-                } else if ( keyword->val == keyword_return ) {
-                    result = parse_stmt_ret(tokens);
-                } else if ( keyword->val == keyword_using ) {
-                    result = parse_stmt_using(tokens);
-                } else if ( keyword->val == keyword_while ) {
-                    result = parse_stmt_while(tokens);
-                }
-            } else {
+            if ( expr ) {
                 if ( token_is(tokens, T_COLON) ) {
                     assert(expr->kind == EXPR_IDENT);
                     char *name = ((Expr_Ident *)expr)->val;
@@ -2430,9 +2418,9 @@ parse_stmt(Token_List *tokens) {
                     Token *op = token_read(tokens);
                     result = parse_stmt_assign(tokens, op, expr);
                 }
+            } else {
+                report_error(curr, "unbekannter ausdruck");
             }
-        } else {
-            report_error(curr, "unbekannter ausdruck");
         }
     }
 
