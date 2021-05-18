@@ -1154,7 +1154,11 @@ vm_expr(Expr *expr, Mem *mem, bool assign) {
                         vm_emit(vm_instr(expr, OP_LEA, operand_rax(sym->type->size), operand_label(sym->name)));
                     }
                 } else {
-                    vm_emit(vm_instr(expr, OP_LEA, operand_rax(sym->type->size), operand_addr(REG_NONE, sym->decl->offset, sym->type->size)));
+                    if ( assign ) {
+                        vm_emit(vm_instr(expr, OP_LEA, operand_rax(sym->type->size), operand_addr(REG_NONE, sym->decl->offset, sym->type->size)));
+                    } else {
+                        vm_emit(vm_instr(expr, OP_MOV, operand_rax(sym->type->size), operand_addr(REG_NONE, sym->decl->offset, sym->type->size)));
+                    }
                 }
             } else {
                 if ( assign ) {

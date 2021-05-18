@@ -10,6 +10,8 @@ Wert :: union {
     z : bool;
 }
 
+A := 50;
+
 master :: proc() -> u64 {
     a : Wert;
     b : u32 = 0;
@@ -24,6 +26,6 @@ master :: proc() -> u64 {
 }
 
 test :: proc() -> s32 {
-    res 10;
+    res A;
 }
 
