@@ -142,22 +142,22 @@ struct Type_Compound : Type {
 };
 
 struct Type_Struct : Type {
-    Aggr_Fields fields;
-    size_t      num_fields;
-    uint32_t    aggregate_size;
+    Decl_Vars fields;
+    size_t    num_fields;
+    uint32_t  aggregate_size;
 };
 
 struct Type_String : Type {
 };
 
 struct Type_Enum : Type {
-    Aggr_Fields fields;
-    size_t      num_fields;
+    Decl_Vars fields;
+    uint32_t  num_fields;
 };
 
 struct Type_Union : Type {
-    Aggr_Fields fields;
-    size_t      num_fields;
+    Decl_Vars fields;
+    uint32_t  num_fields;
 };
 
 struct Type_Proc : Type {
@@ -305,6 +305,7 @@ type_incomplete_struct(Sym *sym) {
     Type_Struct *result = urq_allocs(Type_Struct);
 
     result->kind  = TYPE_INCOMPLETE;
+    result->name  = sym->name;
     result->sym   = sym;
     result->size  = PTR_SIZE;
     result->align = 0;
@@ -321,6 +322,7 @@ type_incomplete_enum(Sym *sym) {
     Type_Enum *result = urq_allocs(Type_Enum);
 
     result->kind  = TYPE_INCOMPLETE;
+    result->name  = sym->name;
     result->sym   = sym;
     result->size  = PTR_SIZE;
     result->align = 0;
@@ -457,7 +459,7 @@ type_iscastable(Type *left, Type *right) {
         }
 
         for ( int i = 0; i < TSTRUCT(left)->num_fields; ++i ) {
-            Aggr_Field *field = TSTRUCT(left)->fields[i];
+            Decl_Var *field = TSTRUCT(left)->fields[i];
             Compound_Elem *elem = TCMPND(right)->elems[i];
 
             if ( !type_iscastable(field->type, elem->type) ) {
@@ -1145,7 +1147,7 @@ resolve_expr(Expr *expr, Type *given_type = NULL) {
                 } else {
                     Compound_Elems args = NULL;
                     for ( int i = 0; i < TSTRUCT(given_type)->num_fields; ++i ) {
-                        Aggr_Field    * struct_field = TSTRUCT(given_type)->fields[i];
+                        Decl_Var      * struct_field = TSTRUCT(given_type)->fields[i];
                         Compound_Elem * arg          = ECMPND(expr)->elems[i];
 
                         if ( arg->name ) {
@@ -1735,9 +1737,9 @@ resolve_directives(Directive **directives) {
 }
 
 void
-resolve_aggr_fields(Aggr_Fields fields, uint32_t num_fields) {
+resolve_aggr_fields(Decl_Vars fields, uint32_t num_fields) {
     for ( size_t i = 0; i < num_fields; i++ ) {
-        Aggr_Field *field = fields[i];
+        Decl_Var *field = fields[i];
 
         Type *field_type = 0;
         if ( field->typespec ) {
@@ -1745,8 +1747,8 @@ resolve_aggr_fields(Aggr_Fields fields, uint32_t num_fields) {
         }
 
         Operand *operand = NULL;
-        if ( field->value ) {
-            operand = resolve_expr(field->value, field_type);
+        if ( field->expr ) {
+            operand = resolve_expr(field->expr, field_type);
         }
 
         if ( !field_type ) {
@@ -1771,7 +1773,7 @@ resolve_aggr_fields(Aggr_Fields fields, uint32_t num_fields) {
             }
 
             for ( int j = 0; j < TSTRUCT(field->type)->num_fields; ++j ) {
-                Aggr_Field *struct_field = TSTRUCT(field->type)->fields[j];
+                Decl_Var *struct_field = TSTRUCT(field->type)->fields[j];
 
                 sym_push_var(struct_field, struct_field->name, struct_field->type);
             }
@@ -1798,7 +1800,7 @@ type_complete_struct(Type_Struct *type) {
     int32_t align = 0;
 
     for ( uint32_t i = 0; i < DSTRUCT(decl)->num_fields; ++i ) {
-        Aggr_Field *field = DSTRUCT(decl)->fields[i];
+        Decl_Var *field = DSTRUCT(decl)->fields[i];
 
         type->aggregate_size += field->type->size;
         type->align = MAX(type->size, field->type->align);
@@ -1823,17 +1825,12 @@ type_complete_enum(Type_Enum *type) {
     }
 
     for ( size_t i = 0; i < DENUM(decl)->num_fields; i++ ) {
-        Aggr_Field *field = DENUM(decl)->fields[i];
-
-        Operand *op = NULL;
-        if ( field->value ) {
-            /* @AUFGABE: scope vorübergehend mit dem äußeren scope verbinden um den wert aufzulösen */
-            op = resolve_expr(field->value, type_s32);
-        }
+        Decl_Var *field = DENUM(decl)->fields[i];
+        Operand *op = resolve_expr(field->expr, type_s32);
 
         if ( op ) {
             if ( !type_isnum(op->type) ) {
-                report_error(field->value, "datentyp eines enumeration-feldes muß numerisch sein, stattdessen ist es %s", to_str(op->type));
+                report_error(field->expr, "datentyp eines enumeration-feldes muß numerisch sein, stattdessen ist es %s", to_str(op->type));
             }
         } else {
             op = operand(type_s32);
@@ -1841,9 +1838,9 @@ type_complete_enum(Type_Enum *type) {
 
         field->type    = type_s32;
         field->operand = op;
-        field->order   = (int32_t)i;
 
-        sym_push_var(field, field->name, type_s32);
+        Sym *sym = sym_push_var(field, field->name, type_s32);
+        sym->decl = field;
     }
 
     scope_leave();
@@ -1935,7 +1932,7 @@ resolve_proc(Sym *sym) {
             }
 
             for ( int j = 0; j < TSTRUCT(type)->num_fields; ++j ) {
-                Aggr_Field *field = TSTRUCT(type)->fields[j];
+                Decl_Var *field = TSTRUCT(type)->fields[j];
 
                 sym_push_var(field, field->name, field->type);
             }

@@ -1085,9 +1085,9 @@ vm_expr(Expr *expr, Mem *mem, bool assign) {
         case EXPR_FIELD: {
             vm_expr(EFIELD(expr)->base, mem, true);
 
-            Expr *base = EFIELD(expr)->base;
-            int32_t num_fields = 0;
-            Aggr_Fields fields = NULL;
+            Expr      * base       = EFIELD(expr)->base;
+            int32_t     num_fields = 0;
+            Decl_Vars   fields     = NULL;
 
             if ( base->type->kind == TYPE_STRUCT ) {
                 Type_Struct *type = TSTRUCT(base->type);
@@ -1108,9 +1108,9 @@ vm_expr(Expr *expr, Mem *mem, bool assign) {
                 assert(0);
             }
 
-            Aggr_Field *field = NULL;
+            Decl_Var *field = NULL;
             for ( int i = 0; i < num_fields; ++i ) {
-                Aggr_Field *f = fields[i];
+                Decl_Var *f = fields[i];
 
                 if ( f->name == EFIELD(expr)->field ) {
                     field = f;
@@ -1127,12 +1127,7 @@ vm_expr(Expr *expr, Mem *mem, bool assign) {
                 }
             } else if ( base->type->kind == TYPE_ENUM ) {
                 assert(!assign);
-
-                if ( field->value ) {
-                    report_error(field, "aktuell werden enum-feldern zugewiesene werte durch die vm nicht unterstützt");
-                }
-
-                vm_emit(vm_instr(expr, OP_MOV, operand_rax(field->type->size), operand_imm(value((int64_t)field->order, 4), field->type->size)));
+                vm_expr(field->expr, mem);
             } else if ( base->type->kind == TYPE_UNION ) {
                 if ( !assign ) {
                     vm_emit(vm_instr(expr, OP_MOV, operand_rax(field->type->size), operand_addr(REG_RAX, 0, field->type->size)));

@@ -1,3 +1,10 @@
+Richtung :: enum {
+    West;
+    Nord :: 5;
+    Süd :: West + 10;
+    Ost :: 3;
+}
+
 Vec3 :: struktur {
     x, y, z : u64;
 }
@@ -15,8 +22,9 @@ A := 50;
 master :: proc() -> u64 {
     a : Wert;
     b : u32 = 0;
+    c : Richtung = Richtung.Süd;
 
-    (a.b).y = 30;
+    a.b.y = 30;
 
     iter 1..16 {
         wenn it > 10 {
