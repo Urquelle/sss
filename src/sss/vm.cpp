@@ -1204,7 +1204,7 @@ vm_expr(Expr *expr, Mem *mem, bool assign) {
         } break;
 
         case EXPR_PAREN: {
-            vm_expr(EPAREN(expr)->expr, mem);
+            vm_expr(EPAREN(expr)->expr, mem, assign);
         } break;
 
         case EXPR_PTR: {

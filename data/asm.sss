@@ -16,7 +16,7 @@ master :: proc() -> u64 {
     a : Wert;
     b : u32 = 0;
 
-    a.b.y = 30;
+    (a.b).y = 30;
 
     iter 1..16 {
         wenn it > 10 {
