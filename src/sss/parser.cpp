@@ -284,9 +284,11 @@ struct Stmt_Block : Stmt {
 };
 
 struct Stmt_Break : Stmt {
+    Stmt *parent;
 };
 
 struct Stmt_Continue : Stmt {
+    Stmt *parent;
 };
 
 struct Stmt_Decl : Stmt {
@@ -314,6 +316,9 @@ struct Stmt_For : Stmt {
 
     Stmt *block;
     Stmt *stmt_else;
+
+    int32_t *break_instrs;
+    int32_t *continue_instrs;
 };
 
 struct Module_Sym : Ast_Node {
@@ -1293,9 +1298,9 @@ parse_expr_stmt(Token_List *tokens) {
     Expr *result = NULL;
 
     if ( keyword_matches(tokens, keyword_if) ) {
-        result = expr_stmt(curr, parse_stmt_if(tokens));
+        result = expr_stmt(curr, parse_stmt_if(tokens, NULL));
     } else if ( keyword_matches(tokens, keyword_match) ) {
-        result = expr_stmt(curr, parse_stmt_match(tokens));
+        result = expr_stmt(curr, parse_stmt_match(tokens, NULL));
     } else {
         result = parse_expr_range(tokens);
     }
@@ -1529,6 +1534,9 @@ stmt_for(Ast_Node *loc, Stmt *init, Expr *cond, Stmt *step, Stmt *block, Stmt *s
     result->block     = block;
     result->stmt_else = stmt_else;
 
+    result->break_instrs = NULL;
+    result->continue_instrs = NULL;
+
     return result;
 }
 
@@ -1543,15 +1551,19 @@ stmt_block(Ast_Node *loc, Stmts stmts, size_t num_stmts) {
 }
 
 Stmt_Break *
-stmt_break(Ast_Node *loc) {
+stmt_break(Ast_Node *loc, Stmt *parent) {
     STRUCTK(Stmt_Break, STMT_BREAK);
+
+    result->parent = parent;
 
     return result;
 }
 
 Stmt_Continue *
-stmt_continue(Ast_Node *loc) {
+stmt_continue(Ast_Node *loc, Stmt *parent) {
     STRUCTK(Stmt_Continue, STMT_CONTINUE);
+
+    result->parent = parent;
 
     return result;
 }
@@ -1978,14 +1990,14 @@ parse_decl_impl(Token_List *tokens, char *name) {
 }
 
 Stmt_Block *
-parse_stmt_block(Token_List *tokens, Proc_Sign *sign) {
+parse_stmt_block(Token_List *tokens, Proc_Sign *sign, Stmt *parent) {
     Token *curr = token_get(tokens);
 
     Stmts stmts = NULL;
     token_expect(tokens, T_LBRACE);
     if ( !token_is(tokens, T_RBRACE) ) {
         do {
-            buf_push(stmts, parse_stmt(tokens));
+            buf_push(stmts, parse_stmt(tokens, parent));
         } while ( !token_is(tokens, T_RBRACE) );
     }
     token_expect(tokens, T_RBRACE);
@@ -2060,38 +2072,38 @@ parse_stmt_assign(Token_List *tokens, Token *op, Expr *expr) {
 }
 
 Stmt_Break *
-parse_stmt_break(Token_List *tokens) {
+parse_stmt_break(Token_List *tokens, Stmt *parent) {
     Token *curr = token_get(tokens);
 
     token_expect(tokens, T_SEMICOLON);
-    Stmt_Break *result = stmt_break(curr);
+    Stmt_Break *result = stmt_break(curr, parent);
 
     return result;
 }
 
 Stmt_Continue *
-parse_stmt_continue(Token_List *tokens) {
+parse_stmt_continue(Token_List *tokens, Stmt *parent) {
     Token *curr = token_get(tokens);
 
     token_expect(tokens, T_SEMICOLON);
-    Stmt_Continue *result = stmt_continue(curr);
+    Stmt_Continue *result = stmt_continue(curr, parent);
 
     return result;
 }
 
 Stmt_If *
-parse_stmt_if(Token_List *tokens) {
+parse_stmt_if(Token_List *tokens, Stmt *parent) {
     Token *curr = token_get(tokens);
     Expr *cond  = parse_expr(tokens);
-    Stmt *stmt  = parse_stmt(tokens);
+    Stmt *stmt  = parse_stmt(tokens, parent);
     Stmt_If *stmt_else = NULL;
 
     curr = token_get(tokens);
     if ( keyword_matches(tokens, keyword_else) ) {
         if ( !token_is(tokens, T_LBRACE) ) {
-            stmt_else = parse_stmt_if(tokens);
+            stmt_else = parse_stmt_if(tokens, parent);
         } else {
-            stmt_else = stmt_if(curr, expr_bool(curr, true), parse_stmt_block(tokens), NULL);
+            stmt_else = stmt_if(curr, expr_bool(curr, true), parse_stmt_block(tokens, NULL, parent), NULL);
         }
     }
 
@@ -2105,6 +2117,8 @@ parse_stmt_for(Token_List *tokens) {
     Stmt *init = NULL;
     Expr *cond = NULL;
     Stmt *step = NULL;
+
+    Stmt_For *result = stmt_for(curr, init, cond, step, NULL, NULL);
 
     Expr *expr = parse_expr(tokens);
     if ( token_match(tokens, T_COLON) ) {
@@ -2124,14 +2138,20 @@ parse_stmt_for(Token_List *tokens) {
     Expr *step_expr = expr_bin(curr, BIN_ADD, iter, expr_int(curr, 1));
                step = stmt_assign(curr, iter, token_new(T_EQL_ASSIGN, "", 0, 0), step_expr);
 
-    Stmt *stmt = parse_stmt(tokens);
+    Stmt *block = parse_stmt(tokens, result);
 
     Stmt *stmt_else = NULL;
     if ( keyword_matches(tokens, keyword_else) ) {
         stmt_else = parse_stmt_block(tokens);
     }
 
-    return stmt_for(curr, init, cond, step, stmt, stmt_else);
+    result->init      = init;
+    result->cond      = cond;
+    result->step      = step;
+    result->block     = block;
+    result->stmt_else = stmt_else;
+
+    return result;
 }
 
 Stmt_Defer *
@@ -2161,7 +2181,7 @@ parse_stmt_ret(Token_List *tokens) {
 }
 
 Stmt_Match *
-parse_stmt_match(Token_List *tokens) {
+parse_stmt_match(Token_List *tokens, Stmt *parent) {
     Token *curr = token_get(tokens);
     Expr *expr = parse_expr(tokens);
 
@@ -2172,7 +2192,7 @@ parse_stmt_match(Token_List *tokens) {
         do {
             Expr *resolution = parse_expr(tokens);
             token_expect(tokens, T_COLON);
-            Stmt *stmt = parse_stmt(tokens);
+            Stmt *stmt = parse_stmt(tokens, parent);
 
             Expr *cond = NULL;
             if ( resolution->kind == EXPR_RANGE ) {
@@ -2204,11 +2224,11 @@ parse_stmt_using(Token_List *tokens) {
 }
 
 Stmt_While *
-parse_stmt_while(Token_List *tokens) {
+parse_stmt_while(Token_List *tokens, Stmt *parent) {
     Token *curr = token_get(tokens);
 
     Expr *cond = parse_expr(tokens);
-    Stmt *block = parse_stmt_block(tokens);
+    Stmt *block = parse_stmt_block(tokens, NULL, parent);
 
     return stmt_while(curr, cond, block);
 }
@@ -2372,33 +2392,33 @@ parse_directive(Token_List *tokens) {
 }
 
 Stmt *
-parse_stmt(Token_List *tokens) {
+parse_stmt(Token_List *tokens, Stmt *parent) {
     Token *curr = token_get(tokens);
     Stmt *result = NULL;
 
     Notes notes = parse_notes(tokens);
 
     if ( token_is(tokens, T_LBRACE) ) {
-        result = parse_stmt_block(tokens);
+        result = parse_stmt_block(tokens, NULL, parent);
     } else if ( !token_end(tokens) ) {
         if ( keyword_matches(tokens, keyword_break) ) {
-            result = parse_stmt_break(tokens);
+            result = parse_stmt_break(tokens, parent);
         } else if ( keyword_matches(tokens, keyword_continue) ) {
-            result = parse_stmt_continue(tokens);
+            result = parse_stmt_continue(tokens, parent);
         } else if ( keyword_matches(tokens, keyword_defer) ) {
             result = parse_stmt_defer(tokens);
         } else if ( keyword_matches(tokens, keyword_for) ) {
             result = parse_stmt_for(tokens);
         } else if ( keyword_matches(tokens, keyword_if) ) {
-            result = parse_stmt_if(tokens);
+            result = parse_stmt_if(tokens, parent);
         } else if ( keyword_matches(tokens, keyword_match) ) {
-            result = parse_stmt_match(tokens);
+            result = parse_stmt_match(tokens, parent);
         } else if ( keyword_matches(tokens, keyword_return) ) {
             result = parse_stmt_ret(tokens);
         } else if ( keyword_matches(tokens, keyword_using) ) {
             result = parse_stmt_using(tokens);
         } else if ( keyword_matches(tokens, keyword_while) ) {
-            result = parse_stmt_while(tokens);
+            result = parse_stmt_while(tokens, parent);
         } else {
             Expr *expr = parse_expr(tokens);
 

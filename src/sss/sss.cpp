@@ -62,11 +62,11 @@ typedef Type          ** Types;
 Parsed_File            * parse(Token_List *tokens);
 Aggr_Fields              parse_aggr_block(Token_List *tokens);
 Expr                   * parse_expr(Token_List *tokens, bool with_stmt = false);
-Stmt                   * parse_stmt(Token_List *tokens);
-Stmt_Block             * parse_stmt_block(Token_List *tokens, Proc_Sign *sign = NULL);
-Stmt_If                * parse_stmt_if(Token_List *tokens);
+Stmt                   * parse_stmt(Token_List *tokens, Stmt *parent = NULL);
+Stmt_Block             * parse_stmt_block(Token_List *tokens, Proc_Sign *sign = NULL, Stmt *parent = NULL);
+Stmt_If                * parse_stmt_if(Token_List *tokens, Stmt *parent);
 Stmt_For               * parse_stmt_for(Token_List *tokens);
-Stmt_Match             * parse_stmt_match(Token_List *tokens);
+Stmt_Match             * parse_stmt_match(Token_List *tokens, Stmt *parent);
 Typespec               * parse_typespec(Token_List *tokens);
 Decl_Var               * parse_proc_param(Token_List *tokens);
 void                     resolve(Parsed_File *parsed_file, bool check_entry_point = true);
@@ -114,6 +114,7 @@ void                     type_complete(Type *type);
 #define SDECL(Stmt)           ((Stmt_Decl *)(Stmt))
 #define SASSIGN(Stmt)         ((Stmt_Assign *)(Stmt))
 #define SBLOCK(Stmt)          ((Stmt_Block *)(Stmt))
+#define SBREAK(Stmt)          ((Stmt_Break *)(Stmt))
 #define SFOR(Stmt)            ((Stmt_For *)(Stmt))
 #define SMATCH(Stmt)          ((Stmt_Match *)(Stmt))
 #define SWHILE(Stmt)          ((Stmt_While *)(Stmt))

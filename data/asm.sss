@@ -19,6 +19,10 @@ master :: proc() -> u64 {
     a.b.y = 30;
 
     iter 1..16 {
+        wenn it > 10 {
+            weg;
+        }
+
         b += 1;
     }
 

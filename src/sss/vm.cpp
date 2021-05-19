@@ -206,9 +206,11 @@ struct Cpu {
 
 Instrs    vm_instrs;
 Instrs    vm_instrs_labeled;
-Section * vm_data_section;
-Section * vm_text_section;
-Section * vm_curr_section;
+
+Section ** vm_import_sections;
+Section  * vm_data_section;
+Section  * vm_text_section;
+Section  * vm_curr_section;
 
 Reg_Kind regs[] = { REG_RCX, REG_RDX, REG_R8, REG_R9 };
 
@@ -1334,13 +1336,15 @@ vm_stmt(Stmt *stmt, Mem *mem) {
         } break;
 
         case STMT_BREAK: {
-            report_error(stmt, "%s wird noch nicht in der vm unterstützt", format_keyword(keyword_break));
-            // vm_emit(vm_instr(stmt, OP_JMP, operand_addr(REG_NONE, ???, 4), (char *)NULL, "break"));
+            int32_t addr = vm_emit(vm_instr(stmt, OP_JMP, operand_addr(REG_NONE, 0, 4), (char *)NULL, "break"));
+
+            buf_push(SFOR(SBREAK(stmt)->parent)->break_instrs, addr);
         } break;
 
         case STMT_CONTINUE: {
-            report_error(stmt, "%s wird noch nicht in der vm unterstützt", format_keyword(keyword_continue));
-            // vm_emit(vm_instr(stmt, OP_JMP, operand_addr(REG_NONE, ???, 4), (char *)NULL, "continue"));
+            int32_t addr = vm_emit(vm_instr(stmt, OP_JMP, operand_addr(REG_NONE, 0, 4), (char *)NULL, "continue"));
+
+            buf_push(SFOR(SBREAK(stmt)->parent)->continue_instrs, addr);
         } break;
 
         case STMT_DECL: {
@@ -1367,7 +1371,18 @@ vm_stmt(Stmt *stmt, Mem *mem) {
             }
 
             int32_t loop_end = buf_len(vm_instrs);
+
             vm_instr_patch(jmpnz_instr, loop_end);
+
+            /* @INFO: break anweisungen patchen */
+            for ( int i = 0; i < buf_len(SFOR(stmt)->break_instrs); ++i ) {
+                vm_instr_patch(SFOR(stmt)->break_instrs[i], loop_end);
+            }
+
+            /* @INFO: continue anweisungen patchen */
+            for ( int i = 0; i < buf_len(SFOR(stmt)->continue_instrs); ++i ) {
+                vm_instr_patch(SFOR(stmt)->continue_instrs[i], loop_start);
+            }
         } break;
 
         case STMT_IF: {
@@ -1877,6 +1892,10 @@ compile_non_procs(Stmts stmts, Mem *mem) {
     }
 }
 
+void
+compile_directives(Directives dirs, Mem *mem) {
+}
+
 Vm *
 compile(Parsed_File *file, Mem *mem) {
     if ( !vm_data_section ) {
@@ -1886,6 +1905,8 @@ compile(Parsed_File *file, Mem *mem) {
     if ( !vm_text_section ) {
         vm_text_section = section_new("text");
     }
+
+    compile_directives(file->directives, mem);
 
     vm_curr_section = vm_data_section;
     compile_non_procs(file->stmts, mem);
