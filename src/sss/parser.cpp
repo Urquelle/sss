@@ -1499,14 +1499,14 @@ stmt_if(Ast_Node *loc, Expr *cond, Stmt *stmt, Stmt_If *stmt_else) {
 }
 
 Stmt_For *
-stmt_for(Ast_Node *loc, Stmt *init, Expr *cond, Stmt *step, Stmt *block, Stmt *stmt_else) {
+stmt_for(Ast_Node *loc) {
     STRUCTK(Stmt_For, STMT_FOR);
 
-    result->init      = init;
-    result->cond      = cond;
-    result->step      = step;
-    result->block     = block;
-    result->stmt_else = stmt_else;
+    result->init      = NULL;
+    result->cond      = NULL;
+    result->step      = NULL;
+    result->block     = NULL;
+    result->stmt_else = NULL;
 
     result->break_instrs = NULL;
     result->continue_instrs = NULL;
@@ -2098,7 +2098,7 @@ parse_stmt_for(Token_List *tokens) {
     Expr *cond = NULL;
     Stmt *step = NULL;
 
-    Stmt_For *result = stmt_for(curr, init, cond, step, NULL, NULL);
+    Stmt_For *result = stmt_for(curr);
 
     Expr *expr = parse_expr(tokens);
     if ( token_match(tokens, T_COLON) ) {
