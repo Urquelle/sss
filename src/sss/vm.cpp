@@ -1083,27 +1083,31 @@ vm_expr(Expr *expr, Mem *mem, bool assign) {
         } break;
 
         case EXPR_FIELD: {
-            vm_expr(EFIELD(expr)->base, mem, true);
+            if ( EFIELD(expr)->base->type->kind == TYPE_PTR ) {
+                // für ptr muß ein mov anstatt eines lea erzeugt werden
+                vm_expr(EFIELD(expr)->base, mem, false);
+            } else {
+                vm_expr(EFIELD(expr)->base, mem, true);
+            }
 
             Expr      * base       = EFIELD(expr)->base;
+            Type      * type       = base->type;
             int32_t     num_fields = 0;
             Decl_Vars   fields     = NULL;
 
-            if ( base->type->kind == TYPE_STRUCT ) {
-                Type_Struct *type = TSTRUCT(base->type);
+            if ( type->kind == TYPE_PTR ) {
+                type = TPTR(type)->base;
+            }
 
-                num_fields = (int32_t)type->num_fields;
-                fields     = type->fields;
-            } else if ( base->type->kind == TYPE_ENUM ) {
-                Type_Enum *type = TENUM(base->type);
-
-                num_fields = (int32_t)type->num_fields;
-                fields     = type->fields;
-            } else if ( base->type->kind == TYPE_UNION ) {
-                Type_Union *type = TUNION(base->type);
-
-                num_fields = (int32_t)type->num_fields;
-                fields     = type->fields;
+            if ( type->kind == TYPE_STRUCT ) {
+                num_fields = (int32_t)TSTRUCT(type)->num_fields;
+                fields     = TSTRUCT(type)->fields;
+            } else if ( type->kind == TYPE_ENUM ) {
+                num_fields = (int32_t)TENUM(type)->num_fields;
+                fields     = TENUM(type)->fields;
+            } else if ( type->kind == TYPE_UNION ) {
+                num_fields = (int32_t)TENUM(type)->num_fields;
+                fields     = TENUM(type)->fields;
             } else {
                 assert(0);
             }
@@ -1119,16 +1123,16 @@ vm_expr(Expr *expr, Mem *mem, bool assign) {
             }
 
             assert(field);
-            if ( base->type->kind == TYPE_STRUCT ) {
+            if ( type->kind == TYPE_STRUCT ) {
                 vm_emit(vm_instr(expr, OP_ADD, operand_rax(field->type->size), operand_imm(value((int64_t)field->offset, 4), 4)));
 
                 if ( !assign ) {
                     vm_emit(vm_instr(expr, OP_MOV, operand_rax(field->type->size), operand_addr(REG_RAX, 0, field->type->size)));
                 }
-            } else if ( base->type->kind == TYPE_ENUM ) {
+            } else if ( type->kind == TYPE_ENUM ) {
                 assert(!assign);
                 vm_expr(field->expr, mem);
-            } else if ( base->type->kind == TYPE_UNION ) {
+            } else if ( type->kind == TYPE_UNION ) {
                 if ( !assign ) {
                     vm_emit(vm_instr(expr, OP_MOV, operand_rax(field->type->size), operand_addr(REG_RAX, 0, field->type->size)));
                 }
@@ -1138,6 +1142,7 @@ vm_expr(Expr *expr, Mem *mem, bool assign) {
         } break;
 
         case EXPR_FLOAT: {
+            /* @AUFGABE: floats in entsprechende xmm register schieben */
             vm_emit(vm_instr(expr, OP_MOV, operand_reg(REG_RAX, 8), operand_imm(value(EFLOAT(expr)->val), expr->type->size)));
         } break;
 
@@ -1549,6 +1554,7 @@ step(Cpu *cpu) {
         case OP_ENTER: {
             stack_push(cpu, reg_read64(cpu, REG_RBP), 8);
             reg_write64(cpu, REG_RBP, reg_read64(cpu, REG_RSP));
+
             if ( instr->operand1->val.u64 ) {
                 reg_write64(cpu, REG_RSP, reg_read64(cpu, REG_RSP) - instr->operand1->val.u64);
             }

@@ -201,15 +201,19 @@ to_str(Type *type) {
 
     switch ( type->kind ) {
         case TYPE_ARRAY: {
-            buf_printf(result, "[] %s", to_str(TARRAY(type)->base));
+            result = buf_printf(result, "[] %s", to_str(TARRAY(type)->base));
         } break;
 
         case TYPE_STRING: {
-            buf_printf(result, "string");
+            result = buf_printf(result, "string");
+        } break;
+
+        case TYPE_PTR: {
+            result = buf_printf(result, "*%s", to_str(TPTR(type)->base));
         } break;
 
         default: {
-            buf_printf(result, "%s", type->name);
+            result = buf_printf(result, "%s", type->name);
         } break;
     }
 
@@ -1010,11 +1014,17 @@ resolve_expr(Expr *expr, Type *given_type = NULL) {
         case EXPR_FIELD: {
             Operand *base = resolve_expr(EFIELD(expr)->base);
             assert(base->type);
-            assert( base->type->scope );
 
-            Sym *sym = sym_get(base->type->scope, EFIELD(expr)->field);
+            Type *type = base->type;
+            if ( type->kind == TYPE_PTR ) {
+                type = TPTR(type)->base;
+            }
+
+            assert( type->scope );
+
+            Sym *sym = sym_get(type->scope, EFIELD(expr)->field);
             if ( !sym ) {
-                report_error(expr, "symbol %s konnte in %s nicht ermittelt werden", EFIELD(expr)->field, base->type->sym->name);
+                report_error(expr, "symbol %s konnte in %s nicht ermittelt werden", EFIELD(expr)->field, type->sym->name);
             }
 
             result = operand(sym->type);
@@ -1403,12 +1413,6 @@ resolve_decl(Decl *decl) {
             /* @AUFGABE: prüfen ob type aus dem typespec und dem op passen */
 
             result = type;
-        } break;
-
-        case DECL_API: {
-        } break;
-
-        case DECL_IMPL: {
         } break;
 
         default: {
@@ -1979,10 +1983,6 @@ register_global_syms(Stmts stmts) {
         }
 
         Stmt_Decl *stmt = (Stmt_Decl *)stmts[i];
-
-        if ( stmt->decl->kind == DECL_IMPL ) {
-            continue;
-        }
 
         Decl *decl = stmt->decl;
         Sym *sym = sym_push(decl, decl->name, decl);

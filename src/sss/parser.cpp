@@ -1,5 +1,4 @@
 char **keywords;
-char *keyword_api;
 char *keyword_as;
 char *keyword_break;
 char *keyword_cast;
@@ -14,9 +13,9 @@ char *keyword_false;
 char *keyword_for;
 char *keyword_from;
 char *keyword_if;
-char *keyword_impl;
 char *keyword_import;
 char *keyword_load;
+char *keyword_macro;
 char *keyword_match;
 char *keyword_new;
 char *keyword_note;
@@ -379,15 +378,14 @@ struct Stmt_Using : Stmt {
 
 enum Decl_Kind {
     DECL_NONE,
-    DECL_VAR,
     DECL_CONST,
-    DECL_TYPE,
     DECL_ENUM,
-    DECL_STRUCT,
-    DECL_UNION,
+    DECL_MACRO,
     DECL_PROC,
-    DECL_API,
-    DECL_IMPL,
+    DECL_STRUCT,
+    DECL_TYPE,
+    DECL_UNION,
+    DECL_VAR,
 };
 struct Decl : Ast_Node {
     Decl_Kind   kind;
@@ -400,15 +398,6 @@ struct Decl : Ast_Node {
     bool        has_using;
 };
 
-struct Decl_Var : Decl {
-    Typespec * typespec;
-    Expr     * expr;
-};
-
-struct Decl_Type : Decl {
-    Typespec * typespec;
-};
-
 struct Decl_Const : Decl {
     Typespec * typespec;
     Expr     * expr;
@@ -419,14 +408,11 @@ struct Decl_Enum : Decl {
     uint32_t  num_fields;
 };
 
-struct Decl_Struct : Decl {
-    Decl_Vars fields;
-    uint32_t  num_fields;
-};
-
-struct Decl_Union : Decl {
-    Decl_Vars fields;
-    uint32_t  num_fields;
+struct Decl_Macro : Decl {
+    Typespec  * typespec;
+    Proc_Sign * sign;
+    Stmt      * block;
+    Scope     * scope;
 };
 
 struct Decl_Proc : Decl {
@@ -436,15 +422,23 @@ struct Decl_Proc : Decl {
     Scope     * scope;
 };
 
-struct Decl_Api : Decl {
-    Decls   decls;
-    size_t  num_decls;
+struct Decl_Struct : Decl {
+    Decl_Vars fields;
+    uint32_t  num_fields;
 };
 
-struct Decl_Impl : Decl {
-    Exprs  exprs;
-    size_t num_exprs;
-    Stmt * block;
+struct Decl_Type : Decl {
+    Typespec * typespec;
+};
+
+struct Decl_Union : Decl {
+    Decl_Vars fields;
+    uint32_t  num_fields;
+};
+
+struct Decl_Var : Decl {
+    Typespec * typespec;
+    Expr     * expr;
 };
 
 enum Typespec_Kind {
@@ -1342,17 +1336,6 @@ ast_valid(Ast_Node *elem) {
 }
 
 /* decl {{{ */
-Decl_Api *
-decl_api(Ast_Node *loc, char *name, Decls decls, size_t num_decls) {
-    STRUCTK(Decl_Api, DECL_API);
-
-    result->name      = name;
-    result->decls     = decls;
-    result->num_decls = num_decls;
-
-    return result;
-}
-
 Decl_Const *
 decl_const(Ast_Node *loc, char *name, Typespec *typespec, Expr *expr) {
     STRUCTK(Decl_Const, DECL_CONST);
@@ -1378,14 +1361,14 @@ decl_enum(Ast_Node *loc, char *name, Decl_Vars fields, uint32_t num_fields) {
     return result;
 }
 
-Decl_Impl *
-decl_impl(Ast_Node *loc, char *name, Exprs exprs, size_t num_exprs, Stmt *block) {
-    STRUCTK(Decl_Impl, DECL_IMPL);
+Decl_Macro *
+decl_macro(Ast_Node *loc, char *name, Typespec *typespec, Proc_Sign *sign, Stmt *block) {
+    STRUCTK(Decl_Macro, DECL_MACRO);
 
-    result->name      = name;
-    result->exprs     = (Exprs)MEMDUP(exprs);
-    result->num_exprs = num_exprs;
-    result->block     = block;
+    result->name     = name;
+    result->typespec = typespec;
+    result->sign     = sign;
+    result->block    = block;
 
     return result;
 }
@@ -1901,6 +1884,33 @@ parse_decl_union(Token_List *tokens, char *name) {
     return decl_union(curr, name, fields, buf_len(fields));
 }
 
+Decl_Macro *
+parse_decl_macro(Token_List *tokens, char *name, Typespec *typespec) {
+    Token *curr = token_get(tokens);
+
+    Proc_Sign *sign = parse_proc_sign(tokens);
+
+    if ( token_match(tokens, T_HASH) ) {
+        char *dir = parse_expr_ident(tokens);
+
+        if ( dir == intern_str("sys_call") ) {
+            sign->sys_call = true;
+            sign->sys_lib = parse_expr_string(tokens);
+        } else if ( dir == intern_str("dump_ir") ) {
+            sign->dump_ir = true;
+        } else {
+            report_error(curr, "unbekannte direktive %s", format_keyword(curr->val_str));
+        }
+    }
+
+    Stmt *block = NULL;
+    if ( !token_match(tokens, T_SEMICOLON) ) {
+        block = parse_stmt_block(tokens, sign);
+    }
+
+    return decl_macro(curr, name, typespec, sign, block);
+}
+
 Decl_Proc *
 parse_decl_proc(Token_List *tokens, char *name, Typespec *typespec) {
     Token *curr = token_get(tokens);
@@ -1926,47 +1936,6 @@ parse_decl_proc(Token_List *tokens, char *name, Typespec *typespec) {
     }
 
     return decl_proc(curr, name, typespec, sign, block);
-}
-
-Decl_Api *
-parse_decl_api(Token_List *tokens, char *name) {
-    Token *curr = token_get(tokens);
-
-    token_expect(tokens, T_LBRACE);
-    Decls decls = NULL;
-    if ( !token_is(tokens, T_RBRACE) ) {
-        do {
-            Token *proc_name = token_read(tokens);
-            token_expect(tokens, T_COLON);
-            Typespec *typespec = parse_typespec(tokens);
-            buf_push(decls, decl_proc(proc_name, proc_name->val_str, typespec, NULL, NULL));
-
-            token_match(tokens, T_COMMA);
-        } while ( !token_is(tokens, T_RBRACE) );
-    }
-    token_expect(tokens, T_RBRACE);
-
-    return decl_api(curr, name, decls, buf_len(decls));
-}
-
-Decl_Impl *
-parse_decl_impl(Token_List *tokens, char *name) {
-    Token *curr = token_get(tokens);
-
-    Exprs exprs = NULL;
-    if ( token_match(tokens, T_LPAREN) ) {
-        if ( !token_is(tokens, T_RPAREN) ) {
-            do {
-                buf_push(exprs, parse_expr(tokens));
-                token_match(tokens, T_COMMA);
-            } while( !token_is(tokens, T_RPAREN) );
-        }
-        token_expect(tokens, T_RPAREN);
-    }
-
-    Stmt *block = parse_stmt_block(tokens);
-
-    return decl_impl(curr, name, exprs, buf_len(exprs), block);
 }
 
 Stmt_Block *
@@ -2007,10 +1976,6 @@ parse_stmt_decl(Token_List *tokens, char *name) {
             token_expect(tokens, T_SEMICOLON);
         } else if ( keyword_matches(tokens, keyword_proc) ) {
             decl = parse_decl_proc(tokens, name, typespec);
-        } else if ( keyword_matches(tokens, keyword_api) ) {
-            decl = parse_decl_api(tokens, name);
-        } else if ( keyword_matches(tokens, keyword_impl) ) {
-            decl = parse_decl_impl(tokens, name);
         }
     } else {
         Expr *expr = NULL;
@@ -2435,7 +2400,6 @@ Parsed_File *
 parse(Token_List *tokens) {
 #define KEYWORD_K(Key, Var) keyword_##Var = intern_str(#Key); buf_push(keywords, keyword_##Var)
 #define KEYWORD(Key) KEYWORD_K(Key, Key)
-    KEYWORD(api);
     KEYWORD_K(als, as);
     KEYWORD_K(weg, break);
     KEYWORD_K(zu, cast);
@@ -2450,9 +2414,9 @@ parse(Token_List *tokens) {
     KEYWORD(free);
     KEYWORD_K(aus, from);
     KEYWORD_K(wenn, if);
-    KEYWORD(impl);
     KEYWORD(import);
     KEYWORD_K(lade, load);
+    KEYWORD(macro);
     KEYWORD_K(zweig, match);
     KEYWORD(new);
     KEYWORD(note);

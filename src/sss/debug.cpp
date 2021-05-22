@@ -162,7 +162,7 @@ to_str(Urq::Sss::Vm::Operand *op) {
         } break;
 
         case OPERAND_IMM: {
-            result = buf_printf(result, "$%d", op->val.u64);
+            result = buf_printf(result, "%d", op->val.u64);
         } break;
 
         case OPERAND_REG: {

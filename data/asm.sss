@@ -1,43 +1,18 @@
-Richtung :: enum {
-    West;
-    Nord :: 5;
-    Süd :: West + 10;
-    Ost :: 3;
-}
-
 Vec3 :: struktur {
-    x, y, z : u64;
+    x, y, z : u32;
 }
 
-Wert :: union {
-    a : char;
-    b : Vec3;
-    x : u32;
-    y : s64;
-    z : bool;
+master :: proc() -> u32 {
+    a : Vec3;
+
+    a.x = 5;
+
+    test(*a);
+
+    res a.x;
 }
 
-A := 50;
-
-master :: proc() -> u64 {
-    a : Wert;
-    b : u32 = 0;
-    c : Richtung = Richtung.Süd;
-
-    a.b.y = 30;
-
-    iter 1..16 {
-        wenn it > 10 {
-            weg;
-        }
-
-        b += 1;
-    }
-
-    res (a.b.y + b) / 5 + test();
-}
-
-test :: proc() -> s32 {
-    res A;
+test :: proc(x: *Vec3) {
+    x.x += 5;
 }
 
