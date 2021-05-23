@@ -228,6 +228,8 @@ namespace api {
     using Urq::Sss::sss_repl;
     using Urq::Sss::tokenize;
     using Urq::Sss::vm_reset;
+
+    using Urq::Sss::Vm::EVAL_REPL;
 }
 
 }}

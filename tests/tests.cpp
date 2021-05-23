@@ -45,9 +45,7 @@ using namespace Urq::Sss::api;
 
 #define TEST_EXPR_DBG(Label, Content, Expected_Result, Debug)        \
 {                                                                    \
-    char *content = NULL;                                            \
-         content  = buf_printf(content, "master :: proc() { %s; }", Content); \
-    auto tokens   = tokenize("test_expr", content);                  \
+    auto tokens   = tokenize("test_expr", Content);                  \
     auto ast      = parse(&tokens);                                  \
                     resolve(ast, false);                             \
     auto bc       = compile(ast, mem);                               \
@@ -56,7 +54,7 @@ using namespace Urq::Sss::api;
         debug(bc, "test_output.S");                                  \
     }                                                                \
                                                                      \
-    auto result   = eval(bc, mem);                                   \
+    auto result   = eval(bc, mem, EVAL_REPL);                        \
                                                                      \
     printf("test ausführen: %-20s", Label);                          \
                                                                      \
@@ -80,9 +78,7 @@ using namespace Urq::Sss::api;
 
 #define TEST_STMT_DBG(Label, Content, Expected_Result, Debug)        \
 {                                                                    \
-    char *content = NULL;                                            \
-         content  = buf_printf(content, "master :: proc() -> u32 { %s }", Content); \
-    auto tokens   = tokenize("test_stmt", content);                  \
+    auto tokens   = tokenize("test_stmt", Content);                  \
     auto ast      = parse(&tokens);                                  \
                     resolve(ast, false);                             \
     auto bc       = compile(ast, mem);                               \
@@ -91,7 +87,7 @@ using namespace Urq::Sss::api;
         debug(bc, "test_output.S");                                  \
     }                                                                \
                                                                      \
-    auto result   = eval(bc, mem);                                   \
+    auto result   = eval(bc, mem, EVAL_REPL);                        \
                                                                      \
     printf("test ausführen: %-20s", Label);                          \
                                                                      \
@@ -118,24 +114,24 @@ test_expr(Mem *mem) {
     bool success = true;
 
     printf("\n================ EXPRS ================\n\n");
-    TEST_EXPR("3 + 5", "3 + 5", 8)
-    TEST_EXPR("3 * 2 + 5", "3 * 2 + 5", 11)
-    TEST_EXPR("3 * (2 + 5)", "3 * (2 + 5)", 21)
-    TEST_EXPR("3 * (2 + 5) - 10", "3 * (2 + 5) - 10", 11)
-    TEST_EXPR("wahr", "wahr", 1)
-    TEST_EXPR("falsch", "falsch", 0)
-    TEST_EXPR("wahr == wahr", "wahr == wahr", 1)
-    TEST_EXPR("wahr == falsch", "wahr == falsch", 0)
-    TEST_EXPR("wahr == !falsch", "wahr == !falsch", 1)
-    TEST_EXPR("wahr != falsch", "wahr != falsch", 1)
-    TEST_EXPR("wahr && falsch", "wahr && falsch", 0)
-    TEST_EXPR("wahr && wahr", "wahr && wahr", 1)
-    TEST_EXPR("1 < 2", "1 < 2", 1)
-    TEST_EXPR("1 <= 2", "1 <= 2", 1)
-    TEST_EXPR("1 == 2", "1 == 2", 0)
-    TEST_EXPR("2 == 2", "2 == 2", 1)
-    TEST_EXPR("3 >= 2", "3 >= 2", 1)
-    TEST_EXPR("5 > 2", "5 > 2", 1)
+    TEST_EXPR("3 + 5", "3 + 5;", 8)
+    TEST_EXPR("3 * 2 + 5", "3 * 2 + 5;", 11)
+    TEST_EXPR("3 * (2 + 5)", "3 * (2 + 5);", 21)
+    TEST_EXPR("3 * (2 + 5) - 10", "3 * (2 + 5) - 10;", 11)
+    TEST_EXPR("wahr", "wahr;", 1)
+    TEST_EXPR("falsch", "falsch;", 0)
+    TEST_EXPR("wahr == wahr", "wahr == wahr;", 1)
+    TEST_EXPR("wahr == falsch", "wahr == falsch;", 0)
+    TEST_EXPR("wahr == !falsch", "wahr == !falsch;", 1)
+    TEST_EXPR("wahr != falsch", "wahr != falsch;", 1)
+    TEST_EXPR("wahr && falsch", "wahr && falsch;", 0)
+    TEST_EXPR("wahr && wahr", "wahr && wahr;", 1)
+    TEST_EXPR("1 < 2", "1 < 2;", 1)
+    TEST_EXPR("1 <= 2", "1 <= 2;", 1)
+    TEST_EXPR("1 == 2", "1 == 2;", 0)
+    TEST_EXPR("2 == 2", "2 == 2;", 1)
+    TEST_EXPR("3 >= 2", "3 >= 2;", 1)
+    TEST_EXPR("5 > 2", "5 > 2;", 1)
 
     return success;
 }
@@ -145,20 +141,20 @@ test_stmt(Mem *mem) {
     bool success = true;
 
     printf("\n================ STMTS ================\n\n");
-    TEST_STMT("a := 5", "a : u32 = 5; res a;", 5)
-    TEST_STMT("a += 1", "a : u32 = 5; a += 1; res a;", 6)
-    TEST_STMT("a -= 1", "a : u32 = 5; a -= 1; res a;", 4)
-    TEST_STMT("b := a", "a : u32 = 5; b := a; res b;", 5)
-    TEST_STMT("a : *u32", "a : *u32; @a = 5; res @a;", 5)
-    TEST_STMT("a : [3] u32", "a : [3] u32; a[2] = 5; res a[2];", 5)
-    TEST_STMT("a : Vec3", "Vec3 :: struktur { x, y, z : u32; } a : Vec3; a.y = 5; res a.y;", 5)
-    TEST_STMT("wenn 1 != 2", "wenn 1 != 2 { res 1; } sonst { res 2; }", 1)
-    TEST_STMT("wenn 1 > 2", "wenn 1 > 2 { res 1; } sonst { res 2; }", 2)
-    TEST_STMT("wenn 1 > 2", "wenn 1 > 2 { res 1; } sonst 2 == 1 { res 2; } sonst { res 5; }", 5)
-    TEST_STMT("wenn !falsch", "wenn !falsch { res 1; } sonst !wahr { res 2; } sonst { res 3; }", 1)
-    TEST_STMT("wenn a < 5", "a := 5; wenn a < 5 { res 1; } sonst a == 5 { res 2; } sonst { res 3; }", 2)
-    TEST_STMT("iter", "a : u32 = 0; iter 0..5 { a += 1; } res a;", 5)
-    TEST_STMT("iter it", "a : u32 = 0; iter it: 0..5 { a += it; } res a;", 10)
+    TEST_STMT("a := 5", "a : u32 = 5;", 5)
+    TEST_STMT("a += 1", "a : u32 = 5; a += 1;", 6)
+    TEST_STMT("a -= 1", "a : u32 = 5; a -= 1;", 4)
+    TEST_STMT("b := a", "a : u32 = 5; b := a;", 5)
+    TEST_STMT("a : *u32", "b: u32; a := *b; @a = 5; b;", 5)
+    TEST_STMT("a : [3] u32", "a : [3] u32; a[2] = 5; a[2];", 5)
+    TEST_STMT("a : Vec3", "Vec3 :: struktur { x, y, z : u32; } a : Vec3; a.y = 5; a.y;", 5)
+    TEST_STMT("wenn 1 != 2", "wenn 1 != 2 { 1; } sonst { 2; }", 1)
+    TEST_STMT("wenn 1 > 2", "wenn 1 > 2 { 1; } sonst { 2; }", 2)
+    TEST_STMT("wenn 1 > 2", "wenn 1 > 2 { 1; } sonst 2 == 1 { 2; } sonst { 5; }", 5)
+    TEST_STMT("wenn !falsch", "wenn !falsch { 1; } sonst !wahr { 2; } sonst { 3; }", 1)
+    TEST_STMT("wenn a < 5", "a := 5; wenn a < 5 { 1; } sonst a == 5 { 2; } sonst { 3; }", 2)
+    TEST_STMT_DBG("iter", "a : u32 = 0; iter 0..5 { a += 1; } a;", 5, true)
+    TEST_STMT("iter it", "a : u32 = 0; iter it: 0..5 { a += it; } a;", 10)
 
     return success;
 }

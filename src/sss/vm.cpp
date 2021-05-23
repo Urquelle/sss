@@ -9,6 +9,12 @@ struct Mem;
 void      vm_expr(Expr *expr, Mem *mem, bool assign = false);
 void      vm_stmt(Stmt *stmt, Mem *mem);
 
+enum Eval_Flags {
+    EVAL_NONE,
+    EVAL_REPL,
+    EVAL_WITH_ENTRY_POINT,
+};
+
 enum Vm_Op : uint8_t {
     OP_HLT,
 
@@ -474,6 +480,10 @@ mem_new(uint32_t size) {
 
 void
 mem_reset(Mem *mem) {
+    for ( uint32_t i = 0; i < mem->size; ++i ) {
+        mem->mem[i] = 0;
+    }
+
     mem->used = 0;
 }
 
@@ -1931,10 +1941,10 @@ compile(Parsed_File *file, Mem *mem) {
 }
 
 Cpu *
-eval_section(Section *section, Mem *mem, bool use_entry_point) {
+eval_section(Section *section, Mem *mem, uint32_t flags) {
     Cpu *cpu = NULL;
 
-    if ( use_entry_point ) {
+    if ( flags & EVAL_WITH_ENTRY_POINT ) {
         uint32_t start_addr = addr_lookup(entry_point);
 
         cpu = cpu_new(section->instrs, mem, start_addr);
@@ -1964,9 +1974,13 @@ eval_section(Section *section, Mem *mem, bool use_entry_point) {
 }
 
 uint64_t
-eval(Vm *vm, Mem *mem, bool use_entry_point = true) {
-    eval_section(vm->data_section, mem, false);
-    Cpu *cpu = eval_section(vm->text_section, mem, use_entry_point);
+eval(Vm *vm, Mem *mem, uint32_t flags = EVAL_WITH_ENTRY_POINT) {
+    Cpu *cpu = NULL;
+
+    cpu = eval_section(vm->data_section, mem, flags);
+    if ( flags & EVAL_WITH_ENTRY_POINT ) {
+        cpu = eval_section(vm->text_section, mem, flags);
+    }
 
     return reg_read32(cpu, REG_RAX);
 }
