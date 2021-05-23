@@ -1353,13 +1353,13 @@ resolve_decl_const(Decl *decl) {
         type = op->type;
     }
 
+    type_complete(type);
+
     /* @AUFGABE: prüfen ob type aus dem typespec und dem op passen */
     operand_cast(type, op);
-    if ( type != op->type ) {
+    if ( !type_are_compatible(type, op->type) ) {
         report_error(decl, "datentyp erwartet %s, bekommen %s", type->name, op->type->name);
     }
-
-    type_complete(type);
 
     return type;
 }
@@ -1426,32 +1426,6 @@ resolve_decl_var(Decl *decl) {
     return type;
 }
 
-Type *
-resolve_decl(Decl *decl) {
-    Type *result = NULL;
-
-    switch ( decl->kind ) {
-        case DECL_CONST: {
-            Type *type = resolve_typespec(DCONST(decl)->typespec);
-            Operand *op = resolve_expr(DCONST(decl)->expr);
-
-            if ( !type && op->type ) {
-                type = op->type;
-            }
-
-            /* @AUFGABE: prüfen ob type aus dem typespec und dem op passen */
-
-            result = type;
-        } break;
-
-        default: {
-            report_error(decl, "unbekannte deklaration");
-        } break;
-    }
-
-    return result;
-}
-
 bool
 resolve_stmt(Stmt *stmt, Types rets, uint32_t num_rets) {
     bool result = false;
@@ -1495,6 +1469,8 @@ resolve_stmt(Stmt *stmt, Types rets, uint32_t num_rets) {
             switch ( decl->kind ) {
                 case DECL_VAR: {
                     Type *type = resolve_decl_var(decl);
+                    decl->type = type;
+
                     Sym *sym = sym_push_var(decl, decl->name, type);
                     sym->decl = decl;
                 } break;
