@@ -1503,6 +1503,17 @@ resolve_stmt(Stmt *stmt, Types rets, uint32_t num_rets) {
                     sym->decl = decl;
                 } break;
 
+                case DECL_STRUCT: {
+                    Sym *sym = sym_push(decl, decl->name, decl);
+
+                    decl->sym = sym;
+                    sym->kind = SYM_TYPE;
+                    sym->state = SYMSTATE_RESOLVED;
+                    sym->type = type_incomplete_struct(sym);
+
+                    type_complete_struct(TSTRUCT(sym->type));
+                } break;
+
                 default: {
                     report_error(decl, "unbekannte deklaration");
                 } break;
@@ -1607,7 +1618,7 @@ resolve_stmt(Stmt *stmt, Types rets, uint32_t num_rets) {
 
                     operand_cast(rets[i], operand);
                     if ( rets[i] != operand->type ) {
-                        report_error(SRET(stmt)->exprs[i], "rückgabewert vom datentyp erwartet %s, bekommen %s", rets[i]->name, operand->type->name);
+                        report_error(SRET(stmt)->exprs[i], "rückgabewert vom datentyp erwartet %s, bekommen %s", rets[i]->name, to_str(operand->type));
                     }
                 }
             }

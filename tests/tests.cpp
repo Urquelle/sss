@@ -146,13 +146,19 @@ test_stmt(Mem *mem) {
 
     printf("\n================ STMTS ================\n\n");
     TEST_STMT("a := 5", "a : u32 = 5; res a;", 5)
+    TEST_STMT("a += 1", "a : u32 = 5; a += 1; res a;", 6)
+    TEST_STMT("a -= 1", "a : u32 = 5; a -= 1; res a;", 4)
     TEST_STMT("b := a", "a : u32 = 5; b := a; res b;", 5)
+    TEST_STMT("a : *u32", "a : *u32; @a = 5; res @a;", 5)
+    TEST_STMT("a : [3] u32", "a : [3] u32; a[2] = 5; res a[2];", 5)
+    TEST_STMT("a : Vec3", "Vec3 :: struktur { x, y, z : u32; } a : Vec3; a.y = 5; res a.y;", 5)
     TEST_STMT("wenn 1 != 2", "wenn 1 != 2 { res 1; } sonst { res 2; }", 1)
     TEST_STMT("wenn 1 > 2", "wenn 1 > 2 { res 1; } sonst { res 2; }", 2)
     TEST_STMT("wenn 1 > 2", "wenn 1 > 2 { res 1; } sonst 2 == 1 { res 2; } sonst { res 5; }", 5)
     TEST_STMT("wenn !falsch", "wenn !falsch { res 1; } sonst !wahr { res 2; } sonst { res 3; }", 1)
     TEST_STMT("wenn a < 5", "a := 5; wenn a < 5 { res 1; } sonst a == 5 { res 2; } sonst { res 3; }", 2)
     TEST_STMT("iter", "a : u32 = 0; iter 0..5 { a += 1; } res a;", 5)
+    TEST_STMT("iter it", "a : u32 = 0; iter it: 0..5 { a += it; } res a;", 10)
 
     return success;
 }

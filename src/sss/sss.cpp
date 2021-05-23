@@ -81,6 +81,7 @@ void                     resolve_aggr_fields(Decl_Vars fields, uint32_t num_fiel
 Scope                  * scope_new(char *name, Scope *parent = NULL);
 Sym                    * sym_push_scope(Loc *loc, Scope *scope, char *name, Type *type);
 void                     type_complete(Type *type);
+void                     type_complete_struct(Type_Struct *type);
 
 #define EBIN(Expr)            ((Expr_Bin *)(Expr))
 #define EBOOL(Expr)           ((Expr_Bool *)(Expr))
