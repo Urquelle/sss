@@ -881,21 +881,21 @@ stack_push(Cpu *cpu, uint64_t val, uint32_t size) {
     switch ( size ) {
         case 1: {
             rsp_dec(cpu, size);
-            uint64_t addr = reg_read8(cpu, REG_RSP);
+            uint64_t addr = reg_read64(cpu, REG_RSP);
             assert(addr > cpu->stack_size);
             mem_write(cpu->mem, addr, (uint8_t)val);
         } break;
 
         case 2: {
             rsp_dec(cpu, size);
-            uint64_t addr = reg_read16(cpu, REG_RSP);
+            uint64_t addr = reg_read64(cpu, REG_RSP);
             assert(addr > cpu->stack_size);
             mem_write(cpu->mem, addr, (uint16_t)val);
         } break;
 
         case 4: {
             rsp_dec(cpu, size);
-            uint64_t addr = reg_read32(cpu, REG_RSP);
+            uint64_t addr = reg_read64(cpu, REG_RSP);
             assert(addr > cpu->stack_size);
             mem_write(cpu->mem, addr, (uint32_t)val);
         } break;
@@ -918,19 +918,19 @@ stack_pop(Cpu *cpu, Reg_Kind reg, uint32_t size) {
     switch ( size ) {
         case 1: {
             assert(cpu->mem->size >= reg_read64(cpu, REG_RSP) + 1);
-            reg_write8(cpu, reg, mem_read8(cpu->mem, (uint32_t)reg_read8(cpu, REG_RSP)));
+            reg_write8(cpu, reg, mem_read8(cpu->mem, (uint32_t)reg_read64(cpu, REG_RSP)));
             rsp_inc(cpu, 1);
         } break;
 
         case 2: {
             assert(cpu->mem->size >= reg_read64(cpu, REG_RSP) + 2);
-            reg_write16(cpu, reg, mem_read16(cpu->mem, (uint32_t)reg_read16(cpu, REG_RSP)));
+            reg_write16(cpu, reg, mem_read16(cpu->mem, (uint32_t)reg_read64(cpu, REG_RSP)));
             rsp_inc(cpu, 2);
         } break;
 
         case 4: {
             assert(cpu->mem->size >= reg_read64(cpu, REG_RSP) + 4);
-            reg_write32(cpu, reg, mem_read32(cpu->mem, (uint32_t)reg_read32(cpu, REG_RSP)));
+            reg_write32(cpu, reg, mem_read32(cpu->mem, (uint32_t)reg_read64(cpu, REG_RSP)));
             rsp_inc(cpu, 4);
         } break;
 
