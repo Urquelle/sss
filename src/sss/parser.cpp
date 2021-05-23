@@ -58,6 +58,7 @@ enum Bin_Kind {
     BIN_CMP_START = BIN_LT,
     BIN_LTE,
     BIN_EQ,
+    BIN_NEQ,
     BIN_GTE,
     BIN_GT,
     BIN_CMP_END = BIN_GT,
@@ -673,6 +674,7 @@ token_op(Token *t) {
         case T_SLASH:      return BIN_DIV;
         case T_AND:        return BIN_AND;
         case T_OR:         return BIN_OR;
+        case T_NEQ:        return BIN_NEQ;
 
         default:           {
             report_error(t, "unbekanntes token");

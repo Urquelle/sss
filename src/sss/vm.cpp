@@ -1036,6 +1036,9 @@ vm_expr(Expr *expr, Mem *mem, bool assign) {
                 } else if ( EBIN(expr)->op == BIN_EQ ) {
                     vm_emit(vm_instr(expr, OP_CMP, operand_rax(expr->type->size), operand_rdi(expr->type->size)));
                     vm_emit(vm_instr(expr, OP_SETE, operand_rax(expr->type->size)));
+                } else if ( EBIN(expr)->op == BIN_NEQ ) {
+                    vm_emit(vm_instr(expr, OP_CMP, operand_rax(expr->type->size), operand_rdi(expr->type->size)));
+                    vm_emit(vm_instr(expr, OP_SETNE, operand_rax(expr->type->size)));
                 } else if ( EBIN(expr)->op == BIN_GTE ) {
                     vm_emit(vm_instr(expr, OP_CMP, operand_rax(expr->type->size), operand_rdi(expr->type->size)));
                     vm_emit(vm_instr(expr, OP_SETGE, operand_rax(expr->type->size)));

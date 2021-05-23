@@ -13,7 +13,6 @@ struct Ast_Node : Loc {
     X(T_COMMA)                        \
     X(T_COLON)                        \
     X(T_DOT)                          \
-    X(T_BANG)                         \
     X(T_SEMICOLON)                    \
     X(T_NOTE)                         \
     X(T_NOT)                          \
@@ -250,7 +249,13 @@ recurse:
             token_push(&result, token_str(T_COMMA, ",", 1, file, line, col));
         } else if ( AT(0) == '!' ) {
             NEXT();
-            token_push(&result, token_str(T_NOT, "!", 1, file, line, col));
+
+            if ( AT(0) == '=' ) {
+                token_push(&result, token_str(T_NEQ, "!=", 2, file, line, col));
+                NEXT();
+            } else {
+                token_push(&result, token_str(T_NOT, "!", 1, file, line, col));
+            }
         } else if ( AT(0) == '\'' ) {
             NEXT();
 
@@ -394,7 +399,7 @@ recurse:
                 token_push(&result, token_str(T_NEQ, "!=", 2, file, line, col));
                 NEXT();
             } else {
-                token_push(&result, token_str(T_BANG, "!", 1, file, line, col));
+                token_push(&result, token_str(T_NOT, "!", 1, file, line, col));
             }
         } else if ( AT(0) == '<' ) {
             NEXT();
