@@ -27,6 +27,7 @@ enum Scope_Flags {
     SCOPE_CAN_CONTINUE  = 1 << 1,
     SCOPE_CAN_DEFER     = 1 << 2,
     SCOPE_PROC          = 1 << 3,
+    SCOPE_NON_GLOBAL    = 1 << 4,
 };
 struct Scope {
     char     * name;
@@ -282,6 +283,8 @@ type_new( uint32_t size, Type_Kind kind, uint32_t flags = TYPE_FLAG_NONE ) {
     result->flags     = flags;
     result->scope     = scope_new("type");
 
+    result->scope->flags = SCOPE_NON_GLOBAL;
+
     buf_push(types, result);
 
     return result;
@@ -295,6 +298,8 @@ type_string_new() {
     result->size      = PTR_SIZE;
     result->id        = global_type_id++;
     result->scope     = scope_new("string");
+
+    result->scope->flags = SCOPE_NON_GLOBAL;
 
     sym_push_scope(&loc_none, result->scope, prop_size, type_u64);
     sym_push_scope(&loc_none, result->scope, prop_num, type_u64);
@@ -316,6 +321,8 @@ type_incomplete_struct(Sym *sym) {
     result->id    = global_type_id++;
     result->scope = scope_new(sym->name);
 
+    result->scope->flags = SCOPE_NON_GLOBAL;
+
     buf_push(types, result);
 
     return result;
@@ -333,6 +340,8 @@ type_incomplete_enum(Sym *sym) {
     result->id    = global_type_id++;
     result->scope = scope_new(sym->name);
 
+    result->scope->flags = SCOPE_NON_GLOBAL;
+
     buf_push(types, result);
 
     return result;
@@ -349,6 +358,8 @@ type_incomplete_union(Sym *sym) {
     result->id    = global_type_id++;
     result->scope = scope_new(sym->name);
 
+    result->scope->flags = SCOPE_NON_GLOBAL;
+
     buf_push(types, result);
 
     return result;
@@ -363,6 +374,8 @@ type_union() {
     result->align = 0;
     result->id    = global_type_id++;
     result->scope = scope_new("union");
+
+    result->scope->flags = SCOPE_NON_GLOBAL;
 
     buf_push(types, result);
 
@@ -559,6 +572,8 @@ type_array(Type *base, uint32_t num_elems) {
     result->size      = PTR_SIZE;
     result->scope     = scope_new("array");
 
+    result->scope->flags = SCOPE_NON_GLOBAL;
+
     sym_push_scope(&loc_none, result->scope, prop_size, type_u64);
 
     return result;
@@ -598,6 +613,17 @@ scope_new(char *name, Scope *parent) {
     result->num_export_syms = 0;
     result->parent          = parent;
     result->frame_size      = 0;
+
+    return result;
+}
+
+Scope *
+scope_find(Scope *scope, uint32_t flags) {
+    Scope *result = scope;
+
+    while ( result && !(result->flags & flags) ) {
+        result = result->parent;
+    }
 
     return result;
 }
@@ -1362,19 +1388,15 @@ resolve_decl_var(Decl *decl) {
 
     if ( op ) {
         operand_cast(type, op);
-        if ( type != op->type ) {
+        if ( !type_are_compatible(type, op->type) ) {
             report_error(decl, "datentyp erwartet %s, bekommen %s", type->name, op->type->name);
         }
     }
 
     type_complete(type);
 
-    if ( curr_scope != global_scope ) {
-        Scope *scope = curr_scope;
-
-        while ( scope && !(scope->flags & SCOPE_PROC) ) {
-            scope = scope->parent;
-        }
+    if ( scope_find(curr_scope, SCOPE_NON_GLOBAL) ) {
+        Scope *scope = scope_find(curr_scope, SCOPE_PROC);
 
         if ( scope ) {
             if ( type->kind == TYPE_ARRAY ) {
@@ -1456,39 +1478,13 @@ resolve_stmt(Stmt *stmt, Types rets, uint32_t num_rets) {
         } break;
 
         case STMT_BREAK: {
-            /* @INFO: scopes nach oben durchgehen und prüfen ob wir uns in einem abbrechbaren scope befinden */
-            bool can_break = false;
-            Scope *scope = curr_scope;
-
-            while ( scope ) {
-                if ( scope->flags & SCOPE_CAN_BREAK ) {
-                    can_break = true;
-                    break;
-                }
-
-                scope = scope->parent;
-            }
-
-            if ( !can_break ) {
+            if ( !scope_find(curr_scope, SCOPE_CAN_BREAK) ) {
                 report_error(stmt, "%s ist an dieser stelle nicht möglich. es muß sich um einen abbrechbaren bereich wie %s, oder %s handeln", format_keyword(keyword_break), format_keyword(keyword_for), format_keyword(keyword_while));
             }
         } break;
 
         case STMT_CONTINUE: {
-            /* @INFO: scopes nach oben durchgehen und prüfen ob wir uns in einem abbrechbaren scope befinden */
-            bool can_continue = false;
-            Scope *scope = curr_scope;
-
-            while ( scope ) {
-                if ( scope->flags & SCOPE_CAN_CONTINUE ) {
-                    can_continue = true;
-                    break;
-                }
-
-                scope = scope->parent;
-            }
-
-            if ( !can_continue ) {
+            if ( !scope_find(curr_scope, SCOPE_CAN_CONTINUE) ) {
                 report_error(stmt, "%s ist an dieser stelle nicht möglich. es muß sich um einen fortsetzbaren bereich wie %s, oder %s handeln", format_keyword(keyword_continue), format_keyword(keyword_for), format_keyword(keyword_while));
             }
         } break;
@@ -1521,19 +1517,7 @@ resolve_stmt(Stmt *stmt, Types rets, uint32_t num_rets) {
         } break;
 
         case STMT_DEFER: {
-            bool can_defer = false;
-            Scope *scope = curr_scope;
-
-            while ( scope ) {
-                if ( scope->flags & SCOPE_CAN_DEFER ) {
-                    can_defer = true;
-                    break;
-                }
-
-                scope = scope->parent;
-            }
-
-            if ( !can_defer ) {
+            if ( !scope_find(curr_scope, SCOPE_CAN_DEFER) ) {
                 report_error(stmt, "%s ist an dieser stelle nicht möglich. die anweisung muß sich innerhalb einer prozedur befinden", format_keyword(keyword_defer));
             }
 
@@ -1932,7 +1916,7 @@ resolve_proc(Sym *sym) {
     assert(sym->state == SYMSTATE_RESOLVED);
     Proc_Sign *sign = decl->sign;
 
-    decl->scope = scope_enter(decl->name, SCOPE_PROC | SCOPE_CAN_DEFER);
+    decl->scope = scope_enter(decl->name, SCOPE_PROC | SCOPE_CAN_DEFER | SCOPE_NON_GLOBAL);
 
     for ( uint32_t i = 0; i < sign->num_params; ++i ) {
         Decl_Var *param = sign->params[i];
