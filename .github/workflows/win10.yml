@@ -1,0 +1,63 @@
+name: "Win 10"
+on:
+  push:
+    branches:
+      - dev
+
+env:
+    SSS_DIR: ${{ GITHUB_WORKSPACE }}
+
+jobs:
+  build:
+    runs-on: ${{matrix.os}}
+
+    strategy:
+      fail-fast: false
+      max-parallel: 20
+      matrix:
+        compiler: [msvc-2019, msvc-2019]
+        build-config: [Release, Debug]
+        build-platform: [x64, x64]
+        build-runtime: ["", /MT, /MD]
+
+        include:
+          - compiler: msvc-2017
+            build-platform: x86
+            os: windows-2016
+            generator: Visual Studio 15 2017
+            vc_vars:  C:\Program Files (x86)\Microsoft Visual Studio\2017\Enterprise\VC\Auxiliary\Build\vcvars32.bat
+          - compiler: msvc-2017
+            build-platform: x64
+            os: windows-2016
+            generator: Visual Studio 15 2017 Win64
+            vc_vars:  C:\Program Files (x86)\Microsoft Visual Studio\2017\Enterprise\VC\Auxiliary\Build\vcvars64.bat
+          - compiler: msvc-2019
+            build-platform: x86
+            os: windows-2019
+            generator: Visual Studio 16 2019
+            vc_vars:  C:\Program Files (x86)\Microsoft Visual Studio\2019\Enterprise\VC\Auxiliary\Build\vcvars32.bat
+          - compiler: msvc-2019
+            build-platform: x64
+            os: windows-2019
+            generator: Visual Studio 16 2019
+            vc_vars:  C:\Program Files (x86)\Microsoft Visual Studio\2019\Enterprise\VC\Auxiliary\Build\vcvars64.bat
+            extra_flags: -A Win64
+
+    steps:
+    - name: build
+      shell: cmd
+      env:
+        INPUT_COMPILER: ${{ matrix.compiler }}
+        INPUT_BUILD_CONFIG: ${{ matrix.build-config }}
+        INPUT_EXTRA_FLAGS: ${{ matrix.extra_flags }}
+        INPUT_BUILD_PLATFORM: ${{ matrix.build-platform }}
+        INPUT_BUILD_RUNTIME: ${{ matrix.build-runtime }}
+        INPUT_GENERATOR: ${{ matrix.generator }}
+        VC_VARS: "${{ matrix.vc_vars }}"
+      run: |
+        "%VC_VARS%"
+        bin/github_build_test.bat
+    - name: run
+      shell: cmd
+      run: |
+        build/tests.exe
