@@ -1762,7 +1762,7 @@ step(Cpu *cpu) {
         case OP_NOT: {
             if ( instr->operand1->kind == OPERAND_REG ) {
                 auto val = reg_read(cpu, instr->operand1);
-                reg_write(cpu, instr->operand1, ~val);
+                reg_write(cpu, instr->operand1, !val);
             } else {
                 assert(0);
             }
