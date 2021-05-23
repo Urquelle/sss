@@ -602,6 +602,13 @@ scope_new(char *name, Scope *parent) {
     return result;
 }
 
+void
+scope_reset(Scope *scope) {
+    scope->syms             = {};
+    scope->export_syms      = NULL;
+    scope->num_export_syms  = 0;
+}
+
 Scope *
 scope_set(Scope *scope) {
     Scope *result = curr_scope;
@@ -2101,6 +2108,11 @@ resolver_load_sys_modules() {
     curr_scope = module_scope;
     resolve(parsed, false);
     curr_scope = curr_scope_prev;
+}
+
+void
+resolver_reset() {
+    scope_reset(global_scope);
 }
 
 void

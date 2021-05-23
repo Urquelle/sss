@@ -219,11 +219,14 @@ namespace api {
     using Urq::Sss::Vm::eval;
     using Urq::Sss::debug;
     using Urq::Sss::mem_new;
+    using Urq::Sss::mem_reset;
     using Urq::Sss::parse;
     using Urq::Sss::resolve;
     using Urq::Sss::resolver_init;
+    using Urq::Sss::resolver_reset;
     using Urq::Sss::sss_repl;
     using Urq::Sss::tokenize;
+    using Urq::Sss::vm_reset;
 }
 
 }}

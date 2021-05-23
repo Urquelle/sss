@@ -431,6 +431,12 @@ section_new(char *name) {
 }
 
 void
+section_reset(Section *section) {
+    section->instrs     = NULL;
+    section->num_instrs = 0;
+}
+
+void
 section_add_instr(Section *section, Instr *instr) {
     buf_push(section->instrs, instr);
     section->num_instrs = buf_len(section->instrs);
@@ -446,6 +452,15 @@ vm_new(Section *data_section, Section *text_section) {
     return result;
 }
 
+void
+vm_reset(Vm *vm) {
+    section_reset(vm->data_section);
+    section_reset(vm->text_section);
+
+    vm_instrs = NULL;
+    vm_instrs_labeled = NULL;
+}
+
 Mem *
 mem_new(uint32_t size) {
     Mem *result = urq_allocs(Mem);
@@ -455,6 +470,11 @@ mem_new(uint32_t size) {
     result->mem  = (uint8_t *)urq_alloc(result->size);
 
     return result;
+}
+
+void
+mem_reset(Mem *mem) {
+    mem->used = 0;
 }
 
 int32_t
@@ -946,23 +966,7 @@ void
 stack_pop(Cpu *cpu, Operand *op) {
     assert(op->kind == OPERAND_REG);
 
-    switch ( op->reg.size ) {
-        case 1: {
-            stack_pop(cpu, op->reg.kind, 1);
-        } break;
-
-        case 2: {
-            stack_pop(cpu, op->reg.kind, 2);
-        } break;
-
-        case 4: {
-            stack_pop(cpu, op->reg.kind, 4);
-        } break;
-
-        case 8: {
-            stack_pop(cpu, op->reg.kind, 8);
-        } break;
-    }
+    stack_pop(cpu, op->reg.kind, op->reg.size);
 }
 
 void
