@@ -1100,6 +1100,7 @@ vm_expr(Expr *expr, Mem *mem, bool assign) {
         } break;
 
         case EXPR_FIELD: {
+            /* @INFO: sonderbehandlung */
             if ( EFIELD(expr)->base->type->kind == TYPE_PTR ) {
                 // für ptr muß ein mov anstatt eines lea erzeugt werden
                 vm_expr(EFIELD(expr)->base, mem, false);
@@ -1173,14 +1174,16 @@ vm_expr(Expr *expr, Mem *mem, bool assign) {
                         vm_emit(vm_instr(expr, OP_LEA, operand_rax(sym->type->size), operand_label(sym->name)));
                     }
                 } else {
-                    if ( assign ) {
+                    /* @INFO: sonderbehandlung */
+                    if ( assign && expr->type->kind != TYPE_ARRAY ) {
                         vm_emit(vm_instr(expr, OP_LEA, operand_rax(sym->type->size), operand_addr(REG_NONE, sym->decl->offset, sym->type->size)));
                     } else {
                         vm_emit(vm_instr(expr, OP_MOV, operand_rax(sym->type->size), operand_addr(REG_NONE, sym->decl->offset, sym->type->size)));
                     }
                 }
             } else {
-                if ( assign ) {
+                /* @INFO: sonderbehandlung */
+                if ( assign && expr->type->kind != TYPE_ARRAY ) {
                     vm_emit(vm_instr(expr, OP_LEA, operand_rax(sym->type->size), operand_addr(REG_RBP, sym->decl->offset, sym->type->size)));
                 } else {
                     vm_emit(vm_instr(expr, OP_MOV, operand_rax(sym->type->size), operand_addr(REG_RBP, sym->decl->offset, sym->type->size)));

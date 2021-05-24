@@ -516,7 +516,7 @@ to_str(Stmt *stmt) {
 
         default: {
             assert(!"unbekannt");
-            return "<unbekannt>";
+            return "<unbekannte anweisung>";
         } break;
     }
 }
@@ -530,7 +530,7 @@ to_str(Expr *expr) {
 
         default: {
             assert(!"unbekannt");
-            return "<unbekannt>";
+            return "<unbekannter ausdruck>";
         } break;
     }
 }
@@ -544,7 +544,7 @@ to_str(Token t) {
 
         default: {
             assert(!"unbekannt");
-            return "<unbekannt>";
+            return "<unbekanntes token>";
         } break;
     }
 }
