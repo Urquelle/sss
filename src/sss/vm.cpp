@@ -1091,6 +1091,10 @@ vm_expr(Expr *expr, Mem *mem, bool assign) {
             }
         } break;
 
+        case EXPR_CHAR: {
+            vm_emit(vm_instr(expr, OP_MOV, operand_rax(expr->type->size), operand_imm(value((uint64_t)ECHR(expr)->val, 1), 1)));
+        } break;
+
         case EXPR_DEREF: {
             vm_expr(EDEREF(expr)->base, mem);
 

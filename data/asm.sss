@@ -1,18 +1,41 @@
+#lade "W:/sss/data/expr.sss";
+
 Vec3 :: struktur {
     x, y, z : u32;
 }
 
 master :: proc() -> u32 {
-    a : Vec3;
+    a : s32 = 5;
+    b : u32;
+    c : [3][3] u32;
+    d := "abcdefg";
+    v : Vec3;
 
-    a.x = 5;
+    wenn a < 10 {
+        test(*v.y);
+    } sonst {
+        res 33;
+    }
 
-    test(*a);
+    b = index(1);
+    c[index(2)][b] = 15;
 
-    res a.x;
+    wenn d[3] == 'd' {
+        res 11;
+    }
+
+    res c[2][b];
 }
 
-test :: proc(x: *Vec3) {
-    x.x += 5;
+test :: proc(x : *u32) {
+    @x = 25;
+}
+
+index :: proc(i : u32) -> u32 {
+    wenn i == 1 {
+        res 1;
+    } sonst {
+        res 2;
+    }
 }
 

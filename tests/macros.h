@@ -1,4 +1,4 @@
-#define TEST_DBG(Label, Content, Expected_Result, Debug, Cast)       \
+#define TEST_(Label, Content, Expected_Result, Debug, Cast)       \
 {                                                                    \
     auto tokens   = tokenize("test_expr", Content);                  \
     auto ast      = parse(&tokens);                                  \
@@ -29,6 +29,7 @@
     vm_reset(bc);                                                    \
 }
 
-#define TEST(Label, Content, Expected_Result) TEST_DBG(Label, Content, Expected_Result, false, uint32_t)
-#define TEST_CAST(Label, Content, Expected_Result, Cast) TEST_DBG(Label, Content, Expected_Result, false, Cast)
+#define TEST(Label, Content, Expected_Result) TEST_(Label, Content, Expected_Result, false, uint32_t)
+#define TEST_DBG(Label, Content, Expected_Result) TEST_(Label, Content, Expected_Result, true, uint32_t)
+#define TEST_CAST(Label, Content, Expected_Result, Cast) TEST_(Label, Content, Expected_Result, false, Cast)
 
