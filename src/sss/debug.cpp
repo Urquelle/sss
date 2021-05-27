@@ -330,21 +330,15 @@ to_str(Instr *instr) {
 }
 
 void
-debug(Urq::Sss::Vm::Vm *vm, char *file_name) {
+debug(uint8_t *bin, char *file_name) {
     char *output = NULL;
 
-    if ( vm->data_section->num_instrs ) {
-        output = buf_printf(output, "section .%s\n", vm->data_section->name);
-        for ( uint32_t i = 0; i < vm->data_section->num_instrs; ++i ) {
-            Instr *instr = vm->data_section->instrs[i];
-            output = buf_printf(output, "%s%s%d\n", to_str(instr), instr->comment ? " addr: " : " ; addr: ", instr->addr);
-        }
-        output = buf_printf(output, "\n");
-    }
+    uint64_t num_instrs = sss_text_num_entries(bin);
+    Instrs instrs = (Instrs)sss_text_section(bin);
 
-    output = buf_printf(output, "section .%s\n", vm->text_section->name);
-    for ( uint32_t i = 0; i < vm->text_section->num_instrs; ++i ) {
-        Instr *instr = vm->text_section->instrs[i];
+    for ( uint32_t i = 0; i < num_instrs; ++i ) {
+        Instr *instr = instrs[i];
+
         output = buf_printf(output, "%s%s%d\n", to_str(instr), instr->comment ? " addr: " : " ; addr: ", instr->addr);
     }
 

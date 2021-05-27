@@ -26,7 +26,6 @@
                                                                      \
     mem_reset(mem);                                                  \
     resolver_reset();                                                \
-    vm_reset(bc);                                                    \
 }
 
 #define TEST(Label, Content, Expected_Result) TEST_(Label, Content, Expected_Result, false, uint32_t)

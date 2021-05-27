@@ -190,6 +190,7 @@ void                     type_complete_struct(Type_Struct *type);
 #include "lex.cpp"
 #include "parser.cpp"
 #include "resolver.cpp"
+#include "elf.cpp"
 #include "vm.cpp"
 #include "debug.cpp"
 
@@ -227,7 +228,6 @@ namespace api {
     using Urq::Sss::resolver_reset;
     using Urq::Sss::sss_repl;
     using Urq::Sss::tokenize;
-    using Urq::Sss::vm_reset;
 
     using Urq::Sss::Vm::EVAL_REPL;
 }

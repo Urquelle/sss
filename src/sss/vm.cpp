@@ -182,41 +182,22 @@ struct Instr : Loc {
 
 typedef Instr ** Instrs;
 
-struct Section {
-    char     * name;
-    Instrs     instrs;
-    uint32_t   num_instrs;
-    uint32_t   offset;
-};
-
 struct Mem {
     uint8_t  * mem;
     uint32_t   used;
     uint32_t   size;
 };
 
-struct Vm {
-    Section * data_section;
-    Section * text_section;
-};
-
 struct Cpu {
-    Instrs     instrs;
-    uint32_t   num_instrs;
-
-    uint64_t   regs[REG_COUNT];
-
+    uint8_t  * bin;
+    uint64_t   num_instrs;
     Mem      * mem;
+    uint64_t   regs[REG_COUNT];
     uint32_t   stack_size;
 };
 
 Instrs    vm_instrs;
 Instrs    vm_instrs_labeled;
-
-Section ** vm_import_sections;
-Section  * vm_data_section;
-Section  * vm_text_section;
-Section  * vm_curr_section;
 
 Reg_Kind regs[] = { REG_RCX, REG_RDX, REG_R8, REG_R9 };
 
@@ -425,48 +406,6 @@ flag_state(Cpu *cpu, Vm_Rflag flag) {
     return result;
 }
 
-Section *
-section_new(char *name) {
-    Section *result = urq_allocs(Section);
-
-    result->name       = name;
-    result->instrs     = NULL;
-    result->num_instrs = 0;
-
-    return result;
-}
-
-void
-section_reset(Section *section) {
-    section->instrs     = NULL;
-    section->num_instrs = 0;
-}
-
-void
-section_add_instr(Section *section, Instr *instr) {
-    buf_push(section->instrs, instr);
-    section->num_instrs = buf_len(section->instrs);
-}
-
-Vm *
-vm_new(Section *data_section, Section *text_section) {
-    Vm *result = urq_allocs(Vm);
-
-    result->data_section = data_section;
-    result->text_section = text_section;
-
-    return result;
-}
-
-void
-vm_reset(Vm *vm) {
-    section_reset(vm->data_section);
-    section_reset(vm->text_section);
-
-    vm_instrs = NULL;
-    vm_instrs_labeled = NULL;
-}
-
 Mem *
 mem_new(uint32_t size) {
     Mem *result = urq_allocs(Mem);
@@ -617,12 +556,11 @@ mem_read64(Mem *mem, uint32_t addr) {
 }
 
 Cpu *
-cpu_new(Instrs instrs, Mem *mem, uint32_t start = 0) {
+cpu_new(uint8_t *bin, Mem *mem, uint32_t start = 0) {
     Cpu *result = urq_allocs(Cpu);
 
-    result->instrs     = instrs;
-    result->num_instrs = buf_len(instrs);
-
+    result->bin        = bin;
+    result->num_instrs = sss_text_num_entries(bin);
     result->stack_size = STACK_SIZE;
     result->mem        = mem;
 
@@ -866,10 +804,10 @@ vm_instr(Loc *loc, Vm_Op op, char *label = NULL, char *comment = NULL) {
 
 Instr *
 vm_instr_fetch(Cpu *cpu) {
-    uint64_t rip            = reg_read64(cpu, REG_RIP);
-    uint64_t section_offset = reg_read64(cpu, REG_RDS);
+    Instrs instrs = (Instrs)sss_text_section(cpu->bin);
 
-    Instr *result = cpu->instrs[rip - section_offset];
+    uint64_t rip = reg_read64(cpu, REG_RIP);
+    Instr *result = instrs[rip];
     reg_write64(cpu, REG_RIP, reg_read64(cpu, REG_RIP) + 1);
 
     return result;
@@ -890,8 +828,6 @@ vm_emit(Instr *instr) {
         instr->label = intern_str(instr->label);
         buf_push(vm_instrs_labeled, instr);
     }
-
-    section_add_instr(vm_curr_section, instr);
 
     return result;
 }
@@ -1475,10 +1411,7 @@ vm_stmt(Stmt *stmt, Mem *mem) {
 
 bool
 step(Cpu *cpu) {
-    uint64_t section_offset = reg_read64(cpu, REG_RDS);
-    uint64_t num_instructions = cpu->num_instrs + section_offset;
-
-    if ( num_instructions <= reg_read64(cpu, REG_RIP) ) {
+    if ( cpu->num_instrs <= reg_read64(cpu, REG_RIP) ) {
         return false;
     }
 
@@ -1895,70 +1828,28 @@ step(Cpu *cpu) {
     return true;
 }
 
-void
-compile_procs(Stmts stmts, Mem *mem) {
-    for ( int i = 0; i < buf_len(stmts); ++i ) {
-        Stmt *stmt = stmts[i];
-
-        if ( stmt->kind == STMT_DECL && SDECL(stmt)->decl->kind == DECL_PROC ) {
-            vm_stmt(stmt, mem);
-        }
-    }
-}
-
-void
-compile_non_procs(Stmts stmts, Mem *mem) {
-    for ( int i = 0; i < buf_len(stmts); ++i ) {
-        Stmt *stmt = stmts[i];
-
-        if ( stmt->kind != STMT_DECL || SDECL(stmt)->decl->kind != DECL_PROC ) {
-            vm_stmt(stmt, mem);
-        }
-    }
-}
-
-void
-compile_directives(Directives dirs, Mem *mem) {
-}
-
-Vm *
+uint8_t *
 compile(Parsed_File *file, Mem *mem) {
-    if ( !vm_data_section ) {
-        vm_data_section = section_new("data");
+    for ( int i = 0; i < buf_len(file->stmts); ++i ) {
+        vm_stmt(file->stmts[i], mem);
     }
 
-    if ( !vm_text_section ) {
-        vm_text_section = section_new("text");
-    }
-
-    compile_directives(file->directives, mem);
-
-    vm_curr_section = vm_data_section;
-    compile_non_procs(file->stmts, mem);
-
-    vm_curr_section = vm_text_section;
-    compile_procs(file->stmts, mem);
-
-    Vm *result = vm_new(vm_data_section, vm_text_section);
-
-    vm_data_section->offset = 0;
-    vm_text_section->offset = vm_data_section->num_instrs;
+    uint64_t entry = addr_lookup(entry_point) * sizeof(Instr);
+    uint8_t *result = sss_create(mem->mem, mem->used, (uint8_t *)vm_instrs, buf_len(vm_instrs)*8, entry);
 
     return result;
 }
 
-Cpu *
-eval_section(Section *section, Mem *mem, uint32_t flags) {
+uint64_t
+eval(uint8_t *bin, Mem *mem, uint32_t flags = EVAL_WITH_ENTRY_POINT) {
     Cpu *cpu = NULL;
 
     if ( flags & EVAL_WITH_ENTRY_POINT ) {
         uint32_t start_addr = addr_lookup(entry_point);
 
-        cpu = cpu_new(section->instrs, mem, start_addr);
+        cpu = cpu_new(bin, mem, start_addr);
 
-        reg_write64(cpu, REG_RDS, section->offset);
-
-        stack_push(cpu, section->num_instrs + section->offset, 8);
+        stack_push(cpu, buf_len(vm_instrs), 8);
         stack_push(cpu, reg_read64(cpu, REG_RBX), 8);
         stack_push(cpu, reg_read64(cpu, REG_RCX), 8);
         stack_push(cpu, reg_read64(cpu, REG_RDX), 8);
@@ -1968,25 +1859,13 @@ eval_section(Section *section, Mem *mem, uint32_t flags) {
         stack_push(cpu, reg_read64(cpu, REG_R14), 8);
         stack_push(cpu, reg_read64(cpu, REG_R15), 8);
     } else {
-        cpu = cpu_new(section->instrs, mem, 0);
+        cpu = cpu_new(bin, mem, 0);
     }
 
     for (;;) {
         if ( !step(cpu) ) {
             break;
         }
-    }
-
-    return cpu;
-}
-
-uint64_t
-eval(Vm *vm, Mem *mem, uint32_t flags = EVAL_WITH_ENTRY_POINT) {
-    Cpu *cpu = NULL;
-
-    cpu = eval_section(vm->data_section, mem, flags);
-    if ( flags & EVAL_WITH_ENTRY_POINT ) {
-        cpu = eval_section(vm->text_section, mem, flags);
     }
 
     return reg_read32(cpu, REG_RAX);
