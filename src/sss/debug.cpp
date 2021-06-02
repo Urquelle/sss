@@ -330,11 +330,11 @@ to_str(Instr *instr) {
 }
 
 void
-debug(uint8_t *bin, char *file_name) {
+debug(uint8_t *obj, char *file_name) {
     char *output = NULL;
 
-    uint64_t num_instrs = sss_text_num_entries(bin);
-    Instrs instrs = (Instrs)sss_text_section(bin);
+    uint64_t num_instrs = obj_text_num_entries(obj);
+    Instrs instrs = (Instrs)obj_text_section(obj);
 
     for ( uint32_t i = 0; i < num_instrs; ++i ) {
         Instr *instr = instrs[i];

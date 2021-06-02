@@ -359,8 +359,10 @@ struct Match_Line : Ast_Node {
 };
 
 struct Stmt_Match : Stmt {
-    Match_Lines lines;
-    size_t num_lines;
+    Expr        * cond;
+    Match_Lines   lines;
+    size_t        num_lines;
+    bool          cover_every_case;
 };
 
 struct Stmt_Ret : Stmt {
@@ -1093,7 +1095,7 @@ parse_expr_base(Token_List *tokens) {
     } else if ( token_is(tokens, T_FLOAT) ) {
         Token *t = token_read(tokens);
         result = expr_float(curr, t->val_float);
-    } else if ( token_match(tokens, T_NOT) ) {
+    } else if ( token_match(tokens, T_EXCLAMATION_MARK) ) {
         result = expr_not(curr, parse_expr(tokens));
     } else if ( token_is(tokens, T_MINUS) ) {
         while ( token_match(tokens, T_MINUS) ) {
@@ -1538,11 +1540,13 @@ stmt_ret(Ast_Node *loc, Exprs exprs, uint32_t num_exprs) {
 }
 
 Stmt_Match *
-stmt_match(Ast_Node *loc, Match_Lines lines, size_t num_lines) {
+stmt_match(Ast_Node *loc, Expr *cond, Match_Lines lines, size_t num_lines, bool cover_every_case) {
     STRUCTK(Stmt_Match, STMT_MATCH);
 
-    result->lines     = (Match_Lines)MEMDUP(lines);
-    result->num_lines = num_lines;
+    result->cond             = cond;
+    result->lines            = (Match_Lines)MEMDUP(lines);
+    result->num_lines        = num_lines;
+    result->cover_every_case = cover_every_case;
 
     return result;
 }
@@ -2130,6 +2134,12 @@ parse_stmt_ret(Token_List *tokens) {
 Stmt_Match *
 parse_stmt_match(Token_List *tokens, Stmt *parent) {
     Token *curr = token_get(tokens);
+
+    bool cover_every_case = false;
+    if ( token_match(tokens, T_EXCLAMATION_MARK) ) {
+        cover_every_case = true;
+    }
+
     Expr *expr = parse_expr(tokens);
 
     token_expect(tokens, T_LBRACE);
@@ -2157,7 +2167,7 @@ parse_stmt_match(Token_List *tokens, Stmt *parent) {
 
     token_expect(tokens, T_RBRACE);
 
-    return stmt_match(curr, lines, buf_len(lines));
+    return stmt_match(curr, expr, lines, buf_len(lines), cover_every_case);
 }
 
 Stmt_Using *

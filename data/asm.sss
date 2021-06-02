@@ -1,5 +1,11 @@
 #lade "W:/sss/data/expr.sss";
 
+Farbe :: struktur {
+    wert       : u32;
+    sättigung  : d32;
+    helligkeit : d32;
+}
+
 Vec3 :: struktur {
     x, y, z : u32;
 }
@@ -15,6 +21,12 @@ master :: proc() -> u32 {
         test(*v.y);
     } sonst {
         res 33;
+    }
+
+    zweig! a {
+        1: {
+            res 21;
+        }
     }
 
     b = index(1);

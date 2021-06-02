@@ -15,7 +15,7 @@ struct Ast_Node : Loc {
     X(T_DOT)                          \
     X(T_SEMICOLON)                    \
     X(T_NOTE)                         \
-    X(T_NOT)                          \
+    X(T_EXCLAMATION_MARK)             \
     X(T_LPAREN)                       \
     X(T_RPAREN)                       \
     X(T_LBRACKET)                     \
@@ -254,7 +254,7 @@ recurse:
                 token_push(&result, token_str(T_NEQ, "!=", 2, file, line, col));
                 NEXT();
             } else {
-                token_push(&result, token_str(T_NOT, "!", 1, file, line, col));
+                token_push(&result, token_str(T_EXCLAMATION_MARK, "!", 1, file, line, col));
             }
         } else if ( AT(0) == '\'' ) {
             NEXT();
@@ -399,7 +399,7 @@ recurse:
                 token_push(&result, token_str(T_NEQ, "!=", 2, file, line, col));
                 NEXT();
             } else {
-                token_push(&result, token_str(T_NOT, "!", 1, file, line, col));
+                token_push(&result, token_str(T_EXCLAMATION_MARK, "!", 1, file, line, col));
             }
         } else if ( AT(0) == '<' ) {
             NEXT();

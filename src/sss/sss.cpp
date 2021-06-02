@@ -190,7 +190,7 @@ void                     type_complete_struct(Type_Struct *type);
 #include "lex.cpp"
 #include "parser.cpp"
 #include "resolver.cpp"
-#include "elf.cpp"
+#include "obj.cpp"
 #include "vm.cpp"
 #include "debug.cpp"
 
@@ -201,14 +201,12 @@ void sss_repl() {
         printf(">>> ");
         gets_s(buf, sizeof(buf));
 
-        Mem *mem      = mem_new(1024*1024);
-
         auto tokens   = tokenize("<repl>", buf);
         auto ast      = parse(&tokens);
                         resolve(ast, false);
-        auto bc       = compile(ast, mem);
+        auto bc       = compile(ast);
                         debug(bc, "output.S");
-        auto result   = eval(bc, mem);
+        auto result   = eval(bc);
 
         printf("-> %lld\n", result);
     }
@@ -222,6 +220,7 @@ namespace api {
     using Urq::Sss::debug;
     using Urq::Sss::mem_new;
     using Urq::Sss::mem_reset;
+    using Urq::Sss::obj_size;
     using Urq::Sss::parse;
     using Urq::Sss::resolve;
     using Urq::Sss::resolver_init;

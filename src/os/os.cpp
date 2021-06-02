@@ -138,7 +138,7 @@ os_file_read(char *filename, char **result, size_t *size = 0) {
 }
 
 static bool
-os_file_write(char *filename, char *data, size_t len) {
+os_file_write(char *filename, void *data, size_t len) {
     HANDLE file = CreateFileA(filename, GENERIC_WRITE, FILE_SHARE_WRITE, 0, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, 0);
 
     if ( file == INVALID_HANDLE_VALUE ) {

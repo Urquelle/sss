@@ -5,9 +5,13 @@ enum { STACK_SIZE = 1024 };
 struct Cpu;
 struct Operand;
 struct Mem;
+struct Vm;
 
-void      vm_expr(Expr *expr, Mem *mem, bool assign = false);
-void      vm_stmt(Stmt *stmt, Mem *mem);
+#define INSTR_NUM() buf_len(vm->text)
+
+Mem  * mem_new(uint32_t size);
+void   vm_expr(Expr *expr, Vm *vm, bool assign = false);
+void   vm_stmt(Stmt *stmt, Vm *vm);
 
 enum Eval_Flags {
     EVAL_NONE,
@@ -73,7 +77,6 @@ enum Reg_Kind : uint8_t {
     REG_R15,
     REG_RIP,
     REG_RFLAGS,
-    REG_RDS,
 
     REG_COUNT,
 };
@@ -83,7 +86,14 @@ struct Reg {
     uint32_t size;
 };
 
+enum Section {
+    SECTION_TEXT = 1,
+    SECTION_RDATA,
+    SECTION_DATA,
+};
+
 struct Addr {
+    Section  section;
     Reg_Kind base;
     Reg_Kind index;
     int32_t  scale;
@@ -189,15 +199,22 @@ struct Mem {
 };
 
 struct Cpu {
-    uint8_t  * bin;
-    uint64_t   num_instrs;
-    Mem      * mem;
-    uint64_t   regs[REG_COUNT];
-    uint32_t   stack_size;
+    Obj_Header * obj;
+    Mem        * mem;
+    Instrs       instrs;
+    uint64_t     num_instrs;
+    uint64_t     regs[REG_COUNT];
+    uint32_t     stack_size;
 };
 
-Instrs    vm_instrs;
+struct Vm {
+    Mem    * rdata;
+    Instrs   text;
+    Mem    * data;
+};
+
 Instrs    vm_instrs_labeled;
+Mem       vm_rdata;
 
 Reg_Kind regs[] = { REG_RCX, REG_RDX, REG_R8, REG_R9 };
 
@@ -236,6 +253,17 @@ addr_lookup(char *val) {
 
     report_error(&loc_none, "keine passenden bezeichner für %s gefunden", label);
     return 0;
+}
+
+Vm *
+vm_new() {
+    Vm *result = urq_allocs(Vm);
+
+    result->rdata = mem_new(1024*1024);
+    result->text  = NULL;
+    result->data  = mem_new(1024*1024);
+
+    return result;
 }
 
 uint64_t
@@ -337,7 +365,18 @@ effective_addr(Cpu *cpu, Operand *op) {
     uint64_t scale = op->addr.scale;
     uint64_t displacement = op->addr.displacement;
 
+#if 0
+    uint64_t section_offset = cpu->obj->text_offset;
+    if ( op->addr.section == SECTION_RDATA ) {
+        section_offset = cpu->obj->rdata_offset;
+    } else if ( op->addr.section == SECTION_DATA ) {
+        section_offset = cpu->obj->data_offset;
+    }
+
+    uint32_t result = (uint32_t)(section_offset + base + index*scale + displacement);
+#else
     uint32_t result = (uint32_t)(base + index*scale + displacement);
+#endif
 
     return result;
 }
@@ -417,6 +456,17 @@ mem_new(uint32_t size) {
     return result;
 }
 
+Mem *
+mem_new(uint8_t *mem, uint32_t size) {
+    Mem *result = urq_allocs(Mem);
+
+    result->size = size;
+    result->used = 0;
+    result->mem  = mem;
+
+    return result;
+}
+
 void
 mem_reset(Mem *mem) {
     for ( uint32_t i = 0; i < mem->size; ++i ) {
@@ -426,13 +476,40 @@ mem_reset(Mem *mem) {
     mem->used = 0;
 }
 
+void
+mem_resize(Mem *mem, uint32_t size) {
+    if ( mem->size <= (mem->used + size) ) {
+        uint32_t new_size = MAX(1024*1024, mem->size*2);
+
+        uint8_t *new_mem = (uint8_t *)urq_alloc(new_size);
+        memcpy(new_mem, mem->mem, mem->used);
+
+        urq_dealloc(mem->mem);
+        mem->mem = new_mem;
+        mem->size = new_size;
+    }
+}
+
 int32_t
 mem_alloc(Mem *mem, uint32_t size) {
+    mem_resize(mem, size);
+
     assert(mem->size > (mem->used + size));
     assert((mem->used + size) < (mem->size - STACK_SIZE));
 
     int32_t result = mem->used;
 
+    mem->used += size;
+
+    return result;
+}
+
+uint32_t
+mem_push(Mem *mem, void *data, uint32_t size) {
+    mem_resize(mem, size);
+
+    uint32_t result = mem->used;
+    memcpy(mem->mem + mem->used, data, size);
     mem->used += size;
 
     return result;
@@ -556,16 +633,17 @@ mem_read64(Mem *mem, uint32_t addr) {
 }
 
 Cpu *
-cpu_new(uint8_t *bin, Mem *mem, uint32_t start = 0) {
+cpu_new(uint8_t *obj) {
     Cpu *result = urq_allocs(Cpu);
 
-    result->bin        = bin;
-    result->num_instrs = sss_text_num_entries(bin);
+    result->obj        = obj_header(obj);
+    result->instrs     = (Instrs)obj_text_section(obj);
+    result->num_instrs = obj_text_num_entries(obj);
     result->stack_size = STACK_SIZE;
-    result->mem        = mem;
+    result->mem        = mem_new(obj + result->obj->rdata_offset, (uint32_t)result->obj->size);
 
-    reg_write64(result, REG_RIP, start);
-    reg_write64(result, REG_RSP, result->mem->size);
+    reg_write64(result, REG_RIP, result->obj->entry);
+    reg_write64(result, REG_RSP, result->obj->size);
 
     return result;
 }
@@ -701,7 +779,7 @@ operand_addr(Reg_Kind base, Reg_Kind index, int32_t scale, int32_t displacement,
 }
 
 Operand *
-operand_addr(Reg_Kind base, int32_t displacement, int32_t size) {
+operand_addr(Reg_Kind base, int32_t displacement, int32_t size, Section section = SECTION_TEXT) {
     Operand *result = urq_allocs(Operand);
 
     result->kind              = OPERAND_ADDR;
@@ -804,24 +882,25 @@ vm_instr(Loc *loc, Vm_Op op, char *label = NULL, char *comment = NULL) {
 
 Instr *
 vm_instr_fetch(Cpu *cpu) {
-    Instrs instrs = (Instrs)sss_text_section(cpu->bin);
-
     uint64_t rip = reg_read64(cpu, REG_RIP);
-    Instr *result = instrs[rip];
+    Instr *result = cpu->instrs[rip];
     reg_write64(cpu, REG_RIP, reg_read64(cpu, REG_RIP) + 1);
 
     return result;
 }
 
 void
-vm_instr_patch(uint32_t index, uint32_t displacement) {
-    vm_instrs[index]->operand1->addr.displacement = displacement;
+vm_instr_patch(Vm *vm, uint32_t index, uint32_t displacement) {
+    Instr *instr = vm->text[index];
+
+    instr->operand1->addr.displacement = displacement;
 }
 
 uint32_t
-vm_emit(Instr *instr) {
-    uint32_t result = buf_len(vm_instrs);
-    buf_push(vm_instrs, instr);
+vm_emit(Vm *vm, Instr *instr) {
+    uint32_t result = INSTR_NUM();
+
+    buf_push(vm->text, instr);
     instr->addr = result;
 
     if ( instr->label ) {
@@ -916,34 +995,34 @@ stack_pop(Cpu *cpu, Operand *op) {
 }
 
 void
-vm_emit_and(Expr_Bin *expr, Mem *mem) {
-    vm_expr(expr->left, mem);
-    vm_emit(vm_instr(expr, OP_CMP, operand_rax(expr->type->size), operand_imm(value1, expr->type->size)));
-    int32_t jmp1_instr = vm_emit(vm_instr(expr, OP_JNE, operand_addr(REG_NONE, 0, expr->type->size)));
+vm_emit_and(Expr_Bin *expr, Vm *vm) {
+    vm_expr(expr->left, vm);
+    vm_emit(vm, vm_instr(expr, OP_CMP, operand_rax(expr->type->size), operand_imm(value1, expr->type->size)));
+    int32_t jmp1_instr = vm_emit(vm, vm_instr(expr, OP_JNE, operand_addr(REG_NONE, 0, expr->type->size)));
 
-    vm_expr(expr->right, mem);
-    vm_emit(vm_instr(expr, OP_CMP, operand_rax(expr->type->size), operand_imm(value1, expr->type->size)));
+    vm_expr(expr->right, vm);
+    vm_emit(vm, vm_instr(expr, OP_CMP, operand_rax(expr->type->size), operand_imm(value1, expr->type->size)));
 
-    vm_instr_patch(jmp1_instr, buf_len(vm_instrs));
+    vm_instr_patch(vm, jmp1_instr, INSTR_NUM());
 }
 
 void
-vm_emit_or(Expr_Bin *expr, Mem *mem) {
-    vm_expr(expr->left, mem);
-    vm_emit(vm_instr(expr, OP_CMP, operand_rax(expr->type->size), operand_imm(value1, expr->type->size)));
-    int32_t jmp1_instr = vm_emit(vm_instr(expr, OP_JE, operand_addr(REG_NONE, 0, expr->type->size)));
+vm_emit_or(Expr_Bin *expr, Vm *vm) {
+    vm_expr(expr->left, vm);
+    vm_emit(vm, vm_instr(expr, OP_CMP, operand_rax(expr->type->size), operand_imm(value1, expr->type->size)));
+    int32_t jmp1_instr = vm_emit(vm, vm_instr(expr, OP_JE, operand_addr(REG_NONE, 0, expr->type->size)));
 
-    vm_expr(expr->right, mem);
-    vm_emit(vm_instr(expr, OP_CMP, operand_rax(expr->type->size), operand_imm(value1, expr->type->size)));
+    vm_expr(expr->right, vm);
+    vm_emit(vm, vm_instr(expr, OP_CMP, operand_rax(expr->type->size), operand_imm(value1, expr->type->size)));
 
-    vm_instr_patch(jmp1_instr, buf_len(vm_instrs));
+    vm_instr_patch(vm, jmp1_instr, INSTR_NUM());
 }
 
 void
-vm_expr(Expr *expr, Mem *mem, bool assign) {
+vm_expr(Expr *expr, Vm *vm, bool assign) {
     switch ( expr->kind ) {
         case EXPR_BOOL: {
-            vm_emit(vm_instr(expr, OP_MOV, operand_rax(expr->type->size), operand_imm(value(EBOOL(expr)->val), expr->type->size)));
+            vm_emit(vm, vm_instr(expr, OP_MOV, operand_rax(expr->type->size), operand_imm(value(EBOOL(expr)->val), expr->type->size)));
         } break;
 
         case EXPR_BIN: {
@@ -951,50 +1030,50 @@ vm_expr(Expr *expr, Mem *mem, bool assign) {
             uint32_t lhs_size = EBIN(expr)->left->type->size;
 
             if ( EBIN(expr)->op == BIN_AND ) {
-                vm_emit_and(EBIN(expr), mem);
+                vm_emit_and(EBIN(expr), vm);
             } else if ( EBIN(expr)->op == BIN_OR ) {
-                vm_emit_and(EBIN(expr), mem);
+                vm_emit_and(EBIN(expr), vm);
             } else {
-                vm_expr(EBIN(expr)->right, mem);
-                vm_emit(vm_instr(expr, OP_PUSH, operand_rax(rhs_size)));
+                vm_expr(EBIN(expr)->right, vm);
+                vm_emit(vm, vm_instr(expr, OP_PUSH, operand_rax(rhs_size)));
 
-                vm_expr(EBIN(expr)->left, mem);
-                vm_emit(vm_instr(expr, OP_POP, operand_rdi(rhs_size)));
+                vm_expr(EBIN(expr)->left, vm);
+                vm_emit(vm, vm_instr(expr, OP_POP, operand_rdi(rhs_size)));
 
                 if ( EBIN(expr)->op == BIN_ADD ) {
-                    vm_emit(vm_instr(expr, OP_ADD, operand_rax(expr->type->size), operand_rdi(expr->type->size)));
+                    vm_emit(vm, vm_instr(expr, OP_ADD, operand_rax(expr->type->size), operand_rdi(expr->type->size)));
                 } else if ( EBIN(expr)->op == BIN_SUB ) {
-                    vm_emit(vm_instr(expr, OP_SUB, operand_rax(expr->type->size), operand_rdi(expr->type->size)));
+                    vm_emit(vm, vm_instr(expr, OP_SUB, operand_rax(expr->type->size), operand_rdi(expr->type->size)));
                 } else if ( EBIN(expr)->op == BIN_MUL ) {
                     if ( type_issigned(expr->type) ) {
-                        vm_emit(vm_instr(expr, OP_IMUL, operand_rax(expr->type->size), operand_rdi(expr->type->size)));
+                        vm_emit(vm, vm_instr(expr, OP_IMUL, operand_rax(expr->type->size), operand_rdi(expr->type->size)));
                     } else {
-                        vm_emit(vm_instr(expr, OP_MUL, operand_rax(expr->type->size), operand_rdi(expr->type->size)));
+                        vm_emit(vm, vm_instr(expr, OP_MUL, operand_rax(expr->type->size), operand_rdi(expr->type->size)));
                     }
                 } else if ( EBIN(expr)->op == BIN_DIV ) {
                     if ( type_issigned(EBIN(expr)->right->type) ) {
-                        vm_emit(vm_instr(expr, OP_DIV, operand_rdi(expr->type->size)));
+                        vm_emit(vm, vm_instr(expr, OP_DIV, operand_rdi(expr->type->size)));
                     } else {
-                        vm_emit(vm_instr(expr, OP_IDIV, operand_rdi(expr->type->size)));
+                        vm_emit(vm, vm_instr(expr, OP_IDIV, operand_rdi(expr->type->size)));
                     }
                 } else if ( EBIN(expr)->op == BIN_LT ) {
-                    vm_emit(vm_instr(expr, OP_CMP, operand_rax(expr->type->size), operand_rdi(expr->type->size)));
-                    vm_emit(vm_instr(expr, OP_SETL, operand_rax(expr->type->size)));
+                    vm_emit(vm, vm_instr(expr, OP_CMP, operand_rax(expr->type->size), operand_rdi(expr->type->size)));
+                    vm_emit(vm, vm_instr(expr, OP_SETL, operand_rax(expr->type->size)));
                 } else if ( EBIN(expr)->op == BIN_LTE ) {
-                    vm_emit(vm_instr(expr, OP_CMP, operand_rax(expr->type->size), operand_rdi(expr->type->size)));
-                    vm_emit(vm_instr(expr, OP_SETLE, operand_rax(expr->type->size)));
+                    vm_emit(vm, vm_instr(expr, OP_CMP, operand_rax(expr->type->size), operand_rdi(expr->type->size)));
+                    vm_emit(vm, vm_instr(expr, OP_SETLE, operand_rax(expr->type->size)));
                 } else if ( EBIN(expr)->op == BIN_EQ ) {
-                    vm_emit(vm_instr(expr, OP_CMP, operand_rax(expr->type->size), operand_rdi(expr->type->size)));
-                    vm_emit(vm_instr(expr, OP_SETE, operand_rax(expr->type->size)));
+                    vm_emit(vm, vm_instr(expr, OP_CMP, operand_rax(expr->type->size), operand_rdi(expr->type->size)));
+                    vm_emit(vm, vm_instr(expr, OP_SETE, operand_rax(expr->type->size)));
                 } else if ( EBIN(expr)->op == BIN_NEQ ) {
-                    vm_emit(vm_instr(expr, OP_CMP, operand_rax(expr->type->size), operand_rdi(expr->type->size)));
-                    vm_emit(vm_instr(expr, OP_SETNE, operand_rax(expr->type->size)));
+                    vm_emit(vm, vm_instr(expr, OP_CMP, operand_rax(expr->type->size), operand_rdi(expr->type->size)));
+                    vm_emit(vm, vm_instr(expr, OP_SETNE, operand_rax(expr->type->size)));
                 } else if ( EBIN(expr)->op == BIN_GTE ) {
-                    vm_emit(vm_instr(expr, OP_CMP, operand_rax(expr->type->size), operand_rdi(expr->type->size)));
-                    vm_emit(vm_instr(expr, OP_SETGE, operand_rax(expr->type->size)));
+                    vm_emit(vm, vm_instr(expr, OP_CMP, operand_rax(expr->type->size), operand_rdi(expr->type->size)));
+                    vm_emit(vm, vm_instr(expr, OP_SETGE, operand_rax(expr->type->size)));
                 } else if ( EBIN(expr)->op == BIN_GT ) {
-                    vm_emit(vm_instr(expr, OP_CMP, operand_rax(expr->type->size), operand_rdi(expr->type->size)));
-                    vm_emit(vm_instr(expr, OP_SETG, operand_rax(expr->type->size)));
+                    vm_emit(vm, vm_instr(expr, OP_CMP, operand_rax(expr->type->size), operand_rdi(expr->type->size)));
+                    vm_emit(vm, vm_instr(expr, OP_SETG, operand_rax(expr->type->size)));
                 } else {
                     assert(0);
                 }
@@ -1005,8 +1084,8 @@ vm_expr(Expr *expr, Mem *mem, bool assign) {
             for ( int i = (int32_t)ECALL(expr)->num_args; i > 0; --i ) {
                 Expr *arg = ECALL(expr)->args[i-1];
 
-                vm_expr(arg, mem);
-                vm_emit(vm_instr(expr, OP_PUSH, operand_rax(arg->type->size)));
+                vm_expr(arg, vm);
+                vm_emit(vm, vm_instr(expr, OP_PUSH, operand_rax(arg->type->size)));
             }
 
             /* @INFO: die ersten 4 argumente werden in die register gepackt. die übrigen werden auf
@@ -1015,27 +1094,27 @@ vm_expr(Expr *expr, Mem *mem, bool assign) {
             int32_t num_args = (int32_t)MIN(ECALL(expr)->num_args, 4);
             for ( int i = 0; i < num_args; ++i ) {
                 Expr *arg = ECALL(expr)->args[i];
-                vm_emit(vm_instr(expr, OP_POP, operand_args(arg->type->size, i)));
+                vm_emit(vm, vm_instr(expr, OP_POP, operand_args(arg->type->size, i)));
             }
 
-            vm_expr(ECALL(expr)->base, mem);
+            vm_expr(ECALL(expr)->base, vm);
 
             if ( ECALL(expr)->base->type->flags & TYPE_FLAG_SYS_CALL ) {
                 report_error(expr, "syscalls werden in der vm noch nicht unterstützt");
             } else {
-                vm_emit(vm_instr(expr, OP_CALL, operand_reg(REG_RAX, 8)));
+                vm_emit(vm, vm_instr(expr, OP_CALL, operand_reg(REG_RAX, 8)));
             }
         } break;
 
         case EXPR_CHAR: {
-            vm_emit(vm_instr(expr, OP_MOV, operand_rax(expr->type->size), operand_imm(value((uint64_t)ECHR(expr)->val, 1), 1)));
+            vm_emit(vm, vm_instr(expr, OP_MOV, operand_rax(expr->type->size), operand_imm(value((uint64_t)ECHR(expr)->val, 1), 1)));
         } break;
 
         case EXPR_DEREF: {
-            vm_expr(EDEREF(expr)->base, mem);
+            vm_expr(EDEREF(expr)->base, vm);
 
             if ( !assign ) {
-                vm_emit(vm_instr(expr, OP_MOV, operand_reg(REG_RAX, 8), operand_addr(REG_RAX, 0, 8)));
+                vm_emit(vm, vm_instr(expr, OP_MOV, operand_reg(REG_RAX, 8), operand_addr(REG_RAX, 0, 8)));
             }
         } break;
 
@@ -1043,9 +1122,9 @@ vm_expr(Expr *expr, Mem *mem, bool assign) {
             /* @INFO: sonderbehandlung */
             if ( EFIELD(expr)->base->type->kind == TYPE_PTR ) {
                 // für ptr muß ein mov anstatt eines lea erzeugt werden
-                vm_expr(EFIELD(expr)->base, mem, false);
+                vm_expr(EFIELD(expr)->base, vm, false);
             } else {
-                vm_expr(EFIELD(expr)->base, mem, true);
+                vm_expr(EFIELD(expr)->base, vm, true);
             }
 
             Expr      * base       = EFIELD(expr)->base;
@@ -1082,17 +1161,17 @@ vm_expr(Expr *expr, Mem *mem, bool assign) {
 
             assert(field);
             if ( type->kind == TYPE_STRUCT ) {
-                vm_emit(vm_instr(expr, OP_ADD, operand_rax(field->type->size), operand_imm(value((int64_t)field->offset, 4), 4)));
+                vm_emit(vm, vm_instr(expr, OP_ADD, operand_rax(field->type->size), operand_imm(value((int64_t)field->offset, 4), 4)));
 
                 if ( !assign ) {
-                    vm_emit(vm_instr(expr, OP_MOV, operand_rax(field->type->size), operand_addr(REG_RAX, 0, field->type->size)));
+                    vm_emit(vm, vm_instr(expr, OP_MOV, operand_rax(field->type->size), operand_addr(REG_RAX, 0, field->type->size)));
                 }
             } else if ( type->kind == TYPE_ENUM ) {
                 assert(!assign);
-                vm_expr(field->expr, mem);
+                vm_expr(field->expr, vm);
             } else if ( type->kind == TYPE_UNION ) {
                 if ( !assign ) {
-                    vm_emit(vm_instr(expr, OP_MOV, operand_rax(field->type->size), operand_addr(REG_RAX, 0, field->type->size)));
+                    vm_emit(vm, vm_instr(expr, OP_MOV, operand_rax(field->type->size), operand_addr(REG_RAX, 0, field->type->size)));
                 }
             } else {
                 assert(0);
@@ -1101,7 +1180,7 @@ vm_expr(Expr *expr, Mem *mem, bool assign) {
 
         case EXPR_FLOAT: {
             /* @AUFGABE: floats in entsprechende xmm register schieben */
-            vm_emit(vm_instr(expr, OP_MOV, operand_reg(REG_RAX, 8), operand_imm(value(EFLOAT(expr)->val), expr->type->size)));
+            vm_emit(vm, vm_instr(expr, OP_MOV, operand_reg(REG_RAX, 8), operand_imm(value(EFLOAT(expr)->val), expr->type->size)));
         } break;
 
         case EXPR_IDENT: {
@@ -1111,22 +1190,22 @@ vm_expr(Expr *expr, Mem *mem, bool assign) {
             if (sym->decl->is_global) {
                 if ( sym->decl->kind == DECL_PROC ) {
                     if ( !(sym->decl->type->flags & TYPE_FLAG_SYS_CALL) ) {
-                        vm_emit(vm_instr(expr, OP_LEA, operand_rax(sym->type->size), operand_label(sym->name)));
+                        vm_emit(vm, vm_instr(expr, OP_LEA, operand_rax(sym->type->size), operand_label(sym->name)));
                     }
                 } else {
                     /* @INFO: sonderbehandlung */
                     if ( assign && expr->type->kind != TYPE_ARRAY ) {
-                        vm_emit(vm_instr(expr, OP_LEA, operand_rax(sym->type->size), operand_addr(REG_NONE, sym->decl->offset, sym->type->size)));
+                        vm_emit(vm, vm_instr(expr, OP_LEA, operand_rax(sym->type->size), operand_addr(REG_NONE, sym->decl->offset, sym->type->size)));
                     } else {
-                        vm_emit(vm_instr(expr, OP_MOV, operand_rax(sym->type->size), operand_addr(REG_NONE, sym->decl->offset, sym->type->size)));
+                        vm_emit(vm, vm_instr(expr, OP_MOV, operand_rax(sym->type->size), operand_addr(REG_NONE, sym->decl->offset, sym->type->size)));
                     }
                 }
             } else {
                 /* @INFO: sonderbehandlung */
                 if ( assign && expr->type->kind != TYPE_ARRAY ) {
-                    vm_emit(vm_instr(expr, OP_LEA, operand_rax(sym->type->size), operand_addr(REG_RBP, sym->decl->offset, sym->type->size)));
+                    vm_emit(vm, vm_instr(expr, OP_LEA, operand_rax(sym->type->size), operand_addr(REG_RBP, sym->decl->offset, sym->type->size)));
                 } else {
-                    vm_emit(vm_instr(expr, OP_MOV, operand_rax(sym->type->size), operand_addr(REG_RBP, sym->decl->offset, sym->type->size)));
+                    vm_emit(vm, vm_instr(expr, OP_MOV, operand_rax(sym->type->size), operand_addr(REG_RBP, sym->decl->offset, sym->type->size)));
                 }
             }
         } break;
@@ -1136,53 +1215,52 @@ vm_expr(Expr *expr, Mem *mem, bool assign) {
             uint32_t num_elems  = TARRAY(EINDEX(expr)->base->type)->num_elems;
             uint32_t elem_size  = TARRAY(EINDEX(expr)->base->type)->base->size;
 
-            vm_expr(EINDEX(expr)->base, mem, true);
-            vm_emit(vm_instr(expr, OP_PUSH, operand_rax(index_size)));
+            vm_expr(EINDEX(expr)->base, vm, true);
+            vm_emit(vm, vm_instr(expr, OP_PUSH, operand_rax(index_size)));
 
-            vm_expr(EINDEX(expr)->index, mem);
-            vm_emit(vm_instr(expr, OP_MUL, operand_rax(index_size), operand_imm(value(elem_size), index_size)));
+            vm_expr(EINDEX(expr)->index, vm);
+            vm_emit(vm, vm_instr(expr, OP_MUL, operand_rax(index_size), operand_imm(value(elem_size), index_size)));
 
-            vm_emit(vm_instr(expr, OP_POP, operand_rsi(index_size)));
-            vm_emit(vm_instr(expr, OP_ADD, operand_rax(index_size), operand_rsi(index_size)));
+            vm_emit(vm, vm_instr(expr, OP_POP, operand_rsi(index_size)));
+            vm_emit(vm, vm_instr(expr, OP_ADD, operand_rax(index_size), operand_rsi(index_size)));
 
             if ( !assign ) {
-                vm_emit(vm_instr(expr, OP_MOV, operand_rax(index_size), operand_addr(REG_RAX, 0, index_size)));
+                vm_emit(vm, vm_instr(expr, OP_MOV, operand_rax(index_size), operand_addr(REG_RAX, 0, index_size)));
             }
         } break;
 
         case EXPR_INT: {
             if ( type_issigned(expr->type) ) {
-                vm_emit(vm_instr(expr, OP_MOV, operand_rax(expr->type->size), operand_imm(value((int64_t)EINT(expr)->val, expr->type->size), expr->type->size)));
+                vm_emit(vm, vm_instr(expr, OP_MOV, operand_rax(expr->type->size), operand_imm(value((int64_t)EINT(expr)->val, expr->type->size), expr->type->size)));
             } else {
-                vm_emit(vm_instr(expr, OP_MOV, operand_rax(expr->type->size), operand_imm(value((uint64_t)EINT(expr)->val, expr->type->size), expr->type->size)));
+                vm_emit(vm, vm_instr(expr, OP_MOV, operand_rax(expr->type->size), operand_imm(value((uint64_t)EINT(expr)->val, expr->type->size), expr->type->size)));
             }
         } break;
 
         case EXPR_NOT: {
-            vm_expr(ENOT(expr)->expr, mem);
-            vm_emit(vm_instr(expr, OP_NOT, operand_rax(expr->type->size)));
+            vm_expr(ENOT(expr)->expr, vm);
+            vm_emit(vm, vm_instr(expr, OP_NOT, operand_rax(expr->type->size)));
         } break;
 
         case EXPR_PAREN: {
-            vm_expr(EPAREN(expr)->expr, mem, assign);
+            vm_expr(EPAREN(expr)->expr, vm, assign);
         } break;
 
         case EXPR_PTR: {
-            vm_expr(EPTR(expr)->base, mem, true);
+            vm_expr(EPTR(expr)->base, vm, true);
         } break;
 
         case EXPR_STR: {
             uint32_t str_size = utf8_str_size(ESTR(expr)->val);
+            expr->offset = mem_push(vm->rdata, ESTR(expr)->val, str_size);
 
-            expr->offset = mem_alloc(mem, str_size);
-            mem_copy(mem, expr->offset, str_size, ESTR(expr)->val);
-
-            vm_emit(vm_instr(expr, OP_LEA, operand_rax(expr->type->size), operand_addr(REG_NONE, expr->offset, expr->type->size)));
+            Instr *instr = vm_instr(expr, OP_LEA, operand_rax(expr->type->size), operand_addr(REG_NONE, expr->offset, expr->type->size, SECTION_RDATA));
+            vm_emit(vm, instr);
         } break;
 
         case EXPR_UNARY: {
-            vm_expr(EUNARY(expr)->expr, mem);
-            vm_emit(vm_instr(expr, OP_NEG, operand_rax(expr->type->size)));
+            vm_expr(EUNARY(expr)->expr, vm);
+            vm_emit(vm, vm_instr(expr, OP_NEG, operand_rax(expr->type->size)));
         } break;
 
         default: {
@@ -1192,27 +1270,27 @@ vm_expr(Expr *expr, Mem *mem, bool assign) {
 }
 
 void
-vm_decl(Decl *decl, Mem *mem) {
+vm_decl(Decl *decl, Vm *vm) {
     switch ( decl->kind ) {
         case DECL_PROC: {
             if ( DPROC(decl)->sign->sys_call ) {
                 return;
             }
 
-            vm_emit(vm_instr(decl, OP_ENTER, operand_imm(value((uint64_t)DPROC(decl)->scope->frame_size, 4), 4), decl->name));
+            vm_emit(vm, vm_instr(decl, OP_ENTER, operand_imm(value((uint64_t)DPROC(decl)->scope->frame_size, 4), 4), decl->name));
 
             uint8_t reg = 0;
             for ( uint32_t i = 0; i < DPROC(decl)->sign->num_params; ++i ) {
                 Decl_Var *param = DPROC(decl)->sign->params[i];
 
                 if ( i < 4 ) {
-                    vm_emit(vm_instr(decl, OP_MOV, operand_rbp(param->type->size, param->offset), operand_args(param->type->size, reg++)));
+                    vm_emit(vm, vm_instr(decl, OP_MOV, operand_rbp(param->type->size, param->offset), operand_args(param->type->size, reg++)));
                 }
             }
 
-            vm_stmt(DPROC(decl)->block, mem);
-            vm_emit(vm_instr(decl, OP_LEAVE, make_label("%s.end", decl->name)));
-            vm_emit(vm_instr(decl, OP_RET));
+            vm_stmt(DPROC(decl)->block, vm);
+            vm_emit(vm, vm_instr(decl, OP_LEAVE, make_label("%s.end", decl->name)));
+            vm_emit(vm, vm_instr(decl, OP_RET));
         } break;
 
         case DECL_ENUM:
@@ -1227,16 +1305,16 @@ vm_decl(Decl *decl, Mem *mem) {
             Expr *expr = DVAR(decl)->expr;
 
             if ( decl->is_global ) {
-                decl->offset = mem_alloc(mem, decl->type->size);
+                decl->offset = mem_alloc(vm->data, decl->type->size);
 
                 if ( expr ) {
-                    vm_expr(expr, mem);
-                    vm_emit(vm_instr(decl, OP_MOV, operand_addr(REG_NONE, decl->offset, decl->type->size), operand_rax(decl->type->size)));
+                    vm_expr(expr, vm);
+                    vm_emit(vm, vm_instr(decl, OP_MOV, operand_addr(REG_NONE, decl->offset, decl->type->size), operand_rax(decl->type->size)));
                 }
             } else {
                 if ( expr ) {
-                    vm_expr(expr, mem);
-                    vm_emit(vm_instr(decl, OP_MOV, operand_rbp(expr->type->size, decl->offset), operand_rax(expr->type->size)));
+                    vm_expr(expr, vm);
+                    vm_emit(vm, vm_instr(decl, OP_MOV, operand_rbp(expr->type->size, decl->offset), operand_rax(expr->type->size)));
                 }
             }
         } break;
@@ -1248,19 +1326,19 @@ vm_decl(Decl *decl, Mem *mem) {
 }
 
 void
-vm_stmt(Stmt *stmt, Mem *mem) {
+vm_stmt(Stmt *stmt, Vm *vm) {
     switch ( stmt->kind ) {
         case STMT_ASSIGN: {
             uint32_t lhs_size = SASSIGN(stmt)->lhs->type->size;
             uint32_t rhs_size = SASSIGN(stmt)->rhs->type->size;
 
-            vm_expr(SASSIGN(stmt)->lhs, mem, true);
-            vm_emit(vm_instr(stmt, OP_PUSH, operand_rax(lhs_size)));
+            vm_expr(SASSIGN(stmt)->lhs, vm, true);
+            vm_emit(vm, vm_instr(stmt, OP_PUSH, operand_rax(lhs_size)));
 
-            vm_expr(SASSIGN(stmt)->rhs, mem);
+            vm_expr(SASSIGN(stmt)->rhs, vm);
 
-            vm_emit(vm_instr(stmt, OP_POP, operand_rdi(4)));
-            vm_emit(vm_instr(stmt, OP_MOV, operand_addr(REG_RDI, 0, 4), operand_rax(SASSIGN(stmt)->rhs->type->size)));
+            vm_emit(vm, vm_instr(stmt, OP_POP, operand_rdi(4)));
+            vm_emit(vm, vm_instr(stmt, OP_MOV, operand_addr(REG_RDI, 0, 4), operand_rax(SASSIGN(stmt)->rhs->type->size)));
         } break;
 
         case STMT_BLOCK: {
@@ -1275,13 +1353,13 @@ vm_stmt(Stmt *stmt, Mem *mem) {
                 if ( s->kind == STMT_DEFER ) {
                     buf_push(deferred_stmts, s);
                 } else {
-                    vm_stmt(s, mem);
+                    vm_stmt(s, vm);
                 }
             }
 
             for ( int i = buf_len(deferred_stmts); i > 0; --i ) {
                 Stmt_Defer *s = SDEFER(deferred_stmts[i-1]);
-                vm_stmt(s->stmt, mem);
+                vm_stmt(s->stmt, vm);
             }
 
             for ( int i = 0; i < SBLOCK(stmt)->num_stmts; ++i ) {
@@ -1291,57 +1369,57 @@ vm_stmt(Stmt *stmt, Mem *mem) {
                     continue;
                 }
 
-                vm_stmt(s, mem);
+                vm_stmt(s, vm);
             }
         } break;
 
         case STMT_BREAK: {
-            int32_t addr = vm_emit(vm_instr(stmt, OP_JMP, operand_addr(REG_NONE, 0, 4), (char *)NULL, "break"));
+            int32_t addr = vm_emit(vm, vm_instr(stmt, OP_JMP, operand_addr(REG_NONE, 0, 4), (char *)NULL, "break"));
 
             buf_push(SFOR(SBREAK(stmt)->parent)->break_instrs, addr);
         } break;
 
         case STMT_CONTINUE: {
-            int32_t addr = vm_emit(vm_instr(stmt, OP_JMP, operand_addr(REG_NONE, 0, 4), (char *)NULL, "continue"));
+            int32_t addr = vm_emit(vm, vm_instr(stmt, OP_JMP, operand_addr(REG_NONE, 0, 4), (char *)NULL, "continue"));
 
             buf_push(SFOR(SBREAK(stmt)->parent)->continue_instrs, addr);
         } break;
 
         case STMT_DECL: {
-            vm_decl(SDECL(stmt)->decl, mem);
+            vm_decl(SDECL(stmt)->decl, vm);
         } break;
 
         case STMT_EXPR: {
-            vm_expr(SEXPR(stmt)->expr, mem);
+            vm_expr(SEXPR(stmt)->expr, vm);
         } break;
 
         case STMT_FOR: {
-            vm_stmt(SFOR(stmt)->init, mem);
-            int32_t loop_start = buf_len(vm_instrs);
-            vm_expr(SFOR(stmt)->cond, mem);
-            vm_emit(vm_instr(stmt, OP_CMP, operand_rax(SFOR(stmt)->cond->type->size), operand_imm(value1, SFOR(stmt)->cond->type->size)));
-            int32_t jmpnz_instr = vm_emit(vm_instr(stmt, OP_JNZ, operand_addr(REG_NONE, 0, SFOR(stmt)->cond->type->size)));
-            vm_stmt(SFOR(stmt)->block, mem);
-            vm_stmt(SFOR(stmt)->step, mem);
-            vm_emit(vm_instr(stmt, OP_JMP, operand_addr(REG_NONE, loop_start, SFOR(stmt)->cond->type->size)));
+            vm_stmt(SFOR(stmt)->init, vm);
+            int32_t loop_start = INSTR_NUM();
+            vm_expr(SFOR(stmt)->cond, vm);
+            vm_emit(vm, vm_instr(stmt, OP_CMP, operand_rax(SFOR(stmt)->cond->type->size), operand_imm(value1, SFOR(stmt)->cond->type->size)));
+            int32_t jmpnz_instr = vm_emit(vm, vm_instr(stmt, OP_JNZ, operand_addr(REG_NONE, 0, SFOR(stmt)->cond->type->size)));
+            vm_stmt(SFOR(stmt)->block, vm);
+            vm_stmt(SFOR(stmt)->step, vm);
+            vm_emit(vm, vm_instr(stmt, OP_JMP, operand_addr(REG_NONE, loop_start, SFOR(stmt)->cond->type->size)));
 
             /* @AUFGABE: sonst zweig für schleife */
             if ( SFOR(stmt)->stmt_else ) {
                 report_error(stmt, "%s wird für die %s schleife noch nicht unterstützt", keyword_else, keyword_for);
             }
 
-            int32_t loop_end = buf_len(vm_instrs);
+            int32_t loop_end = INSTR_NUM();
 
-            vm_instr_patch(jmpnz_instr, loop_end);
+            vm_instr_patch(vm, jmpnz_instr, loop_end);
 
             /* @INFO: break anweisungen patchen */
             for ( int i = 0; i < buf_len(SFOR(stmt)->break_instrs); ++i ) {
-                vm_instr_patch(SFOR(stmt)->break_instrs[i], loop_end);
+                vm_instr_patch(vm, SFOR(stmt)->break_instrs[i], loop_end);
             }
 
             /* @INFO: continue anweisungen patchen */
             for ( int i = 0; i < buf_len(SFOR(stmt)->continue_instrs); ++i ) {
-                vm_instr_patch(SFOR(stmt)->continue_instrs[i], loop_start);
+                vm_instr_patch(vm, SFOR(stmt)->continue_instrs[i], loop_start);
             }
         } break;
 
@@ -1349,19 +1427,19 @@ vm_stmt(Stmt *stmt, Mem *mem) {
             static uint32_t loop_count = 0;
             char *label = make_label("if.%d", loop_count++);
 
-            vm_expr(SIF(stmt)->cond, mem);
-            vm_emit(vm_instr(stmt, OP_CMP, operand_rax(SIF(stmt)->cond->type->size), operand_imm(value1, SIF(stmt)->cond->type->size)));
-            int32_t jmp1_instr = vm_emit(vm_instr(stmt, OP_JNE, operand_addr(REG_NONE, 0, SIF(stmt)->cond->type->size), label));
-            vm_stmt(SIF(stmt)->stmt, mem);
-            int32_t jmp2_instr = vm_emit(vm_instr(stmt, OP_JMP, operand_addr(REG_NONE, 0, SIF(stmt)->cond->type->size)));
+            vm_expr(SIF(stmt)->cond, vm);
+            vm_emit(vm, vm_instr(stmt, OP_CMP, operand_rax(SIF(stmt)->cond->type->size), operand_imm(value1, SIF(stmt)->cond->type->size)));
+            int32_t jmp1_instr = vm_emit(vm, vm_instr(stmt, OP_JNE, operand_addr(REG_NONE, 0, SIF(stmt)->cond->type->size), label));
+            vm_stmt(SIF(stmt)->stmt, vm);
+            int32_t jmp2_instr = vm_emit(vm, vm_instr(stmt, OP_JMP, operand_addr(REG_NONE, 0, SIF(stmt)->cond->type->size)));
 
-            vm_instr_patch(jmp1_instr, buf_len(vm_instrs));
+            vm_instr_patch(vm, jmp1_instr, INSTR_NUM());
 
             if ( SIF(stmt)->stmt_else ) {
-                vm_stmt(SIF(stmt)->stmt_else, mem);
+                vm_stmt(SIF(stmt)->stmt_else, vm);
             }
 
-            vm_instr_patch(jmp2_instr, buf_len(vm_instrs));
+            vm_instr_patch(vm, jmp2_instr, INSTR_NUM());
         } break;
 
         case STMT_MATCH: {
@@ -1370,37 +1448,37 @@ vm_stmt(Stmt *stmt, Mem *mem) {
             for ( int i = 0; i < SMATCH(stmt)->num_lines; ++i ) {
                 Match_Line *line = SMATCH(stmt)->lines[i];
 
-                vm_expr(line->cond, mem);
-                int32_t jmp_next = vm_emit(vm_instr(line, OP_JNZ, operand_addr(REG_NONE, 0, line->cond->type->size)));
-                vm_stmt(line->stmt, mem);
-                buf_push(jmp_exit_instrs, vm_emit(vm_instr(line, OP_JMP, operand_addr(REG_NONE, 0, line->cond->type->size))));
-                vm_instr_patch(jmp_next, buf_len(vm_instrs));
+                vm_expr(line->cond, vm);
+                int32_t jmp_next = vm_emit(vm, vm_instr(line, OP_JNZ, operand_addr(REG_NONE, 0, line->cond->type->size)));
+                vm_stmt(line->stmt, vm);
+                buf_push(jmp_exit_instrs, vm_emit(vm, vm_instr(line, OP_JMP, operand_addr(REG_NONE, 0, line->cond->type->size))));
+                vm_instr_patch(vm, jmp_next, INSTR_NUM());
             }
 
-            int32_t exit_addr = buf_len(vm_instrs);
+            int32_t exit_addr = INSTR_NUM();
             for ( int i = 0; i < buf_len(jmp_exit_instrs); ++i ) {
-                vm_instr_patch(jmp_exit_instrs[i], exit_addr);
+                vm_instr_patch(vm, jmp_exit_instrs[i], exit_addr);
             }
         } break;
 
         case STMT_RET: {
             if ( SRET(stmt)->num_exprs ) {
-                vm_expr(SRET(stmt)->exprs[0], mem);
+                vm_expr(SRET(stmt)->exprs[0], vm);
             }
 
-            vm_emit(vm_instr(stmt, OP_LEAVE));
-            vm_emit(vm_instr(stmt, OP_RET));
+            vm_emit(vm, vm_instr(stmt, OP_LEAVE));
+            vm_emit(vm, vm_instr(stmt, OP_RET));
         } break;
 
         case STMT_WHILE: {
-            int32_t loop_start = buf_len(vm_instrs);
-            vm_expr(SWHILE(stmt)->cond, mem);
-            vm_emit(vm_instr(stmt, OP_CMP, operand_rax(SWHILE(stmt)->cond->type->size), operand_imm(value0, SWHILE(stmt)->cond->type->size)));
-            int32_t jmp_instr = vm_emit(vm_instr(stmt, OP_JZ, operand_addr(REG_NONE, 0, SWHILE(stmt)->cond->type->size), operand_imm(value1, SWHILE(stmt)->cond->type->size)));
-            vm_stmt(SWHILE(stmt)->block, mem);
-            vm_emit(vm_instr(stmt, OP_JMP, operand_addr(REG_NONE, loop_start, SWHILE(stmt)->cond->type->size)));
+            int32_t loop_start = INSTR_NUM();
+            vm_expr(SWHILE(stmt)->cond, vm);
+            vm_emit(vm, vm_instr(stmt, OP_CMP, operand_rax(SWHILE(stmt)->cond->type->size), operand_imm(value0, SWHILE(stmt)->cond->type->size)));
+            int32_t jmp_instr = vm_emit(vm, vm_instr(stmt, OP_JZ, operand_addr(REG_NONE, 0, SWHILE(stmt)->cond->type->size), operand_imm(value1, SWHILE(stmt)->cond->type->size)));
+            vm_stmt(SWHILE(stmt)->block, vm);
+            vm_emit(vm, vm_instr(stmt, OP_JMP, operand_addr(REG_NONE, loop_start, SWHILE(stmt)->cond->type->size)));
 
-            vm_instr_patch(jmp_instr, buf_len(vm_instrs));
+            vm_instr_patch(vm, jmp_instr, INSTR_NUM());
         } break;
 
         default: {
@@ -1829,27 +1907,32 @@ step(Cpu *cpu) {
 }
 
 uint8_t *
-compile(Parsed_File *file, Mem *mem) {
+compile(Parsed_File *file) {
+    Vm *vm = vm_new();
+
     for ( int i = 0; i < buf_len(file->stmts); ++i ) {
-        vm_stmt(file->stmts[i], mem);
+        vm_stmt(file->stmts[i], vm);
     }
 
-    uint64_t entry = addr_lookup(entry_point) * sizeof(Instr);
-    uint8_t *result = sss_create(mem->mem, mem->used, (uint8_t *)vm_instrs, buf_len(vm_instrs)*8, entry);
+    uint64_t entry = addr_lookup(entry_point);
+
+    uint8_t *result = obj_create(
+            vm->rdata->mem, vm->rdata->used,
+            (uint8_t *)vm->text, buf_len(vm->text)*sizeof(Instr*),
+            vm->data->mem,  vm->data->used,
+            entry);
 
     return result;
 }
 
 uint64_t
-eval(uint8_t *bin, Mem *mem, uint32_t flags = EVAL_WITH_ENTRY_POINT) {
-    Cpu *cpu = NULL;
+eval(uint8_t *obj, uint32_t flags = EVAL_WITH_ENTRY_POINT) {
+    Cpu *cpu = cpu_new(obj);
 
     if ( flags & EVAL_WITH_ENTRY_POINT ) {
-        uint32_t start_addr = addr_lookup(entry_point);
+        uint64_t num_instr = obj_text_num_entries(obj);
 
-        cpu = cpu_new(bin, mem, start_addr);
-
-        stack_push(cpu, buf_len(vm_instrs), 8);
+        stack_push(cpu, num_instr, 8);
         stack_push(cpu, reg_read64(cpu, REG_RBX), 8);
         stack_push(cpu, reg_read64(cpu, REG_RCX), 8);
         stack_push(cpu, reg_read64(cpu, REG_RDX), 8);
@@ -1858,8 +1941,6 @@ eval(uint8_t *bin, Mem *mem, uint32_t flags = EVAL_WITH_ENTRY_POINT) {
         stack_push(cpu, reg_read64(cpu, REG_R13), 8);
         stack_push(cpu, reg_read64(cpu, REG_R14), 8);
         stack_push(cpu, reg_read64(cpu, REG_R15), 8);
-    } else {
-        cpu = cpu_new(bin, mem, 0);
     }
 
     for (;;) {

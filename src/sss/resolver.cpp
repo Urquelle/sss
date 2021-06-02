@@ -1544,6 +1544,12 @@ resolve_stmt(Stmt *stmt, Types rets, uint32_t num_rets) {
         } break;
 
         case STMT_MATCH: {
+            /* @AUFGABE: überprüfen ob jeder fall eines enums abgedeckt wurde */
+            /* @AUFGABE: überprüfen ob fälle mehrfach vorkommen */
+
+            if ( SMATCH(stmt)->cover_every_case ) {
+            }
+
             for ( int i = 0; i < SMATCH(stmt)->num_lines; ++i ) {
                 Match_Line *line = SMATCH(stmt)->lines[i];
 
