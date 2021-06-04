@@ -1,4 +1,4 @@
-<img src="https://github.com/Urquelle/sss/workflows/win10/badge.svg" />
+<img src="https://github.com/Urquelle/sss/actions/workflows/win10.yml/badge.svg" />
 
 # sss
 <p align="center">
@@ -66,12 +66,12 @@ das [beispiel1.sss](https://github.com/Urquelle/sss/tree/dev/beispiel/beispiel1.
 
 ### natürliche zahlen
 
-natürliche zahlen sind positive, ganze zahlen angefangen bei 0. diese menge wird durch die spracheigenen datentypen n8, n16, n32 und n64 repräsentiert.
+natürliche zahlen sind positive, ganze zahlen angefangen bei 0. diese menge wird durch die spracheigenen datentypen __`n8`__, __`n16`__, __`n32`__ und __`n64`__ repräsentiert.
 
 ### ganze zahlen
 
-ganze zahlen sind positive und negative ganze zahlen. diese menge wird durch die spracheigenen datentypen g8, g16, g32 und g64 repräsentiert.
+ganze zahlen sind positive und negative ganze zahlen. diese menge wird durch die spracheigenen datentypen __`g8`__, __`g16`__, __`g32`__ und __`g64`__ repräsentiert.
 
 ### rationale zahlen
 
-rationale zahlen sind alle zahlen, die einen quotienten zweier ganzer zahlen abbilden. diese menge wird durch die spracheigenen datentypen r32 und r64 repräsentiert.
+rationale zahlen sind alle zahlen, die einen quotienten zweier ganzer zahlen abbilden. diese menge wird durch die spracheigenen datentypen __`r32`__ und __`r64`__ repräsentiert.
