@@ -1,19 +1,19 @@
 #lade "W:/sss/data/expr.sss";
 
 Farbe :: struktur {
-    wert       : u32;
-    sättigung  : d32;
-    helligkeit : d32;
+    wert       : n32;
+    sättigung  : r32;
+    helligkeit : r32;
 }
 
 Vec3 :: struktur {
-    x, y, z : u32;
+    x, y, z : n32;
 }
 
-master :: proc() -> u32 {
-    a : s32 = 5;
-    b : u32;
-    c : [3][3] u32;
+master :: proc() -> n32 {
+    a : g32 = 5;
+    b : n32;
+    c : [3][3] n32;
     d := "abcdefg";
     v : Vec3;
 
@@ -32,18 +32,18 @@ master :: proc() -> u32 {
     b = index(1);
     c[index(2)][b] = 15;
 
-    wenn d[3] == 'd' {
+    wenn d[3] != 'd' {
         res 11;
     }
 
     res c[2][b];
 }
 
-test :: proc(x : *u32) {
+test :: proc(x : *n32) {
     @x = 25;
 }
 
-index :: proc(i : u32) -> u32 {
+index :: proc(i : n32) -> n32 {
     wenn i == 1 {
         res 1;
     } sonst {

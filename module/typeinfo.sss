@@ -1,16 +1,16 @@
 Datentyp_Art :: enum {
-    U8;
-    U16;
-    U32;
-    U64;
+    N8;
+    N16;
+    N32;
+    N64;
 
-    S8;
-    S16;
-    S32;
-    S64;
+    G8;
+    G16;
+    G32;
+    G64;
 
-    F32;
-    F64;
+    R32;
+    R64;
 
     Proc;
     Struktur;
@@ -18,7 +18,7 @@ Datentyp_Art :: enum {
     Zeiger;
 }
 
-typid :: typedef u32;
+typid :: typedef n32;
 
 Any :: struktur {
     id  : typid;
@@ -39,8 +39,8 @@ Datentyp :: struktur {
     id             : typid;
     art            : Datentyp_Art;
     name           : string;
-    größe          : u32;
-    versatz        : u32;
+    größe          : n32;
+    versatz        : n32;
     basis          : typid;
     felder         : [] Datentyp_Feld;
     parameter      : [] Datentyp_Feld;

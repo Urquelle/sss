@@ -1623,7 +1623,8 @@ void
 resolve_directive(Directive *dir) {
     switch ( dir->kind ) {
         case DIRECTIVE_IMPORT: {
-            Scope *scope = scope_new("import", module_scope);
+            DIRIMPORT(dir)->own_scope = scope_new("import", module_scope);
+            Scope *scope = DIRIMPORT(dir)->own_scope;
             Scope *prev_scope = scope_set(scope);
             resolve_file(DIRIMPORT(dir)->parsed_file);
             scope_set(prev_scope);
@@ -1640,6 +1641,8 @@ resolve_directive(Directive *dir) {
                 curr_scope = type->scope;
                 push_scope = type->scope;
             }
+
+            DIRIMPORT(dir)->import_scope = push_scope;
 
             /* @INFO: überprüfen ob export_syms im scope gesetzt wurden */
             if ( scope->num_export_syms ) {
@@ -2118,16 +2121,16 @@ resolver_init() {
 
     sym_push_sys("void",   type_void);
     sym_push_sys("char",   type_char);
-    sym_push_sys("u8",     type_u8);
-    sym_push_sys("u16",    type_u16);
-    sym_push_sys("u32",    type_u32);
-    sym_push_sys("u64",    type_u64);
-    sym_push_sys("s8",     type_s8);
-    sym_push_sys("s16",    type_s16);
-    sym_push_sys("s32",    type_s32);
-    sym_push_sys("s64",    type_s64);
-    sym_push_sys("d32",    type_f32);
-    sym_push_sys("d64",    type_f64);
+    sym_push_sys("n8",     type_u8);
+    sym_push_sys("n16",    type_u16);
+    sym_push_sys("n32",    type_u32);
+    sym_push_sys("n64",    type_u64);
+    sym_push_sys("g8",     type_s8);
+    sym_push_sys("g16",    type_s16);
+    sym_push_sys("g32",    type_s32);
+    sym_push_sys("g64",    type_s64);
+    sym_push_sys("r32",    type_f32);
+    sym_push_sys("r64",    type_f64);
     sym_push_sys("bool",   type_bool);
     sym_push_sys("string", type_string);
 

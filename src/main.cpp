@@ -78,7 +78,7 @@ int main(int argc, char* argv[]) {
                         debug(obj, "output.S");
         auto result   = eval(obj);
 
-        printf("result = %lld\n", result);
+        printf("ergebnis = %lld\n", result);
     }
 
     return 0;

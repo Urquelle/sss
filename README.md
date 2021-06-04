@@ -12,13 +12,13 @@ compiler für eine c-ähnliche sprache.
 #lade "W:/sss/data/expr.sss";
 
 Vec3 :: struktur {
-    x, y, z : u32;
+    x, y, z : n32;
 }
 
-master :: proc() -> u32 {
-    a : s32 = 5;
-    b : u32;
-    c : [3][3] u32;
+master :: proc() -> n32 {
+    a : g32 = 5;
+    b : n32;
+    c : [3][3] n32;
     v : Vec3;
 
     wenn a < 10 {
@@ -33,11 +33,11 @@ master :: proc() -> u32 {
     res c[2][b];
 }
 
-test :: proc(x : *u32) {
+test :: proc(x : *n32) {
     @x = 25;
 }
 
-index :: proc(i : u32) -> u32 {
+index :: proc(i : n32) -> n32 {
     wenn i == 1 {
         res 1;
     } sonst {
@@ -61,3 +61,17 @@ derzeit werden folgende konstrukte, anweisungen, direktiven und ausdrücke unste
 * mathematische ausdrücke
 
 das [beispiel1.sss](https://github.com/Urquelle/sss/tree/dev/beispiel/beispiel1.sss) wird zum bytecode transformiert und ausgeführt, das in [beispiel1.asm](https://github.com/Urquelle/sss/tree/dev/beispiel/beispiel1.asm)
+
+## datentypen
+
+### natürliche zahlen
+
+natürliche zahlen sind positive, ganze zahlen angefangen bei 0. diese menge wird durch die spracheigenen datentypen n8, n16, n32 und n64 repräsentiert.
+
+### ganze zahlen
+
+ganze zahlen sind positive und negative ganze zahlen. diese menge wird durch die spracheigenen datentypen g8, g16, g32 und g64 repräsentiert.
+
+### rationale zahlen
+
+rationale zahlen sind alle zahlen, die einen quotienten zweier ganzer zahlen abbilden. diese menge wird durch die spracheigenen datentypen r32 und r64 repräsentiert.

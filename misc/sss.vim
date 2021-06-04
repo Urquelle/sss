@@ -33,7 +33,7 @@ syntax keyword sssWhile solange
 syntax keyword sssContinue weiter
 syntax keyword sssBreak weg
 
-syntax keyword sssDataType void string char f32 f64 u8 u16 u32 u64 s8 s16 s32 s64 bool typeid
+syntax keyword sssDataType void string char r32 r64 n8 n16 n32 n64 g8 g16 g32 g64 bool typeid
 syntax keyword sssBool wahr falsch
 
 syntax keyword sssReturn res

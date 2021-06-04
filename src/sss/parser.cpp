@@ -341,6 +341,8 @@ struct Directive_Import : Directive {
     bool          wildcard;
     Module_Syms   syms;
     size_t        num_syms;
+    Scope       * own_scope;
+    Scope       * import_scope;
     Parsed_File * parsed_file;
 };
 
