@@ -26,7 +26,8 @@ Any :: struktur {
 }
 
 Optional :: struktur {
-    value : Any;
+    wert    : Any;
+    gesetzt : bool;
 }
 
 Datentyp_Feld :: struktur {
@@ -45,4 +46,8 @@ Datentyp :: struktur {
     felder         : [] Datentyp_Feld;
     parameter      : [] Datentyp_Feld;
     rückgabewerte  : [] Datentyp_Feld;
+}
+
+wert_gesetzt :: proc(var: Optional) -> bool {
+    res var.gesetzt;
 }

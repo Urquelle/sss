@@ -228,7 +228,7 @@ namespace api {
     using Urq::Sss::sss_repl;
     using Urq::Sss::tokenize;
 
-    using Urq::Sss::Vm::EVAL_REPL;
+    using Urq::Sss::Vm::VM_FLAGS_REPL;
 }
 
 }}

@@ -1,3 +1,5 @@
+#import (sag_hallo als hallo) aus test;
+
 #lade "W:/sss/data/expr.sss";
 
 Farbe :: struktur {
@@ -28,6 +30,9 @@ master :: proc() -> n32 {
             res 21;
         }
     }
+
+    j := hallo();
+    res j;
 
     b = index(1);
     c[index(2)][b] = 15;

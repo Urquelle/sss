@@ -9,15 +9,16 @@ struct Vm;
 
 #define INSTR_NUM() buf_len(vm->text)
 
-Mem  * mem_new(uint32_t size);
-void   vm_expr(Expr *expr, Vm *vm, bool assign = false);
-void   vm_stmt(Stmt *stmt, Vm *vm);
-
-enum Eval_Flags {
-    EVAL_NONE,
-    EVAL_REPL,
-    EVAL_WITH_ENTRY_POINT,
+enum Vm_Flags {
+    VM_FLAGS_NONE,
+    VM_FLAGS_REPL,
+    VM_FLAGS_WITH_ENTRY_POINT,
 };
+
+uint8_t * compile(Parsed_File *file, Vm *vm = NULL, uint32_t flags = VM_FLAGS_WITH_ENTRY_POINT);
+Mem     * mem_new(uint32_t size);
+void      vm_expr(Expr *expr, Vm *vm, bool assign = false);
+void      vm_stmt(Stmt *stmt, Vm *vm);
 
 enum Vm_Op : uint8_t {
     OP_HLT,
@@ -213,8 +214,13 @@ struct Vm {
     Mem    * data;
 };
 
-Instrs    vm_instrs_labeled;
-Mem       vm_rdata;
+struct Vm_Label {
+    char     * label;
+    uint32_t   addr;
+};
+
+Vm_Label * vm_labels;
+Mem        vm_rdata;
 
 Reg_Kind regs[] = { REG_RCX, REG_RDX, REG_R8, REG_R9 };
 
@@ -240,19 +246,29 @@ make_label(char *fmt, char *str) {
 }
 
 uint32_t
-addr_lookup(char *val) {
-    char *label = intern_str(val);
+vm_label_find(char *label) {
+    label = intern_str(label);
 
-    for ( int i = 0; i < buf_len(vm_instrs_labeled); ++i ) {
-        Instr *instr = vm_instrs_labeled[i];
+    for ( int i = 0; i < buf_len(vm_labels); ++i ) {
+        Vm_Label vm_existing_label = vm_labels[i];
 
-        if ( instr->label == label ) {
-            return instr->addr;
+        if ( vm_existing_label.label == label ) {
+            return vm_existing_label.addr;
         }
     }
 
     report_error(&loc_none, "keine passenden bezeichner für %s gefunden", label);
     return 0;
+}
+
+Vm_Label
+vm_label(char *label, uint32_t addr) {
+    Vm_Label result = {};
+
+    result.label = label;
+    result.addr  = addr;
+
+    return result;
 }
 
 Vm *
@@ -905,7 +921,7 @@ vm_emit(Vm *vm, Instr *instr) {
 
     if ( instr->label ) {
         instr->label = intern_str(instr->label);
-        buf_push(vm_instrs_labeled, instr);
+        buf_push(vm_labels, vm_label(instr->label, instr->addr));
     }
 
     return result;
@@ -1145,6 +1161,8 @@ vm_expr(Expr *expr, Vm *vm, bool assign) {
             } else if ( type->kind == TYPE_UNION ) {
                 num_fields = (int32_t)TENUM(type)->num_fields;
                 fields     = TENUM(type)->fields;
+            } else if ( type->kind == TYPE_NAMESPACE ) {
+                assert(!"namespace");
             } else {
                 assert(0);
             }
@@ -1186,6 +1204,10 @@ vm_expr(Expr *expr, Vm *vm, bool assign) {
         case EXPR_IDENT: {
             assert(EIDENT(expr)->sym);
             Sym *sym = EIDENT(expr)->sym;
+
+            if ( sym->kind == SYM_NAMESPACE ) {
+                return;
+            }
 
             if (sym->decl->is_global) {
                 if ( sym->decl->kind == DECL_PROC ) {
@@ -1277,7 +1299,11 @@ vm_decl(Decl *decl, Vm *vm) {
                 return;
             }
 
-            vm_emit(vm, vm_instr(decl, OP_ENTER, operand_imm(value((uint64_t)DPROC(decl)->scope->frame_size, 4), 4), decl->name));
+            uint32_t addr = vm_emit(vm, vm_instr(decl, OP_ENTER, operand_imm(value((uint64_t)DPROC(decl)->scope->frame_size, 4), 4), decl->name));
+
+            if ( decl->sym->foreign_name ) {
+                buf_push(vm_labels, vm_label(decl->sym->foreign_name, addr));
+            }
 
             uint8_t reg = 0;
             for ( uint32_t i = 0; i < DPROC(decl)->sign->num_params; ++i ) {
@@ -1533,7 +1559,7 @@ step(Cpu *cpu) {
             if ( instr->operand1->kind == OPERAND_REG ) {
                 reg_write64(cpu, REG_RIP, reg_read(cpu, instr->operand1));
             } else if ( instr->operand1->kind == OPERAND_LABEL ) {
-                reg_write64(cpu, REG_RIP, addr_lookup(instr->operand1->label));
+                reg_write64(cpu, REG_RIP, vm_label_find(instr->operand1->label));
             } else {
                 assert(0);
             }
@@ -1647,7 +1673,7 @@ step(Cpu *cpu) {
                 if ( instr->operand1->kind == OPERAND_ADDR ) {
                     reg_write64(cpu, REG_RIP, effective_addr(cpu, instr->operand1));
                 } else if ( instr->operand1->kind == OPERAND_LABEL ) {
-                    reg_write64(cpu, REG_RIP, addr_lookup(instr->operand1->label));
+                    reg_write64(cpu, REG_RIP, vm_label_find(instr->operand1->label));
                 } else {
                     assert(0);
                 }
@@ -1658,7 +1684,7 @@ step(Cpu *cpu) {
             if ( instr->operand1->kind == OPERAND_ADDR ) {
                 reg_write64(cpu, REG_RIP, effective_addr(cpu, instr->operand1));
             } else if ( instr->operand1->kind == OPERAND_LABEL ) {
-                reg_write64(cpu, REG_RIP, addr_lookup(instr->operand1->label));
+                reg_write64(cpu, REG_RIP, vm_label_find(instr->operand1->label));
             } else {
                 assert(0);
             }
@@ -1699,7 +1725,7 @@ step(Cpu *cpu) {
                 if ( instr->src->kind == OPERAND_REG ) {
                     reg_write(cpu, instr->dst, reg_read(cpu, instr->src));
                 } else if ( instr->src->kind == OPERAND_LABEL ) {
-                    reg_write(cpu, instr->dst, addr_lookup(instr->src->label));
+                    reg_write(cpu, instr->dst, vm_label_find(instr->src->label));
                 } else if ( instr->src->kind == OPERAND_ADDR ) {
                     reg_write(cpu, instr->dst, effective_addr(cpu, instr->src));
                 } else {
@@ -1906,15 +1932,44 @@ step(Cpu *cpu) {
     return true;
 }
 
+void
+vm_dir(Directive *dir, Vm *vm) {
+    switch ( dir->kind ) {
+        case DIRECTIVE_IMPORT: {
+            compile(DIRIMPORT(dir)->parsed_file, vm, VM_FLAGS_NONE);
+        } break;
+
+        case DIRECTIVE_EXPORT:
+        case DIRECTIVE_LOAD: {
+            //
+        } break;
+
+        default: {
+            assert(0);
+        } break;
+    }
+}
+
 uint8_t *
-compile(Parsed_File *file) {
-    Vm *vm = vm_new();
+compile(Parsed_File *file, Vm *vm, uint32_t flags) {
+    if ( !vm ) {
+        vm = vm_new();
+    }
+
+    for ( int i = 0; i < buf_len(file->directives); ++i ) {
+        Directive *dir = file->directives[i];
+
+        vm_dir(dir, vm);
+    }
 
     for ( int i = 0; i < buf_len(file->stmts); ++i ) {
         vm_stmt(file->stmts[i], vm);
     }
 
-    uint64_t entry = addr_lookup(entry_point);
+    uint64_t entry = 0;
+    if ( flags & VM_FLAGS_WITH_ENTRY_POINT ) {
+        entry = vm_label_find(entry_point);
+    }
 
     uint8_t *result = obj_create(
             vm->rdata->mem, vm->rdata->used,
@@ -1926,10 +1981,10 @@ compile(Parsed_File *file) {
 }
 
 uint64_t
-eval(uint8_t *obj, uint32_t flags = EVAL_WITH_ENTRY_POINT) {
+eval(uint8_t *obj, uint32_t flags = VM_FLAGS_WITH_ENTRY_POINT) {
     Cpu *cpu = cpu_new(obj);
 
-    if ( flags & EVAL_WITH_ENTRY_POINT ) {
+    if ( flags & VM_FLAGS_WITH_ENTRY_POINT ) {
         uint64_t num_instr = obj_text_num_entries(obj);
 
         stack_push(cpu, num_instr, 8);

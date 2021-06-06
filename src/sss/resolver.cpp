@@ -14,11 +14,12 @@ enum Sym_State {
     SYMSTATE_RESOLVED,
 };
 struct Sym : Loc {
-    Sym_Kind kind;
-    Sym_State state;
-    char *name;
-    Decl *decl;
-    Type *type;
+    Sym_Kind    kind;
+    Sym_State   state;
+    char      * name;
+    char      * foreign_name;
+    Decl      * decl;
+    Type      * type;
 };
 
 enum Scope_Flags {
@@ -1663,6 +1664,11 @@ resolve_directive(Directive *dir) {
 
                                 if ( dir_sym->name == export_name ) {
                                     actually_import = true;
+
+                                    if ( dir_sym->alias ) {
+                                        export_name = dir_sym->alias;
+                                    }
+
                                     break;
                                 }
                             }
@@ -1674,6 +1680,8 @@ resolve_directive(Directive *dir) {
                             push_sym->state = export_sym->state;
                             push_sym->decl  = export_sym->decl;
                             push_sym->type  = export_sym->type;
+
+                            push_sym->decl->sym->foreign_name = export_name;
 
                             scope_push(push_scope, push_sym);
                         }

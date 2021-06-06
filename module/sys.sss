@@ -2,18 +2,15 @@
 
 #export {
     ausgabe,
-    ausgabe_zeile,
-}
-
-wert_gesetzt :: proc(var: Optional) -> bool {
-    res falsch;
+    ausgabe_zeile
 }
 
 ausgabe_zeile :: proc(fmt: string) {
-    ausgabe(fmt);
-    ausgabe("\n");
+    ##ausgabe(fmt);
+    ##ausgabe("\n");
 }
 
+##(
 ausgabe :: proc(fmt: string, args: ...) {
     mit Win32;
 
@@ -22,8 +19,9 @@ ausgabe :: proc(fmt: string, args: ...) {
         type := typeof(arg);
     }
 
-    handle := get_std_handle(als(u32)Device_Type.STD_OUTPUT_HANDLE);
-    chars_written : u32;
-    write_console(handle, als(* void)fmt, als(u32)fmt.größe, @chars_written, 0);
+    handle := get_std_handle(als(n32)Device_Type.STD_OUTPUT_HANDLE);
+    chars_written : n32;
+    write_console(handle, als(* void)fmt, als(n32)fmt.größe, @chars_written, 0);
 }
+##)
 
