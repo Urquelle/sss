@@ -261,6 +261,19 @@ vm_label_find(char *label) {
     return 0;
 }
 
+void
+vm_label_add(Vm_Label *labels, Vm_Label label) {
+    for ( int i = 0; i < buf_len(labels); ++i ) {
+        Vm_Label l = labels[i];
+
+        if ( l.label == label.label ) {
+            report_error(&loc_none, "%s etikett ist bereits vorhanden", label.label);
+        }
+    }
+
+    buf_push(vm_labels, label);
+}
+
 Vm_Label
 vm_label(char *label, uint32_t addr) {
     Vm_Label result = {};
@@ -921,7 +934,7 @@ vm_emit(Vm *vm, Instr *instr) {
 
     if ( instr->label ) {
         instr->label = intern_str(instr->label);
-        buf_push(vm_labels, vm_label(instr->label, instr->addr));
+        vm_label_add(vm_labels, vm_label(instr->label, instr->addr));
     }
 
     return result;
@@ -1302,7 +1315,7 @@ vm_decl(Decl *decl, Vm *vm) {
             uint32_t addr = vm_emit(vm, vm_instr(decl, OP_ENTER, operand_imm(value((uint64_t)DPROC(decl)->scope->frame_size, 4), 4), decl->name));
 
             if ( decl->sym->foreign_name ) {
-                buf_push(vm_labels, vm_label(decl->sym->foreign_name, addr));
+                vm_label_add(vm_labels, vm_label(decl->sym->foreign_name, addr));
             }
 
             uint8_t reg = 0;
