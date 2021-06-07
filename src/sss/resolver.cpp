@@ -1627,7 +1627,20 @@ resolve_directive(Directive *dir) {
             DIRIMPORT(dir)->own_scope = scope_new("import", module_scope);
             Scope *scope = DIRIMPORT(dir)->own_scope;
             Scope *prev_scope = scope_set(scope);
-            resolve_file(DIRIMPORT(dir)->parsed_file);
+
+            resolve_file(DIRIMPORT(dir)->parsed_file, DIRIMPORT(dir)->name);
+
+            if ( scope->num_export_syms ) {
+                for ( int i = 0; i < scope->num_export_syms; ++i ) {
+                    Module_Sym *module_sym = scope->export_syms[i];
+                    Sym *sym = sym_get(scope, module_sym->name);
+
+                    if ( !sym ) {
+                        report_error(dir, "%s konnte für den export nicht ermittelt werden", module_sym->name);
+                    }
+                }
+            }
+
             scope_set(prev_scope);
 
             Scope *push_scope = curr_scope;
@@ -1651,40 +1664,39 @@ resolve_directive(Directive *dir) {
                     Module_Sym *module_sym = scope->export_syms[i];
 
                     Sym *export_sym = sym_get(scope, module_sym->name);
+                    assert(export_sym);
 
-                    if ( export_sym ) {
-                        bool actually_import = false;
-                        char *export_name = (module_sym->alias) ? module_sym->alias : module_sym->name;
+                    bool actually_import = false;
+                    char *export_name = (module_sym->alias) ? module_sym->alias : module_sym->name;
 
-                        if ( DIRIMPORT(dir)->wildcard ) {
-                            actually_import = true;
-                        } else {
-                            for ( int j = 0; j < DIRIMPORT(dir)->num_syms; ++j ) {
-                                Module_Sym *dir_sym = DIRIMPORT(dir)->syms[j];
+                    if ( DIRIMPORT(dir)->wildcard ) {
+                        actually_import = true;
+                    } else {
+                        for ( int j = 0; j < DIRIMPORT(dir)->num_syms; ++j ) {
+                            Module_Sym *dir_sym = DIRIMPORT(dir)->syms[j];
 
-                                if ( dir_sym->name == export_name ) {
-                                    actually_import = true;
+                            if ( dir_sym->name == export_name ) {
+                                actually_import = true;
 
-                                    if ( dir_sym->alias ) {
-                                        export_name = dir_sym->alias;
-                                    }
-
-                                    break;
+                                if ( dir_sym->alias ) {
+                                    export_name = dir_sym->alias;
                                 }
+
+                                break;
                             }
                         }
+                    }
 
-                        if ( actually_import ) {
-                            Sym *push_sym = sym_new(module_sym, export_sym->kind, export_name);
+                    if ( actually_import ) {
+                        Sym *push_sym = sym_new(module_sym, export_sym->kind, export_name);
 
-                            push_sym->state = export_sym->state;
-                            push_sym->decl  = export_sym->decl;
-                            push_sym->type  = export_sym->type;
+                        push_sym->state = export_sym->state;
+                        push_sym->decl  = export_sym->decl;
+                        push_sym->type  = export_sym->type;
 
-                            push_sym->decl->sym->foreign_name = export_name;
+                        push_sym->decl->sym->foreign_name = export_name;
 
-                            scope_push(push_scope, push_sym);
-                        }
+                        scope_push(push_scope, push_sym);
                     }
                 }
 
