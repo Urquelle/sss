@@ -9,7 +9,7 @@ env:
 
 jobs:
   build:
-    runs-on: ${{matrix.os}}
+    runs-on: self-hosted
 
     strategy:
       fail-fast: false
@@ -25,20 +25,20 @@ jobs:
             build-platform: x86
             os: windows-2019
             generator: Visual Studio 16 2019
-            vc_vars:  C:\Program Files (x86)\Microsoft Visual Studio\2019\Enterprise\VC\Auxiliary\Build\vcvars32.bat
+            vc_vars:  "C:/PROGRA~2/MICROS~1/2019/Community/VC/Auxiliary/Build/vcvars32.bat"
           - compiler: msvc-2019
             build-platform: x64
             os: windows-2019
             generator: Visual Studio 16 2019
-            vc_vars:  C:\Program Files (x86)\Microsoft Visual Studio\2019\Enterprise\VC\Auxiliary\Build\vcvars64.bat
+            vc_vars:  "C:/PROGRA~2/MICROS~1/2019/Community/VC/Auxiliary/Build/vcvars64.bat"
             extra_flags: -A Win64
 
     steps:
     - name: create build dir
       shell: cmd
-      run: mkdir build
+      run: IF NOT exist build ( mkdir build )
 
-    - name: build
+    - name: set environment
       shell: cmd
       working-directory: build
       env:
@@ -50,18 +50,12 @@ jobs:
         INPUT_GENERATOR: ${{ matrix.generator }}
         VC_VARS: "${{ matrix.vc_vars }}"
       run: |
-        "%VC_VARS%"
-        set compiler_flags=-fp:fast -fp:except- -EHsc -Gm- -GR- -EHa- -Zo -Oi -WX -W4 -wd4201 -wd4100 -wd4101 -wd4189 -wd4505 -wd4127 -wd4702 -wd4530 -wd4800 -FC -Z7 -I../src
-        set linker_flags= -incremental:no -opt:ref user32.lib gdi32.lib winmm.lib Shlwapi.lib Ws2_32.lib
-        cl %compiler_flags% ..\tests\tests.cpp -Fetests.exe /link %linker_flags%
-        if %ERRORLEVEL% NEQ 0 (
-            echo "fehler bei der kompilierung des projekts"
-            exit /b %ERRORLEVEL%
-        )
+          "%VC_VARS%"
+      run: set compiler_flags=-fp:fast -fp:except- -EHsc -Gm- -GR- -EHa- -Zo -Oi -WX -W4 -wd4201 -wd4100 -wd4101 -wd4189 -wd4505 -wd4127 -wd4702 -wd4530 -wd4800 -FC -Z7 -I../src
+      run: set linker_flags= -incremental:no -opt:ref user32.lib gdi32.lib winmm.lib Shlwapi.lib Ws2_32.lib
+      run: cl %compiler_flags% ..\tests\tests.cpp -Fetests.exe /link %linker_flags%
 
-    - name: run
+    - name: run tests
       shell: cmd
       working-directory: build
-      run: |
-          echo %CD%
-          tests.exe
+      run: tests.exe
