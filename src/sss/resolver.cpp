@@ -29,6 +29,7 @@ enum Scope_Flags {
     SCOPE_CAN_DEFER     = 1 << 2,
     SCOPE_PROC          = 1 << 3,
     SCOPE_NON_GLOBAL    = 1 << 4,
+    SCOPE_IMPORT        = 1 << 5,
 };
 struct Scope {
     char     * name;
@@ -178,6 +179,11 @@ enum { PTR_SIZE = 8 };
 uint16_t global_type_id = 1;
 int32_t  mem_offset = 0;
 
+/* @AUFGABE: wozu werden die 3 variablen benötigt? */
+int32_t  data_sector_size  = 0;
+int32_t  rdata_sector_size = 0;
+int32_t  bss_sector_size   = 0;
+
 Type *type_void;
 Type *type_char;
 Type *type_u8;
@@ -293,6 +299,8 @@ type_new( uint32_t size, Type_Kind kind, uint32_t flags = TYPE_FLAG_NONE ) {
 
 Type_String *
 type_string_new() {
+    // @AUFGABE: zu TYPE_ARRAY(TYPE_CHAR) umwandeln
+
     Type_String *result = urq_allocs(Type_String);
 
     result->kind      = TYPE_STRING;
@@ -1029,7 +1037,7 @@ resolve_expr(Expr *expr, Type *given_type = NULL) {
                     result = operand(type_bool);
                 }
             } else {
-                assert(0);
+                ILLEGAL();
             }
 
             result->is_const = left->is_const && right->is_const;
@@ -1326,6 +1334,7 @@ resolve_decl_proc(Decl *decl) {
     assert(decl->kind == DECL_PROC);
 
     decl->is_global = true;
+    decl->scope     = curr_scope;
 
     Proc_Sign *sign = DPROC(decl)->sign;
     for ( size_t i = 0; i < sign->num_params; ++i ) {
@@ -1401,26 +1410,47 @@ resolve_decl_var(Decl *decl) {
 
         if ( scope ) {
             if ( type->kind == TYPE_ARRAY ) {
-                scope->frame_size += TARRAY(type)->base->size * TARRAY(type)->num_elems;
-                decl->offset       = -scope->frame_size;
+                /* @INFO: arrays beanspruchen platz in der größe U32 + PTR + size*num_elems.
+                 *           u32 beinhaltet die anzahl der elemente im array, der ptr zeigt auf den anfang der daten im array
+                 */
+                scope->frame_size += type_u32->size + PTR_SIZE + TARRAY(type)->base->size*TARRAY(type)->num_elems;
             } else if ( type->kind == TYPE_STRUCT ) {
                 scope->frame_size += TSTRUCT(type)->aggregate_size;
-                decl->offset       = -scope->frame_size;
             } else {
                 scope->frame_size += type->size;
-                decl->offset       = -scope->frame_size;
             }
         }
     } else {
         decl->is_global = true;
-        decl->offset = mem_offset;
 
         if ( type->kind == TYPE_ARRAY ) {
-            mem_offset = TARRAY(type)->base->size * TARRAY(type)->num_elems;
+            mem_offset = type_u32->size + PTR_SIZE + TARRAY(type)->base->size * TARRAY(type)->num_elems;
         } else if ( type->kind == TYPE_STRUCT ) {
             mem_offset = TSTRUCT(type)->aggregate_size;
         } else {
             mem_offset = type->size;
+        }
+    }
+
+    /* @INFO: sektorengröße berechnen */
+    if ( decl->is_global ) {
+        if ( DVAR(decl)->expr ) {
+            data_sector_size += op->type->size;
+
+            if ( type->kind == TYPE_ARRAY ) {
+                data_sector_size += type_u32->size + PTR_SIZE;
+            }
+        } else {
+            bss_sector_size += type->size;
+
+            if ( type->kind == TYPE_ARRAY ) {
+                bss_sector_size += type_u32->size + PTR_SIZE;
+            }
+        }
+    } else {
+        /* @INFO: falls es lokale variablen sind, dann landen sie auf dem stack ... außer strings */
+        if ( DVAR(decl)->expr && op->type->kind == TYPE_STRING ) {
+            data_sector_size += op->type->size;
         }
     }
 
@@ -1624,7 +1654,14 @@ void
 resolve_directive(Directive *dir) {
     switch ( dir->kind ) {
         case DIRECTIVE_IMPORT: {
-            DIRIMPORT(dir)->own_scope = scope_new("import", module_scope);
+            char *scope_name = NULL;
+            if ( DIRIMPORT(dir)->scope_name ) {
+                scope_name = DIRIMPORT(dir)->scope_name;
+            }
+
+            DIRIMPORT(dir)->own_scope = scope_new(scope_name, module_scope);
+            DIRIMPORT(dir)->own_scope->flags |= SCOPE_IMPORT;
+
             Scope *scope = DIRIMPORT(dir)->own_scope;
             Scope *prev_scope = scope_set(scope);
 
@@ -1983,7 +2020,7 @@ resolve_proc(Sym *sym) {
 }
 
 void
-register_global_syms(Stmts stmts) {
+register_global_syms(Stmts stmts, char *module = NULL) {
     for ( int i = 0; i < buf_len(stmts); ++i ) {
         if (stmts[i]->kind != STMT_DECL) {
             continue;
@@ -1992,6 +2029,8 @@ register_global_syms(Stmts stmts) {
         Stmt_Decl *stmt = (Stmt_Decl *)stmts[i];
 
         Decl *decl = stmt->decl;
+        decl->module = module;
+
         Sym *sym = sym_push(decl, decl->name, decl);
 
         decl->sym = sym;
@@ -2044,9 +2083,9 @@ sym_finalize(Sym *sym) {
 }
 
 void
-resolve_file(Parsed_File *parsed_file) {
+resolve_file(Parsed_File *parsed_file, char *module) {
     resolve_directives(parsed_file->directives);
-    register_global_syms(parsed_file->stmts);
+    register_global_syms(parsed_file->stmts, module);
 
     for ( int i = 0; i < buf_len(parsed_file->stmts); ++i ) {
         Stmt *stmt = parsed_file->stmts[i];

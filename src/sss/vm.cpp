@@ -88,7 +88,8 @@ struct Reg {
 };
 
 enum Section {
-    SECTION_TEXT = 1,
+    SECTION_NONE,
+    SECTION_TEXT,
     SECTION_RDATA,
     SECTION_DATA,
 };
@@ -210,8 +211,9 @@ struct Cpu {
 
 struct Vm {
     Mem    * rdata;
-    Instrs   text;
     Mem    * data;
+    Mem    * bss;
+    Instrs   text;
 };
 
 struct Vm_Label {
@@ -289,8 +291,9 @@ vm_new() {
     Vm *result = urq_allocs(Vm);
 
     result->rdata = mem_new(1024*1024);
-    result->text  = NULL;
     result->data  = mem_new(1024*1024);
+    result->bss   = mem_new(1024*1024);
+    result->text  = NULL;
 
     return result;
 }
@@ -345,7 +348,7 @@ reg_read(Cpu *cpu, Operand *op) {
         } break;
 
         default: {
-            assert(0);
+            ILLEGAL();
             return 0;
         } break;
     }
@@ -371,7 +374,7 @@ reg_read(Cpu *cpu, Reg_Kind reg, uint32_t size) {
         } break;
 
         default: {
-            assert(0);
+            ILLEGAL();
             return 0;
         } break;
     }
@@ -383,7 +386,7 @@ effective_addr(Cpu *cpu, Operand *op) {
 
     uint64_t base = 0;
     if ( op->addr.base != REG_NONE ) {
-        base = reg_read(cpu, op->addr.base, op->size);
+        base = reg_read(cpu, op->addr.base, 8);
     }
 
     uint64_t index = 0;
@@ -393,19 +396,34 @@ effective_addr(Cpu *cpu, Operand *op) {
 
     uint64_t scale = op->addr.scale;
     uint64_t displacement = op->addr.displacement;
-
-#if 0
-    uint64_t section_offset = cpu->obj->text_offset;
-    if ( op->addr.section == SECTION_RDATA ) {
-        section_offset = cpu->obj->rdata_offset;
-    } else if ( op->addr.section == SECTION_DATA ) {
-        section_offset = cpu->obj->data_offset;
-    }
-
-    uint32_t result = (uint32_t)(section_offset + base + index*scale + displacement);
-#else
     uint32_t result = (uint32_t)(base + index*scale + displacement);
-#endif
+
+    if ( op->addr.base == REG_NONE ) {
+        Obj_Header *header = (Obj_Header *)cpu->obj;
+
+        switch (op->addr.section) {
+            case SECTION_NONE: {
+                // nichts tun
+            } break;
+
+            case SECTION_TEXT: {
+                result += (uint32_t)(header->text_offset-header->rdata_offset);
+            } break;
+
+            case SECTION_DATA: {
+                result += (uint32_t)(header->data_offset-header->rdata_offset);
+            } break;
+
+            case SECTION_RDATA: {
+                // @INFO: der beginn der cpu->mem wird auf rdata_offset gesetzt, deshalb braucht hier
+                //        kein offset draufgerechnet zu werden
+            } break;
+
+            default: {
+                ILLEGAL();
+            } break;
+        }
+    }
 
     return result;
 }
@@ -618,7 +636,7 @@ mem_read(Mem *mem, uint32_t addr, uint32_t size) {
         } break;
 
         default: {
-            assert(0);
+            ILLEGAL();
         } break;
     }
 
@@ -723,7 +741,7 @@ value(int64_t val, uint32_t size) {
         } break;
 
         default: {
-            assert(0);
+            ILLEGAL();
         } break;
     }
 
@@ -756,7 +774,7 @@ value(uint64_t val, uint32_t size) {
         } break;
 
         default: {
-            assert(0);
+            ILLEGAL();
         } break;
     }
 
@@ -803,6 +821,7 @@ operand_addr(Reg_Kind base, Reg_Kind index, int32_t scale, int32_t displacement,
     result->addr.index        = index;
     result->addr.scale        = scale;
     result->addr.displacement = displacement;
+    result->addr.section      = SECTION_TEXT;
 
     return result;
 }
@@ -817,6 +836,7 @@ operand_addr(Reg_Kind base, int32_t displacement, int32_t size, Section section 
     result->addr.index        = REG_NONE;
     result->addr.scale        = 0;
     result->addr.displacement = displacement;
+    result->addr.section      = section;
 
     return result;
 }
@@ -862,6 +882,7 @@ operand_rdi(int32_t size) {
 
 Operand *
 operand_rbp(int32_t size, int32_t displacement) {
+    /* @AUFGABE: ist es sinnvoll hier size < 8 zu verwenden */
     return operand_addr(REG_RBP, displacement, size);
 }
 
@@ -982,7 +1003,7 @@ stack_push(Cpu *cpu, uint64_t val, uint32_t size) {
         } break;
 
         default: {
-            assert(0);
+            ILLEGAL();
         } break;
     }
 }
@@ -1104,7 +1125,7 @@ vm_expr(Expr *expr, Vm *vm, bool assign) {
                     vm_emit(vm, vm_instr(expr, OP_CMP, operand_rax(expr->type->size), operand_rdi(expr->type->size)));
                     vm_emit(vm, vm_instr(expr, OP_SETG, operand_rax(expr->type->size)));
                 } else {
-                    assert(0);
+                    ILLEGAL();
                 }
             }
         } break;
@@ -1143,7 +1164,7 @@ vm_expr(Expr *expr, Vm *vm, bool assign) {
             vm_expr(EDEREF(expr)->base, vm);
 
             if ( !assign ) {
-                vm_emit(vm, vm_instr(expr, OP_MOV, operand_reg(REG_RAX, 8), operand_addr(REG_RAX, 0, 8)));
+                vm_emit(vm, vm_instr(expr, OP_MOV, operand_reg(REG_RAX, 8), operand_addr(REG_RAX, 0, PTR_SIZE)));
             }
         } break;
 
@@ -1161,6 +1182,11 @@ vm_expr(Expr *expr, Vm *vm, bool assign) {
             int32_t     num_fields = 0;
             Decl_Vars   fields     = NULL;
 
+            if ( type->kind == TYPE_NAMESPACE ) {
+                //assert(!"namespace zugriff");
+                return;
+            }
+
             if ( type->kind == TYPE_PTR ) {
                 type = TPTR(type)->base;
             }
@@ -1174,10 +1200,8 @@ vm_expr(Expr *expr, Vm *vm, bool assign) {
             } else if ( type->kind == TYPE_UNION ) {
                 num_fields = (int32_t)TENUM(type)->num_fields;
                 fields     = TENUM(type)->fields;
-            } else if ( type->kind == TYPE_NAMESPACE ) {
-                assert(!"namespace");
             } else {
-                assert(0);
+                ILLEGAL();
             }
 
             Decl_Var *field = NULL;
@@ -1205,7 +1229,7 @@ vm_expr(Expr *expr, Vm *vm, bool assign) {
                     vm_emit(vm, vm_instr(expr, OP_MOV, operand_rax(field->type->size), operand_addr(REG_RAX, 0, field->type->size)));
                 }
             } else {
-                assert(0);
+                ILLEGAL();
             }
         } break;
 
@@ -1225,20 +1249,32 @@ vm_expr(Expr *expr, Vm *vm, bool assign) {
             if (sym->decl->is_global) {
                 if ( sym->decl->kind == DECL_PROC ) {
                     if ( !(sym->decl->type->flags & TYPE_FLAG_SYS_CALL) ) {
-                        vm_emit(vm, vm_instr(expr, OP_LEA, operand_rax(sym->type->size), operand_label(sym->name)));
+                        if ( !sym->foreign_name && !sym->decl->module) {
+                            vm_emit(vm, vm_instr(expr, OP_LEA, operand_rax(sym->type->size), operand_label(sym->name)));
+                        } else {
+                            char *name = NULL;
+                            name = buf_printf(name, "%s.%s", sym->decl->module, sym->name);
+                            vm_emit(vm, vm_instr(expr, OP_LEA, operand_rax(sym->type->size), operand_label(name)));
+                        }
                     }
                 } else {
-                    /* @INFO: sonderbehandlung */
-                    if ( assign && expr->type->kind != TYPE_ARRAY ) {
-                        vm_emit(vm, vm_instr(expr, OP_LEA, operand_rax(sym->type->size), operand_addr(REG_NONE, sym->decl->offset, sym->type->size)));
+                    if ( assign || expr->type->kind == TYPE_ARRAY ) {
+                        if ( sym->type->kind == TYPE_ARRAY ) {
+                            vm_emit(vm, vm_instr(expr, OP_MOV, operand_rax(sym->type->size), operand_addr(REG_NONE, sym->decl->offset, sym->type->size, SECTION_DATA)));
+                        } else {
+                            vm_emit(vm, vm_instr(expr, OP_LEA, operand_rax(sym->type->size), operand_addr(REG_NONE, sym->decl->offset, sym->type->size, SECTION_DATA)));
+                        }
                     } else {
-                        vm_emit(vm, vm_instr(expr, OP_MOV, operand_rax(sym->type->size), operand_addr(REG_NONE, sym->decl->offset, sym->type->size)));
+                        vm_emit(vm, vm_instr(expr, OP_MOV, operand_rax(sym->type->size), operand_addr(REG_NONE, sym->decl->offset, sym->type->size, SECTION_DATA)));
                     }
                 }
             } else {
-                /* @INFO: sonderbehandlung */
-                if ( assign && expr->type->kind != TYPE_ARRAY ) {
-                    vm_emit(vm, vm_instr(expr, OP_LEA, operand_rax(sym->type->size), operand_addr(REG_RBP, sym->decl->offset, sym->type->size)));
+                if ( assign || sym->type->kind == TYPE_ARRAY ) {
+                    if ( sym->type->kind == TYPE_ARRAY ) {
+                        vm_emit(vm, vm_instr(expr, OP_MOV, operand_rax(sym->type->size), operand_addr(REG_RBP, sym->decl->ptr_offset, sym->type->size)));
+                    } else {
+                        vm_emit(vm, vm_instr(expr, OP_LEA, operand_rax(sym->type->size), operand_addr(REG_RBP, sym->decl->offset, sym->type->size)));
+                    }
                 } else {
                     vm_emit(vm, vm_instr(expr, OP_MOV, operand_rax(sym->type->size), operand_addr(REG_RBP, sym->decl->offset, sym->type->size)));
                 }
@@ -1250,7 +1286,7 @@ vm_expr(Expr *expr, Vm *vm, bool assign) {
             uint32_t num_elems  = TARRAY(EINDEX(expr)->base->type)->num_elems;
             uint32_t elem_size  = TARRAY(EINDEX(expr)->base->type)->base->size;
 
-            vm_expr(EINDEX(expr)->base, vm, true);
+            vm_expr(EINDEX(expr)->base, vm, assign);
             vm_emit(vm, vm_instr(expr, OP_PUSH, operand_rax(index_size)));
 
             vm_expr(EINDEX(expr)->index, vm);
@@ -1260,7 +1296,7 @@ vm_expr(Expr *expr, Vm *vm, bool assign) {
             vm_emit(vm, vm_instr(expr, OP_ADD, operand_rax(index_size), operand_rsi(index_size)));
 
             if ( !assign ) {
-                vm_emit(vm, vm_instr(expr, OP_MOV, operand_rax(index_size), operand_addr(REG_RAX, 0, index_size)));
+                vm_emit(vm, vm_instr(expr, OP_MOV, operand_rax(index_size), operand_addr(REG_RAX, 0, elem_size)));
             }
         } break;
 
@@ -1287,6 +1323,10 @@ vm_expr(Expr *expr, Vm *vm, bool assign) {
 
         case EXPR_STR: {
             uint32_t str_size = utf8_str_size(ESTR(expr)->val);
+            /* @INFO: da data, rdata, bss, etc. letztendlich als sektoren in einem speicher zusammengelegt werden,
+             *        müsste der offset entsprechend berechnet werden. die jeweilige größe der sektoren sollte vermutlich im
+             *        resolver vorberechnet werden.
+             */
             expr->offset = mem_push(vm->rdata, ESTR(expr)->val, str_size);
 
             Instr *instr = vm_instr(expr, OP_LEA, operand_rax(expr->type->size), operand_addr(REG_NONE, expr->offset, expr->type->size, SECTION_RDATA));
@@ -1299,7 +1339,7 @@ vm_expr(Expr *expr, Vm *vm, bool assign) {
         } break;
 
         default: {
-            assert(0);
+            ILLEGAL();
         } break;
     }
 }
@@ -1312,10 +1352,24 @@ vm_decl(Decl *decl, Vm *vm) {
                 return;
             }
 
-            uint32_t addr = vm_emit(vm, vm_instr(decl, OP_ENTER, operand_imm(value((uint64_t)DPROC(decl)->scope->frame_size, 4), 4), decl->name));
+            char *name = NULL;
+            if ( decl->module ) {
+                name = buf_printf(name, "%s.%s", decl->module, decl->name);
+            } else {
+                name = decl->name;
+            }
+
+            uint32_t addr = vm_emit(vm, vm_instr(decl, OP_ENTER, operand_imm(value((uint64_t)DPROC(decl)->scope->frame_size, 4), 4), name));
 
             if ( decl->sym->foreign_name ) {
                 vm_label_add(vm_labels, vm_label(decl->sym->foreign_name, addr));
+            }
+
+            if ( decl->scope->flags & SCOPE_IMPORT ) {
+                char *scoped_import_name = NULL;
+                scoped_import_name = buf_printf(scoped_import_name, "import.%s.%s", decl->scope->name, name);
+
+                vm_label_add(vm_labels, vm_label(scoped_import_name, addr));
             }
 
             uint8_t reg = 0;
@@ -1328,8 +1382,11 @@ vm_decl(Decl *decl, Vm *vm) {
             }
 
             vm_stmt(DPROC(decl)->block, vm);
-            vm_emit(vm, vm_instr(decl, OP_LEAVE, make_label("%s.end", decl->name)));
-            vm_emit(vm, vm_instr(decl, OP_RET));
+
+            if ( !DPROC(decl)->sign->num_rets ) {
+                vm_emit(vm, vm_instr(decl, OP_LEAVE));
+                vm_emit(vm, vm_instr(decl, OP_RET));
+            }
         } break;
 
         case DECL_ENUM:
@@ -1344,22 +1401,51 @@ vm_decl(Decl *decl, Vm *vm) {
             Expr *expr = DVAR(decl)->expr;
 
             if ( decl->is_global ) {
-                decl->offset = mem_alloc(vm->data, decl->type->size);
+                /* @INFO: initialisierte globale variablen landen in data, uninitialisierte in bss */
+                if ( decl->type->kind == TYPE_ARRAY ) {
+                    int32_t mem = mem_alloc(vm->data, type_u32->size + PTR_SIZE + decl->type->size);
+
+                    decl->len_offset = mem;
+                    decl->ptr_offset = mem + type_u32->size;
+                    decl->offset     = mem + type_u32->size + PTR_SIZE;
+
+                    uint32_t num_elems = TARRAY(decl->type)->num_elems;
+
+                    /* @INFO: die anzahl der elemente speichern */
+                    vm_emit(vm, vm_instr(decl, OP_MOV, operand_addr(REG_NONE, decl->len_offset, type_u32->size, SECTION_DATA), operand_imm(value(num_elems), decl->type->size)));
+
+                    /* @INFO: adresse der daten speichern */
+                    vm_emit(vm, vm_instr(decl, OP_MOV, operand_addr(REG_NONE, decl->ptr_offset, type_u64->size, SECTION_DATA), operand_addr(REG_RBP, decl->offset, decl->type->size)));
+                } else {
+                    decl->offset = mem_alloc(vm->data, decl->type->size);
+                }
 
                 if ( expr ) {
+                    /* @AUFGABE: decl->offset mit übergeben, damit die werte in vm_expr direkt zugewiesen werden können */
                     vm_expr(expr, vm);
-                    vm_emit(vm, vm_instr(decl, OP_MOV, operand_addr(REG_NONE, decl->offset, decl->type->size), operand_rax(decl->type->size)));
+                    vm_emit(vm, vm_instr(decl, OP_MOV, operand_addr(REG_NONE, decl->offset, decl->type->size, SECTION_DATA), operand_rax(decl->type->size)));
                 }
             } else {
+                if ( decl->type->kind == TYPE_ARRAY ) {
+                    uint32_t num_elems = TARRAY(decl->type)->num_elems;
+
+                    /* @INFO: die anzahl der elemente speichern */
+                    vm_emit(vm, vm_instr(decl, OP_MOV, operand_rbp(type_u32->size, decl->len_offset), operand_imm(value(num_elems), decl->type->size)));
+
+                    /* @INFO: adresse der daten speichern */
+                    vm_emit(vm, vm_instr(decl, OP_MOV, operand_rbp(type_u64->size, decl->ptr_offset), operand_addr(REG_RBP, decl->offset, decl->type->size)));
+                }
+
                 if ( expr ) {
+                    /* @AUFGABE: decl->offset mit übergeben, damit die werte in vm_expr direkt zugewiesen werden können */
                     vm_expr(expr, vm);
-                    vm_emit(vm, vm_instr(decl, OP_MOV, operand_rbp(expr->type->size, decl->offset), operand_rax(expr->type->size)));
+                    vm_emit(vm, vm_instr(decl, OP_MOV, operand_rbp(8, decl->offset), operand_rax(expr->type->size)));
                 }
             }
         } break;
 
         default: {
-            assert(0);
+            ILLEGAL();
         } break;
     }
 }
@@ -1509,11 +1595,14 @@ vm_stmt(Stmt *stmt, Vm *vm) {
             vm_emit(vm, vm_instr(stmt, OP_RET));
         } break;
 
+        /* @INFO: while ist anders als üblich als "bis" implementiert. die schleife dauert also solange an, bis die bedingung
+         * wahr wird.
+         */
         case STMT_WHILE: {
             int32_t loop_start = INSTR_NUM();
             vm_expr(SWHILE(stmt)->cond, vm);
             vm_emit(vm, vm_instr(stmt, OP_CMP, operand_rax(SWHILE(stmt)->cond->type->size), operand_imm(value0, SWHILE(stmt)->cond->type->size)));
-            int32_t jmp_instr = vm_emit(vm, vm_instr(stmt, OP_JZ, operand_addr(REG_NONE, 0, SWHILE(stmt)->cond->type->size), operand_imm(value1, SWHILE(stmt)->cond->type->size)));
+            int32_t jmp_instr = vm_emit(vm, vm_instr(stmt, OP_JNZ, operand_addr(REG_NONE, 0, SWHILE(stmt)->cond->type->size), operand_imm(value1, SWHILE(stmt)->cond->type->size)));
             vm_stmt(SWHILE(stmt)->block, vm);
             vm_emit(vm, vm_instr(stmt, OP_JMP, operand_addr(REG_NONE, loop_start, SWHILE(stmt)->cond->type->size)));
 
@@ -1521,7 +1610,7 @@ vm_stmt(Stmt *stmt, Vm *vm) {
         } break;
 
         default: {
-            assert(0);
+            ILLEGAL();
         } break;
     }
 }
@@ -1544,7 +1633,7 @@ step(Cpu *cpu) {
             } else if ( instr->operand1->kind == OPERAND_IMM ) {
                 operand1 = instr->operand1->val.u64;
             } else {
-                assert(0);
+                ILLEGAL();
             }
 
             if ( instr->operand2->kind == OPERAND_REG ) {
@@ -1552,7 +1641,7 @@ step(Cpu *cpu) {
             } else if ( instr->operand2->kind == OPERAND_IMM ) {
                 operand2 = instr->operand2->val.u64;
             } else {
-                assert(0);
+                ILLEGAL();
             }
 
             reg_write(cpu, instr->dst, operand1 + operand2);
@@ -1574,7 +1663,7 @@ step(Cpu *cpu) {
             } else if ( instr->operand1->kind == OPERAND_LABEL ) {
                 reg_write64(cpu, REG_RIP, vm_label_find(instr->operand1->label));
             } else {
-                assert(0);
+                ILLEGAL();
             }
         } break;
 
@@ -1587,7 +1676,7 @@ step(Cpu *cpu) {
             } else if ( instr->operand1->kind == OPERAND_IMM ) {
                 operand1 = instr->operand1->val.u64;
             } else {
-                assert(0);
+                ILLEGAL();
             }
 
             if ( instr->operand2->kind == OPERAND_REG ) {
@@ -1595,7 +1684,7 @@ step(Cpu *cpu) {
             } else if ( instr->operand2->kind == OPERAND_IMM ) {
                 operand2 = instr->operand2->val.u64;
             } else {
-                assert(0);
+                ILLEGAL();
             }
 
             flags_clear(cpu);
@@ -1615,7 +1704,7 @@ step(Cpu *cpu) {
             } else if ( instr->operand1->kind == OPERAND_IMM ) {
                 divisor = instr->operand1->val.u64;
             } else {
-                assert(0);
+                ILLEGAL();
             }
 
             uint64_t quotient  = (uint64_t)(dividend / divisor);
@@ -1643,7 +1732,7 @@ step(Cpu *cpu) {
             } else if ( instr->operand1->kind == OPERAND_IMM ) {
                 divisor = instr->operand1->val.u64;
             } else {
-                assert(0);
+                ILLEGAL();
             }
 
             uint64_t quotient  = (uint64_t)(dividend / divisor);
@@ -1662,7 +1751,7 @@ step(Cpu *cpu) {
             } else if ( instr->operand1->kind == OPERAND_IMM ) {
                 operand1 = instr->operand1->val.u64;
             } else {
-                assert(0);
+                ILLEGAL();
             }
 
             if ( instr->operand2->kind == OPERAND_REG ) {
@@ -1670,7 +1759,7 @@ step(Cpu *cpu) {
             } else if ( instr->operand2->kind == OPERAND_IMM ) {
                 operand2 = instr->operand2->val.u64;
             } else {
-                assert(0);
+                ILLEGAL();
             }
 
             reg_write64(cpu, REG_RAX, operand1 * operand2);
@@ -1688,7 +1777,7 @@ step(Cpu *cpu) {
                 } else if ( instr->operand1->kind == OPERAND_LABEL ) {
                     reg_write64(cpu, REG_RIP, vm_label_find(instr->operand1->label));
                 } else {
-                    assert(0);
+                    ILLEGAL();
                 }
             }
         } break;
@@ -1699,7 +1788,7 @@ step(Cpu *cpu) {
             } else if ( instr->operand1->kind == OPERAND_LABEL ) {
                 reg_write64(cpu, REG_RIP, vm_label_find(instr->operand1->label));
             } else {
-                assert(0);
+                ILLEGAL();
             }
         } break;
 
@@ -1708,7 +1797,7 @@ step(Cpu *cpu) {
                 if ( instr->operand1->kind == OPERAND_ADDR ) {
                     reg_write64(cpu, REG_RIP, effective_addr(cpu, instr->operand1));
                 } else {
-                    assert(0);
+                    ILLEGAL();
                 }
             }
         } break;
@@ -1718,7 +1807,7 @@ step(Cpu *cpu) {
                 if ( instr->operand1->kind == OPERAND_ADDR ) {
                     reg_write64(cpu, REG_RIP, effective_addr(cpu, instr->operand1));
                 } else {
-                    assert(0);
+                    ILLEGAL();
                 }
             }
         } break;
@@ -1728,7 +1817,7 @@ step(Cpu *cpu) {
                 if ( instr->operand1->kind == OPERAND_ADDR ) {
                     reg_write64(cpu, REG_RIP, effective_addr(cpu, instr->operand1));
                 } else {
-                    assert(0);
+                    ILLEGAL();
                 }
             }
         } break;
@@ -1742,10 +1831,10 @@ step(Cpu *cpu) {
                 } else if ( instr->src->kind == OPERAND_ADDR ) {
                     reg_write(cpu, instr->dst, effective_addr(cpu, instr->src));
                 } else {
-                    assert(0);
+                    ILLEGAL();
                 }
             } else {
-                assert(0);
+                ILLEGAL();
             }
         } break;
 
@@ -1763,7 +1852,7 @@ step(Cpu *cpu) {
                 } else if ( instr->src->kind == OPERAND_ADDR ) {
                     reg_write(cpu, instr->dst, mem_read(cpu->mem, effective_addr(cpu, instr->src), instr->src->size));
                 } else {
-                    assert(0);
+                    ILLEGAL();
                 }
             } else if ( instr->dst->kind == OPERAND_ADDR ) {
                 if ( instr->src->kind == OPERAND_REG ) {
@@ -1773,10 +1862,10 @@ step(Cpu *cpu) {
                 } else if ( instr->src->kind == OPERAND_ADDR ) {
                     mem_write(cpu->mem, effective_addr(cpu, instr->dst), mem_read(cpu->mem, effective_addr(cpu, instr->src), instr->src->size));
                 } else {
-                    assert(0);
+                    ILLEGAL();
                 }
             } else {
-                assert(0);
+                ILLEGAL();
             }
         } break;
 
@@ -1789,7 +1878,7 @@ step(Cpu *cpu) {
             } else if ( instr->operand1->kind == OPERAND_IMM ) {
                 operand1 = instr->operand1->val.u64;
             } else {
-                assert(0);
+                ILLEGAL();
             }
 
             if ( instr->operand2->kind == OPERAND_REG ) {
@@ -1797,7 +1886,7 @@ step(Cpu *cpu) {
             } else if ( instr->operand2->kind == OPERAND_IMM ) {
                 operand2 = instr->operand2->val.u64;
             } else {
-                assert(0);
+                ILLEGAL();
             }
 
             uint64_t result = operand1 * operand2;
@@ -1822,7 +1911,7 @@ step(Cpu *cpu) {
                     flags_set(cpu, RFLAG_CF);
                 }
             } else {
-                assert(0);
+                ILLEGAL();
             }
         } break;
 
@@ -1835,7 +1924,7 @@ step(Cpu *cpu) {
                 auto val = reg_read(cpu, instr->operand1);
                 reg_write(cpu, instr->operand1, !val);
             } else {
-                assert(0);
+                ILLEGAL();
             }
         } break;
 
@@ -1843,7 +1932,7 @@ step(Cpu *cpu) {
             if ( instr->operand1->kind == OPERAND_REG ) {
                 stack_push(cpu, reg_read(cpu, instr->operand1), instr->operand1->size);
             } else {
-                assert(0);
+                ILLEGAL();
             }
         } break;
 
@@ -1851,7 +1940,7 @@ step(Cpu *cpu) {
             if ( instr->dst->kind == OPERAND_REG ) {
                 stack_pop(cpu, instr->dst);
             } else {
-                assert(0);
+                ILLEGAL();
             }
         } break;
 
@@ -1912,7 +2001,7 @@ step(Cpu *cpu) {
             } else if ( instr->operand1->kind == OPERAND_IMM ) {
                 operand1 = instr->operand1->val.u64;
             } else {
-                assert(0);
+                ILLEGAL();
             }
 
             if ( instr->operand2->kind == OPERAND_REG ) {
@@ -1920,13 +2009,13 @@ step(Cpu *cpu) {
             } else if ( instr->operand2->kind == OPERAND_IMM ) {
                 operand2 = instr->operand2->val.u64;
             } else {
-                assert(0);
+                ILLEGAL();
             }
 
             if ( instr->dst->kind == OPERAND_REG ) {
                 reg_write(cpu, instr->dst, operand1 - operand2);
             } else {
-                assert(0);
+                ILLEGAL();
             }
 
             flags_clear(cpu);
@@ -1938,7 +2027,7 @@ step(Cpu *cpu) {
         } break;
 
         default: {
-            assert(0);
+            ILLEGAL();
         } break;
     }
 
@@ -1958,7 +2047,7 @@ vm_dir(Directive *dir, Vm *vm) {
         } break;
 
         default: {
-            assert(0);
+            ILLEGAL();
         } break;
     }
 }

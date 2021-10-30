@@ -20,23 +20,23 @@ Datentyp_Art :: enum {
 
 typid :: typedef n32;
 
-Any :: struktur {
+Any :: obj {
     id  : typid;
     val : *void;
 }
 
-Optional :: struktur {
+Optional :: obj {
     wert    : Any;
     gesetzt : bool;
 }
 
-Datentyp_Feld :: struktur {
+Datentyp_Feld :: obj {
     id     : typid;
     art    : Datentyp_Art;
     name   : string;
 }
 
-Datentyp :: struktur {
+Datentyp :: obj {
     id             : typid;
     art            : Datentyp_Art;
     name           : string;
@@ -49,5 +49,5 @@ Datentyp :: struktur {
 }
 
 wert_gesetzt :: proc(var: Optional) -> bool {
-    res var.gesetzt;
+    erg var.gesetzt;
 }

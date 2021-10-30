@@ -56,7 +56,7 @@ char *regs8_dbg[] = {
     "bl",
     "cl",
     "dl",
-    "",
+    "bp",
     "",
     "dil",
     "spl",
@@ -196,6 +196,14 @@ to_str(Instr *instr) {
 
     if ( instr->label ) {
         output = buf_printf(output, "%s:\n    ", instr->label);
+
+        for ( int i = 0; i < buf_len(vm_labels); ++i ) {
+            Vm_Label label = vm_labels[i];
+
+            if ( label.addr == instr->addr && label.label != instr->label ) {
+                output = buf_printf(output, "%s:\n    ", label.label);
+            }
+        }
     } else {
         output = buf_printf(output, "    ");
     }

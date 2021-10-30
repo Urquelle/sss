@@ -3,24 +3,22 @@ if exists("b:current_syntax")
 endif
 
 syntax keyword sssAlignOf alignof
-syntax keyword sssApi api
 syntax keyword sssAs als
 syntax keyword sssCast zu
 syntax keyword sssConst konst
-syntax keyword sssImpl impl
 syntax keyword sssMatch zweig
 syntax keyword sssNew new
 syntax keyword sssOffsetOf offsetof
 syntax keyword sssRemove remove
 syntax keyword sssSizeOf sizeof
-syntax keyword sssType type
-syntax keyword sssTypeOf typeof
+syntax keyword sssType typ
+syntax keyword sssTypeOf typ_von
 syntax keyword sssTypedef typedef
-syntax keyword sssTypeinfo typeinfo
+syntax keyword sssTypeinfo typinfo
 syntax keyword sssUsing mit
 syntax keyword sssFrom aus
 
-syntax keyword sssStruct struktur
+syntax keyword sssStruct obj
 syntax keyword sssUnion union
 syntax keyword sssEnum enum
 syntax keyword sssProc proc
@@ -30,13 +28,14 @@ syntax keyword sssThen then
 syntax keyword sssElse sonst
 syntax keyword sssFor iter
 syntax keyword sssWhile solange
+syntax keyword sssUntil bis
 syntax keyword sssContinue weiter
 syntax keyword sssBreak weg
 
 syntax keyword sssDataType void string char r32 r64 n8 n16 n32 n64 g8 g16 g32 g64 bool typeid
 syntax keyword sssBool wahr falsch
 
-syntax keyword sssReturn res
+syntax keyword sssReturn erg
 syntax keyword sssDefer defer
 syntax keyword sssFree free
 syntax keyword sssAssert assert
@@ -141,6 +140,7 @@ highlight link sssThen Conditional
 highlight link sssElse Conditional
 highlight link sssFor Repeat
 highlight link sssWhile Repeat
+highlight link sssUntil Repeat
 
 highlight link sssLineComment Comment
 highlight link sssBlockComment Comment

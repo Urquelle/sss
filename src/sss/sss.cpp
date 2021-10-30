@@ -1,6 +1,10 @@
 #ifndef __URQ_SSS__
 #define __URQ_SSS__
 
+#pragma comment (lib, "user32")
+#pragma comment (lib, "gdi32")
+#pragma comment (lib, "libdyncall_s")
+
 #define dcAllocMem urq_alloc
 #define dcFreeMem urq_dealloc
 #include "dyncall.h"
@@ -69,7 +73,7 @@ Stmt_Match             * parse_stmt_match(Token_List *tokens, Stmt *parent);
 Typespec               * parse_typespec(Token_List *tokens);
 Decl_Var               * parse_proc_param(Token_List *tokens);
 void                     resolve(Parsed_File *parsed_file, bool check_entry_point = true);
-void                     resolve_file(Parsed_File *parsed_file);
+void                     resolve_file(Parsed_File *parsed_file, char *module = NULL);
 Type                   * resolve_decl(Decl *d);
 Type                   * resolve_decl_const(Decl *decl);
 Type_Proc              * resolve_decl_proc(Decl *decl);
@@ -187,6 +191,9 @@ void                     type_complete_struct(Type_Struct *type);
 #define IS_OITERARRAY(Obj)    ((Obj)->kind == OBJ_ITER && OITER(Obj)->iter_kind == ITER_ARRAY)
 #define IS_OITERRNG(Obj)      ((Obj)->kind == OBJ_ITER && OITER(Obj)->iter_kind == ITER_RANGE)
 
+#define TODO()                (assert(0))
+#define ILLEGAL()             (assert(0))
+
 #include "lex.cpp"
 #include "parser.cpp"
 #include "resolver.cpp"
@@ -229,6 +236,7 @@ namespace api {
     using Urq::Sss::tokenize;
 
     using Urq::Sss::Vm::VM_FLAGS_REPL;
+    using Urq::Sss::Vm::VM_FLAGS_WITH_ENTRY_POINT;
 }
 
 }}

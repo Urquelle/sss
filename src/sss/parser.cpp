@@ -30,6 +30,7 @@ char *keyword_typeof;
 char *keyword_typeinfo;
 char *keyword_using;
 char *keyword_union;
+char *keyword_until;
 char *keyword_while;
 
 #define STRUCT(Struct) \
@@ -268,8 +269,8 @@ enum Stmt_Kind {
 #undef X
 };
 struct Stmt : Ast_Node {
-    Stmt_Kind kind;
-    Notes notes;
+    Stmt_Kind   kind;
+    Notes       notes;
 };
 
 struct Stmt_Assign : Stmt {
@@ -337,6 +338,7 @@ struct Directive : Ast_Node {
 };
 
 struct Directive_Import : Directive {
+    char        * name;
     char        * scope_name;
     bool          wildcard;
     Module_Syms   syms;
@@ -395,9 +397,14 @@ enum Decl_Kind {
 struct Decl : Ast_Node {
     Decl_Kind   kind;
     char      * name;
+    char      * module;
     Sym       * sym;
     Type      * type;
     Operand   * operand;
+    Scope     * scope;
+
+    int32_t     len_offset;
+    int32_t     ptr_offset;
     int32_t     offset;
     bool        is_global;
     bool        has_using;
@@ -1574,11 +1581,12 @@ stmt_using(Ast_Node *loc, Expr *expr) {
 /* }}} */
 /* directives {{{ */
 Directive_Import *
-directive_import(Ast_Node *loc, char *scope_name, bool wildcard, Module_Syms syms,
+directive_import(Ast_Node *loc, char *name, char *scope_name, bool wildcard, Module_Syms syms,
         size_t num_syms, Parsed_File *parsed_file)
 {
     STRUCTK(Directive_Import, DIRECTIVE_IMPORT);
 
+    result->name        = name;
     result->scope_name  = scope_name;
     result->wildcard    = wildcard;
     result->syms        = (Module_Syms)MEMDUP(syms);
@@ -2257,7 +2265,7 @@ parse_directive_import(Token_List *tokens) {
     auto imported_tokens = tokenize(file_name, content);
     auto parsed_file     = parse(&imported_tokens);
 
-    return directive_import(curr, scope_name, wildcard, syms, buf_len(syms), parsed_file);
+    return directive_import(curr, ident, scope_name, wildcard, syms, buf_len(syms), parsed_file);
 }
 
 Directive_Load *
@@ -2435,15 +2443,16 @@ parse(Token_List *tokens) {
     KEYWORD(new);
     KEYWORD(note);
     KEYWORD(proc);
-    KEYWORD_K(res, return);
+    KEYWORD_K(erg, return);
     KEYWORD_K(ausführen, run);
-    KEYWORD_K(struktur, struct);
+    KEYWORD_K(obj, struct);
     KEYWORD_K(wahr, true);
     KEYWORD_K(typedef, type);
     KEYWORD_K(typeof, typeof);
     KEYWORD(typeinfo);
     KEYWORD_K(mit, using);
     KEYWORD(union);
+    KEYWORD_K(bis, until);
     KEYWORD_K(sizeof, sizeof);
     KEYWORD_K(solange, while);
 #undef KEYWORD

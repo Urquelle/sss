@@ -1,4 +1,4 @@
 data/output.S
-
 tests/test_output.S 
 data/*.obj 
+build/*

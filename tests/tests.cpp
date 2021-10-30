@@ -12,6 +12,11 @@
 
 #include "macros.h"
 
+using namespace Urq::Os::api;
+using namespace Urq::Sss::api;
+
+#include "tests/string.cpp"
+
 Arena *perm_arena;
 Arena *temp_arena;
 
@@ -42,11 +47,17 @@ CALLOCATOR(custom_calloc) {
     return result;
 }
 
-using namespace Urq::Os::api;
-using namespace Urq::Sss::api;
+bool
+test_lex() {
+    bool success = true;
+
+    /* @AUFGABE: implementieren */
+
+    return success;
+}
 
 bool
-test_expr(Mem *mem) {
+test_expr() {
     bool success = true;
 
     printf("\n================ EXPRS ================\n\n");
@@ -73,25 +84,25 @@ test_expr(Mem *mem) {
 }
 
 bool
-test_stmt(Mem *mem) {
+test_stmt() {
     bool success = true;
 
     printf("\n================ STMTS ================\n\n");
-    TEST("a := 5", "a : u32 = 5;", 5)
-    TEST("a += 1", "a : u32 = 5; a += 1;", 6)
-    TEST("a -= 1", "a : u32 = 5; a -= 1;", 4)
-    TEST("b := a", "a : u32 = 5; b := a;", 5)
-    TEST("a : *u32", "b: u32; a := *b; @a = 5; b;", 5)
-    TEST("a : [3] u32", "a : [3] u32; a[2] = 5; a[2];", 5)
-    TEST("a : Vec3", "Vec3 :: struktur { x, y, z : u32; } a : Vec3; a.y = 5; a.y;", 5)
-    TEST_CAST("a : string", "a := \"abcdef\"; a[0];", 'a', char)
+    TEST("a := 5", "a : n32 = 5;", 5)
+    TEST("a += 1", "a : n32 = 5; a += 1;", 6)
+    TEST("a -= 1", "a : n32 = 5; a -= 1;", 4)
+    TEST("b := a", "a : n32 = 5; b := a;", 5)
+    TEST("a : *n32", "b: n32; a := *b; @a = 5; b;", 5)
+    TEST("a : [3] n32", "a : [3] n32; a[2] = 5; a[2];", 5)
+    TEST("a : Vec3", "Vec3 :: obj { x, y, z : n32; } a : Vec3; a.y = 5; a.y;", 5)
+    TEST_DBG("a : string", "a := \"abcdef\"; a[0];", 'a')
     TEST("wenn 1 != 2", "wenn 1 != 2 { 1; } sonst { 2; }", 1)
     TEST("wenn 1 > 2", "wenn 1 > 2 { 1; } sonst { 2; }", 2)
     TEST("wenn 1 > 2", "wenn 1 > 2 { 1; } sonst 2 == 1 { 2; } sonst { 5; }", 5)
     TEST("wenn !falsch", "wenn !falsch { 1; } sonst !wahr { 2; } sonst { 3; }", 1)
     TEST("wenn a < 5", "a := 5; wenn a < 5 { 1; } sonst a == 5 { 2; } sonst { 3; }", 2)
-    TEST("iter", "a : u32 = 0; iter 0..5 { a += 1; } a;", 5)
-    TEST("iter it", "a : u32 = 0; iter it: 0..5 { a += it; } a;", 10)
+    TEST("iter", "a : n32 = 0; iter 0..5 { a += 1; } a;", 5)
+    TEST("iter it", "a : n32 = 0; iter it: 0..5 { a += it; } a;", 10)
 
     return success;
 }
@@ -110,12 +121,18 @@ int main(int argc, char* argv[]) {
     os_init();
     resolver_init();
 
-    Mem *mem = mem_new(1024*1024);
-
     bool success = true;
 
-    success = test_expr(mem) && success;
-    success = test_stmt(mem) && success;
+#if 1
+    success = test_lex()  && success;
+    success = test_expr() && success;
+    success = test_stmt() && success;
+#else
+    for ( int i = 0; i < test_procs_count; ++i ) {
+        Test_Proc *t = test_procs[i];
+        success = t(false) && success;
+    }
+#endif
 
     return !success;
 }

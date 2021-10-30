@@ -50,12 +50,8 @@ jobs:
         INPUT_GENERATOR: ${{ matrix.generator }}
         VC_VARS: "${{ matrix.vc_vars }}"
       run: |
-          "%VC_VARS%"
-      run: set compiler_flags=-fp:fast -fp:except- -EHsc -Gm- -GR- -EHa- -Zo -Oi -WX -W4 -wd4201 -wd4100 -wd4101 -wd4189 -wd4505 -wd4127 -wd4702 -wd4530 -wd4800 -FC -Z7 -I../src
-      run: set linker_flags= -incremental:no -opt:ref user32.lib gdi32.lib winmm.lib Shlwapi.lib Ws2_32.lib
-      run: cl %compiler_flags% ..\tests\tests.cpp -Fetests.exe /link %linker_flags%
-
-    - name: run tests
-      shell: cmd
-      working-directory: build
-      run: tests.exe
+        "%VC_VARS%"
+        set compiler_flags=-fp:fast -fp:except- -EHsc -Gm- -GR- -EHa- -Zo -Oi -WX -W4 -wd4201 -wd4100 -wd4101 -wd4189 -wd4505 -wd4127 -wd4702 -wd4530 -wd4800 -FC -Z7 -I../src
+        set linker_flags= -incremental:no -opt:ref user32.lib gdi32.lib winmm.lib Shlwapi.lib Ws2_32.lib
+        cl %compiler_flags% ..\tests\tests.cpp -Fetests.exe /link %linker_flags%
+        tests.exe
