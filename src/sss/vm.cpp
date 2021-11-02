@@ -821,13 +821,13 @@ operand_addr(Reg_Kind base, Reg_Kind index, int32_t scale, int32_t displacement,
     result->addr.index        = index;
     result->addr.scale        = scale;
     result->addr.displacement = displacement;
-    result->addr.section      = SECTION_TEXT;
+    result->addr.section      = SECTION_NONE;
 
     return result;
 }
 
 Operand *
-operand_addr(Reg_Kind base, int32_t displacement, int32_t size, Section section = SECTION_TEXT) {
+operand_addr(Reg_Kind base, int32_t displacement, int32_t size, Section section = SECTION_NONE) {
     Operand *result = urq_allocs(Operand);
 
     result->kind              = OPERAND_ADDR;
@@ -1405,9 +1405,9 @@ vm_decl(Decl *decl, Vm *vm) {
                 if ( decl->type->kind == TYPE_ARRAY ) {
                     int32_t mem = mem_alloc(vm->data, type_u32->size + PTR_SIZE + decl->type->size);
 
-                    decl->len_offset = mem;
+                    decl->offset     = mem;
                     decl->ptr_offset = mem + type_u32->size;
-                    decl->offset     = mem + type_u32->size + PTR_SIZE;
+                    decl->len_offset = mem + type_u32->size + PTR_SIZE;
 
                     uint32_t num_elems = TARRAY(decl->type)->num_elems;
 
@@ -1430,10 +1430,10 @@ vm_decl(Decl *decl, Vm *vm) {
                     uint32_t num_elems = TARRAY(decl->type)->num_elems;
 
                     /* @INFO: die anzahl der elemente speichern */
-                    vm_emit(vm, vm_instr(decl, OP_MOV, operand_rbp(type_u32->size, decl->len_offset), operand_imm(value(num_elems), decl->type->size)));
+                    vm_emit(vm, vm_instr(decl, OP_MOV, operand_rbp(type_u32->size, decl->len_offset), operand_imm(value(num_elems), type_u32->size)));
 
                     /* @INFO: adresse der daten speichern */
-                    vm_emit(vm, vm_instr(decl, OP_MOV, operand_rbp(type_u64->size, decl->ptr_offset), operand_addr(REG_RBP, decl->offset, decl->type->size)));
+                    vm_emit(vm, vm_instr(decl, OP_MOV, operand_rbp(PTR_SIZE, decl->ptr_offset), operand_addr(REG_RBP, decl->offset, PTR_SIZE)));
                 }
 
                 if ( expr ) {
@@ -1549,8 +1549,8 @@ vm_stmt(Stmt *stmt, Vm *vm) {
         } break;
 
         case STMT_IF: {
-            static uint32_t loop_count = 0;
-            char *label = make_label("if.%d", loop_count++);
+            static uint32_t if_count = 0;
+            char *label = make_label("if.%d", if_count++);
 
             vm_expr(SIF(stmt)->cond, vm);
             vm_emit(vm, vm_instr(stmt, OP_CMP, operand_rax(SIF(stmt)->cond->type->size), operand_imm(value1, SIF(stmt)->cond->type->size)));

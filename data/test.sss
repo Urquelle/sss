@@ -1,0 +1,22 @@
+Vec3 :: obj {
+    x, y, z : n32;
+}
+
+master :: proc() -> n32 {
+    a : g32 = 5;
+    d := "abcdefg";
+    v : Vec3;
+
+    wenn a < 10 {
+        a = 1;
+    }
+
+    zweig! a {
+        1: {
+            erg 20;
+        }
+    }
+
+    erg 15;
+}
+

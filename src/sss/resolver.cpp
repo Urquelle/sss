@@ -1414,10 +1414,17 @@ resolve_decl_var(Decl *decl) {
                  *           u32 beinhaltet die anzahl der elemente im array, der ptr zeigt auf den anfang der daten im array
                  */
                 scope->frame_size += type_u32->size + PTR_SIZE + TARRAY(type)->base->size*TARRAY(type)->num_elems;
+
+                decl->offset     = -scope->frame_size;
+                decl->ptr_offset = -scope->frame_size + TARRAY(type)->base->size*TARRAY(type)->num_elems;
+                decl->len_offset = -scope->frame_size + TARRAY(type)->base->size*TARRAY(type)->num_elems + PTR_SIZE;
+
             } else if ( type->kind == TYPE_STRUCT ) {
                 scope->frame_size += TSTRUCT(type)->aggregate_size;
+                decl->offset = -scope->frame_size;
             } else {
                 scope->frame_size += type->size;
+                decl->offset = -scope->frame_size;
             }
         }
     } else {

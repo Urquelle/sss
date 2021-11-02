@@ -1,21 +1,22 @@
+##(
 #import Sys = (*) aus sys;
 
 master :: proc() -> n32 {
     Sys.ausgabe_zeile("hallo");
 
-    res 10;
+    erg 10;
 }
+##)
 
-##(
 #lade "W:/sss/data/expr.sss";
 
-Farbe :: struktur {
+Farbe :: obj {
     wert       : n32;
     sättigung  : r32;
     helligkeit : r32;
 }
 
-Vec3 :: struktur {
+Vec3 :: obj {
     x, y, z : n32;
 }
 
@@ -29,12 +30,12 @@ master :: proc() -> n32 {
     wenn a < 10 {
         test(*v.y);
     } sonst {
-        res 33;
+        erg 33;
     }
 
     zweig! a {
         1: {
-            res 21;
+            erg 20;
         }
     }
 
@@ -42,10 +43,10 @@ master :: proc() -> n32 {
     c[index(2)][b] = 15;
 
     wenn d[3] != 'd' {
-        res 11;
+        erg 11;
     }
 
-    res c[2][b];
+    erg c[2][b];
 }
 
 test :: proc(x : *n32) {
@@ -54,10 +55,9 @@ test :: proc(x : *n32) {
 
 index :: proc(i : n32) -> n32 {
     wenn i == 1 {
-        res 1;
+        erg 1;
     } sonst {
-        res 2;
+        erg 2;
     }
 }
-##)
 
