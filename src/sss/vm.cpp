@@ -1423,7 +1423,7 @@ vm_decl(Decl *decl, Vm *vm) {
                     vm_emit(vm, vm_instr(decl, OP_MOV, operand_addr(REG_NONE, decl->len_offset, type_u32->size, SECTION_DATA), operand_imm(value(num_elems), decl->type->size)));
 
                     /* @INFO: adresse der daten speichern */
-                    vm_emit(vm, vm_instr(decl, OP_MOV, operand_addr(REG_NONE, decl->ptr_offset, type_u64->size, SECTION_DATA), operand_addr(REG_RBP, decl->offset, decl->type->size)));
+                    vm_emit(vm, vm_instr(decl, OP_LEA, operand_addr(REG_NONE, decl->ptr_offset, type_u64->size, SECTION_DATA), operand_addr(REG_RBP, decl->offset, decl->type->size)));
                 } else {
                     decl->offset = mem_alloc(vm->data, decl->type->size);
                 }
@@ -1431,7 +1431,12 @@ vm_decl(Decl *decl, Vm *vm) {
                 if ( expr ) {
                     /* @AUFGABE: decl->offset mit übergeben, damit die werte in vm_expr direkt zugewiesen werden können */
                     vm_expr(expr, vm);
-                    vm_emit(vm, vm_instr(decl, OP_MOV, operand_addr(REG_NONE, decl->offset, decl->type->size, SECTION_DATA), operand_rax(decl->type->size)));
+
+                    if ( decl->type->kind == TYPE_ARRAY ) {
+                        vm_emit(vm, vm_instr(decl, OP_MOV, operand_addr(REG_NONE, decl->ptr_offset, decl->type->size, SECTION_DATA), operand_rax(decl->type->size)));
+                    } else {
+                        vm_emit(vm, vm_instr(decl, OP_MOV, operand_addr(REG_NONE, decl->offset, decl->type->size, SECTION_DATA), operand_rax(decl->type->size)));
+                    }
                 }
             } else {
                 if ( decl->type->kind == TYPE_ARRAY ) {
@@ -1447,7 +1452,12 @@ vm_decl(Decl *decl, Vm *vm) {
                 if ( expr ) {
                     /* @AUFGABE: decl->offset mit übergeben, damit die werte in vm_expr direkt zugewiesen werden können */
                     vm_expr(expr, vm);
-                    vm_emit(vm, vm_instr(decl, OP_MOV, operand_rbp(8, decl->ptr_offset), operand_rax(expr->type->size)));
+
+                    if ( decl->type->kind == TYPE_ARRAY ) {
+                        vm_emit(vm, vm_instr(decl, OP_MOV, operand_rbp(8, decl->ptr_offset), operand_rax(expr->type->size)));
+                    } else {
+                        vm_emit(vm, vm_instr(decl, OP_MOV, operand_rbp(8, decl->offset), operand_rax(expr->type->size)));
+                    }
                 }
             }
         } break;
