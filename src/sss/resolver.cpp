@@ -124,6 +124,7 @@ struct Type {
     uint16_t id;
 
     uint32_t flags;
+    uint32_t data_size;
 
     Sym   * sym;
     char  * name;
@@ -137,6 +138,7 @@ struct Type_Ptr : Type {
 struct Type_Array : Type {
     Type   * base;
     int32_t  num_elems;
+    int32_t  total_num_elems;
 };
 
 struct Type_Compound : Type {
@@ -289,6 +291,7 @@ type_new( uint32_t size, Type_Kind kind, uint32_t flags = TYPE_FLAG_NONE ) {
     result->id        = global_type_id++;
     result->flags     = flags;
     result->scope     = scope_new("type");
+    result->data_size = size;
 
     result->scope->flags = SCOPE_NON_GLOBAL;
 
@@ -564,9 +567,10 @@ Type_Ptr *
 type_ptr(Type *base) {
     Type_Ptr *result = urq_allocs(Type_Ptr);
 
-    result->kind = TYPE_PTR;
-    result->size = PTR_SIZE;
-    result->base = base;
+    result->kind      = TYPE_PTR;
+    result->size      = PTR_SIZE;
+    result->data_size = PTR_SIZE;
+    result->base      = base;
 
     return result;
 }
@@ -575,11 +579,24 @@ Type_Array *
 type_array(Type *base, uint32_t num_elems) {
     Type_Array *result = urq_allocs(Type_Array);
 
-    result->kind      = TYPE_ARRAY;
-    result->base      = base;
-    result->num_elems = num_elems;
-    result->size      = PTR_SIZE;
-    result->scope     = scope_new("array");
+    result->kind            = TYPE_ARRAY;
+    result->base            = base;
+    result->num_elems       = num_elems;
+    result->size            = PTR_SIZE;
+    result->scope           = scope_new("array");
+    result->total_num_elems = 1;
+    result->data_size       = num_elems * base->data_size;
+
+    Type *type = result;
+    while ( type ) {
+        if ( type->kind == TYPE_ARRAY ) {
+            result->total_num_elems *= TARRAY(type)->num_elems;
+        } else {
+            break;
+        }
+
+        type = TARRAY(type)->base;
+    }
 
     result->scope->flags = SCOPE_NON_GLOBAL;
 
@@ -593,11 +610,12 @@ type_proc(Decl_Var **params, uint32_t num_params, Decl_Var **rets, uint32_t num_
     Type_Proc *result = urq_allocs(Type_Proc);
 
     result->kind       = TYPE_PROC;
-    result->size       = 8;
+    result->size       = PTR_SIZE;
     result->params     = (Decl_Var **)MEMDUP(params);
     result->num_params = num_params;
     result->rets       = (Decl_Var **)MEMDUP(rets);
     result->num_rets   = num_rets;
+    result->data_size  = PTR_SIZE;
     result->flags      = TYPE_FLAG_IS_CALLABLE;
 
     return result;
@@ -1410,14 +1428,12 @@ resolve_decl_var(Decl *decl) {
 
         if ( scope ) {
             if ( type->kind == TYPE_ARRAY ) {
-                /* @INFO: arrays beanspruchen platz in der größe U32 + PTR + size*num_elems.
-                 *           u32 beinhaltet die anzahl der elemente im array, der ptr zeigt auf den anfang der daten im array
-                 */
-                scope->frame_size += type_u32->size + PTR_SIZE + TARRAY(type)->base->size*TARRAY(type)->num_elems;
+                int32_t array_size = type_u32->size + PTR_SIZE + TARRAY(type)->base->size*TARRAY(type)->total_num_elems;
+                scope->frame_size += array_size;
 
-                decl->offset     = -scope->frame_size;
-                decl->ptr_offset = -scope->frame_size + TARRAY(type)->base->size*TARRAY(type)->num_elems;
-                decl->len_offset = -scope->frame_size + TARRAY(type)->base->size*TARRAY(type)->num_elems + PTR_SIZE;
+                decl->offset     = -array_size;
+                decl->ptr_offset = -array_size + TARRAY(type)->base->size*TARRAY(type)->total_num_elems;
+                decl->len_offset = -array_size + TARRAY(type)->base->size*TARRAY(type)->total_num_elems + PTR_SIZE;
 
             } else if ( type->kind == TYPE_STRUCT ) {
                 scope->frame_size += TSTRUCT(type)->aggregate_size;
@@ -1431,7 +1447,7 @@ resolve_decl_var(Decl *decl) {
         decl->is_global = true;
 
         if ( type->kind == TYPE_ARRAY ) {
-            mem_offset = type_u32->size + PTR_SIZE + TARRAY(type)->base->size * TARRAY(type)->num_elems;
+            mem_offset = type_u32->size + PTR_SIZE + TARRAY(type)->base->size * TARRAY(type)->total_num_elems;
         } else if ( type->kind == TYPE_STRUCT ) {
             mem_offset = TSTRUCT(type)->aggregate_size;
         } else {
@@ -1439,6 +1455,7 @@ resolve_decl_var(Decl *decl) {
         }
     }
 
+#if 0
     /* @INFO: sektorengröße berechnen */
     if ( decl->is_global ) {
         if ( DVAR(decl)->expr ) {
@@ -1460,6 +1477,7 @@ resolve_decl_var(Decl *decl) {
             data_sector_size += op->type->size;
         }
     }
+#endif
 
     return type;
 }

@@ -53,6 +53,8 @@ enum Vm_Op : uint8_t {
     OP_SETNE,
     OP_SUB,
 
+    OP_COMMENT,
+
     OP_COUNT,
 };
 
@@ -962,6 +964,11 @@ vm_emit(Vm *vm, Instr *instr) {
 }
 
 void
+vm_comment(Vm *vm, char *comment) {
+    buf_push(vm->text, vm_instr(&loc_none, OP_COMMENT, NULL, NULL, NULL, comment));
+}
+
+void
 rsp_dec(Cpu *cpu, uint32_t by_how_much) {
     reg_write64(cpu, REG_RSP, reg_read64(cpu, REG_RSP) - by_how_much);
 }
@@ -977,28 +984,28 @@ stack_push(Cpu *cpu, uint64_t val, uint32_t size) {
         case 1: {
             rsp_dec(cpu, size);
             uint64_t addr = reg_read64(cpu, REG_RSP);
-            assert(addr > cpu->stack_size);
+            assert((cpu->mem->mem + addr) > (cpu->mem->mem + cpu->mem->size - cpu->stack_size));
             mem_write(cpu->mem, addr, (uint8_t)val);
         } break;
 
         case 2: {
             rsp_dec(cpu, size);
             uint64_t addr = reg_read64(cpu, REG_RSP);
-            assert(addr > cpu->stack_size);
+            assert((cpu->mem->mem + addr) > (cpu->mem->mem + cpu->mem->size - cpu->stack_size));
             mem_write(cpu->mem, addr, (uint16_t)val);
         } break;
 
         case 4: {
             rsp_dec(cpu, size);
             uint64_t addr = reg_read64(cpu, REG_RSP);
-            assert(addr > cpu->stack_size);
+            assert((cpu->mem->mem + addr) > (cpu->mem->mem + cpu->mem->size - cpu->stack_size));
             mem_write(cpu->mem, addr, (uint32_t)val);
         } break;
 
         case 8: {
             rsp_dec(cpu, size);
             uint64_t addr = reg_read64(cpu, REG_RSP);
-            assert(addr > cpu->stack_size);
+            assert((cpu->mem->mem + addr) > (cpu->mem->mem + cpu->mem->size - cpu->stack_size));
             mem_write(cpu->mem, addr, val);
         } break;
 
@@ -1285,17 +1292,18 @@ vm_expr(Expr *expr, Vm *vm, bool assign) {
             uint32_t index_size = EINDEX(expr)->index->type->size;
             uint32_t num_elems  = TARRAY(EINDEX(expr)->base->type)->num_elems;
             uint32_t elem_size  = TARRAY(EINDEX(expr)->base->type)->base->size;
+            uint32_t data_size  = TARRAY(EINDEX(expr)->base->type)->base->data_size;
 
             vm_expr(EINDEX(expr)->base, vm, assign);
             vm_emit(vm, vm_instr(expr, OP_PUSH, operand_rax(index_size)));
 
             vm_expr(EINDEX(expr)->index, vm);
-            vm_emit(vm, vm_instr(expr, OP_MUL, operand_rax(index_size), operand_imm(value(elem_size), index_size)));
+            vm_emit(vm, vm_instr(expr, OP_MUL, operand_rax(index_size), operand_imm(value(data_size), index_size)));
 
             vm_emit(vm, vm_instr(expr, OP_POP, operand_rsi(index_size)));
             vm_emit(vm, vm_instr(expr, OP_ADD, operand_rax(index_size), operand_rsi(index_size)));
 
-            if ( !assign ) {
+            if ( !assign && TARRAY(EINDEX(expr)->base->type)->base->kind != TYPE_ARRAY ) {
                 vm_emit(vm, vm_instr(expr, OP_MOV, operand_rax(index_size), operand_addr(REG_RAX, 0, elem_size)));
             }
         } break;
@@ -1409,7 +1417,7 @@ vm_decl(Decl *decl, Vm *vm) {
                     decl->ptr_offset = mem + type_u32->size;
                     decl->len_offset = mem + type_u32->size + PTR_SIZE;
 
-                    uint32_t num_elems = TARRAY(decl->type)->num_elems;
+                    uint32_t num_elems = TARRAY(decl->type)->total_num_elems;
 
                     /* @INFO: die anzahl der elemente speichern */
                     vm_emit(vm, vm_instr(decl, OP_MOV, operand_addr(REG_NONE, decl->len_offset, type_u32->size, SECTION_DATA), operand_imm(value(num_elems), decl->type->size)));
@@ -1427,19 +1435,19 @@ vm_decl(Decl *decl, Vm *vm) {
                 }
             } else {
                 if ( decl->type->kind == TYPE_ARRAY ) {
-                    uint32_t num_elems = TARRAY(decl->type)->num_elems;
+                    uint32_t num_elems = TARRAY(decl->type)->total_num_elems;
 
                     /* @INFO: die anzahl der elemente speichern */
                     vm_emit(vm, vm_instr(decl, OP_MOV, operand_rbp(type_u32->size, decl->len_offset), operand_imm(value(num_elems), type_u32->size)));
 
                     /* @INFO: adresse der daten speichern */
-                    vm_emit(vm, vm_instr(decl, OP_MOV, operand_rbp(PTR_SIZE, decl->ptr_offset), operand_addr(REG_RBP, decl->offset, PTR_SIZE)));
+                    vm_emit(vm, vm_instr(decl, OP_LEA, operand_rbp(PTR_SIZE, decl->ptr_offset), operand_rbp(PTR_SIZE, decl->offset)));
                 }
 
                 if ( expr ) {
                     /* @AUFGABE: decl->offset mit übergeben, damit die werte in vm_expr direkt zugewiesen werden können */
                     vm_expr(expr, vm);
-                    vm_emit(vm, vm_instr(decl, OP_MOV, operand_rbp(8, decl->offset), operand_rax(expr->type->size)));
+                    vm_emit(vm, vm_instr(decl, OP_MOV, operand_rbp(8, decl->ptr_offset), operand_rax(expr->type->size)));
                 }
             }
         } break;
@@ -1695,6 +1703,10 @@ step(Cpu *cpu) {
             }
         } break;
 
+        case OP_COMMENT: {
+            // nix
+        } break;
+
         case OP_DIV: {
             uint64_t dividend = reg_read64(cpu, REG_RAX);
             uint64_t divisor = 0;
@@ -1830,6 +1842,16 @@ step(Cpu *cpu) {
                     reg_write(cpu, instr->dst, vm_label_find(instr->src->label));
                 } else if ( instr->src->kind == OPERAND_ADDR ) {
                     reg_write(cpu, instr->dst, effective_addr(cpu, instr->src));
+                } else {
+                    ILLEGAL();
+                }
+            } else if ( instr->dst->kind == OPERAND_ADDR ) {
+                if ( instr->src->kind == OPERAND_REG ) {
+                    mem_write(cpu->mem, effective_addr(cpu, instr->dst), reg_read(cpu, instr->src));
+                } else if ( instr->src->kind == OPERAND_LABEL ) {
+                    mem_write(cpu->mem, effective_addr(cpu, instr->dst), vm_label_find(instr->src->label));
+                } else if ( instr->src->kind == OPERAND_ADDR ) {
+                    mem_write(cpu->mem, effective_addr(cpu, instr->dst), effective_addr(cpu, instr->src));
                 } else {
                     ILLEGAL();
                 }

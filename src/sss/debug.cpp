@@ -148,6 +148,31 @@ to_str(Reg_Kind reg, uint32_t size) {
 }
 
 char *
+to_str(Section section) {
+    switch (section) {
+        case SECTION_NONE: {
+            return "mem";
+        } break;
+
+        case SECTION_TEXT: {
+            return "text";
+        } break;
+
+        case SECTION_DATA: {
+            return "data";
+        } break;
+
+        case SECTION_RDATA: {
+            return "rdata";
+        } break;
+
+        default: {
+            return "unbekannt";
+        } break;
+    }
+}
+
+char *
 to_str(Urq::Sss::Vm::Operand *op) {
     char *result = NULL;
 
@@ -156,7 +181,7 @@ to_str(Urq::Sss::Vm::Operand *op) {
             char *displacement = NULL;
             displacement = buf_printf(displacement, "%d", op->addr.displacement);
 
-            result = buf_printf(result, "[%s%s%s%s]", to_str(op->addr.base, op->size),
+            result = buf_printf(result, "%s [%s%s%s%s]", to_str(op->addr.section), to_str(op->addr.base, op->size),
                     to_str(op->addr.index, op->addr.scale, op->size), (op->addr.displacement >= 0) ? "+" : "",
                     displacement);
         } break;
@@ -219,6 +244,10 @@ to_str(Instr *instr) {
 
         case OP_CMP: {
             output = buf_printf(output, to_str_binop("cmp", instr));
+        } break;
+
+        case OP_COMMENT: {
+            output = buf_printf(output, "; %s", instr->comment);
         } break;
 
         case OP_DIV: {
@@ -330,7 +359,7 @@ to_str(Instr *instr) {
         } break;
     }
 
-    if ( instr->comment ) {
+    if ( instr->comment && instr->op != OP_COMMENT ) {
         output = buf_printf(output, "    ; %s", instr->comment);
     }
 
