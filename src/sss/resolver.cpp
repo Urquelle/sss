@@ -1432,8 +1432,8 @@ resolve_decl_var(Decl *decl) {
                 scope->frame_size += array_size;
 
                 decl->offset     = -array_size;
-                decl->ptr_offset = -array_size + TARRAY(type)->base->size*TARRAY(type)->total_num_elems;
-                decl->len_offset = -array_size + TARRAY(type)->base->size*TARRAY(type)->total_num_elems + PTR_SIZE;
+                decl->ptr_offset = -array_size - TARRAY(type)->base->size*TARRAY(type)->total_num_elems;
+                decl->len_offset = -array_size - TARRAY(type)->base->size*TARRAY(type)->total_num_elems - PTR_SIZE;
 
             } else if ( type->kind == TYPE_STRUCT ) {
                 scope->frame_size += TSTRUCT(type)->aggregate_size;
