@@ -25,11 +25,13 @@ struct Obj_Header {
     uint64_t entry;
 };
 
+enum { STACK_SIZE = 1024 };
+
 uint8_t *
 obj_create(uint8_t *rdata, uint64_t rdata_size, uint8_t *text, uint64_t text_size,
         uint8_t *data, uint64_t data_size, uint64_t entry)
 {
-    uint64_t stack_size = 1024;
+    uint64_t stack_size = STACK_SIZE;
 
     uint64_t result_size = sizeof(Obj_Header) + rdata_size + text_size + data_size + stack_size;
     uint8_t *result = (uint8_t *)urq_alloc(result_size);

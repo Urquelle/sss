@@ -2255,11 +2255,19 @@ parse_directive_import(Token_List *tokens) {
         report_error(curr, "SSS_DIR umgebungsvariable setzen");
     }
 
-    char *file_name = path_concat(sss_dir, ident, ".sss");
+    char *sys_module_file_name  = path_concat(sss_dir, ident, ".sss");
+    char *user_module_file_name = path_concat("./", ident, ".sss");
+    char *file_name = NULL;
 
     char *content = "";
-    if ( !Urq::Os::os_file_read(file_name, &content) ) {
-        report_error(curr, "konnte datei %s nicht lesen", file_name);
+    if ( !Urq::Os::os_file_read(sys_module_file_name, &content) ) {
+        if ( !Urq::Os::os_file_read(user_module_file_name, &content) ) {
+            report_error(curr, "konnte datei %s nicht lesen", file_name);
+        } else {
+            file_name = user_module_file_name;
+        }
+    } else {
+        file_name = sys_module_file_name;
     }
 
     auto imported_tokens = tokenize(file_name, content);

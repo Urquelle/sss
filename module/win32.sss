@@ -38,12 +38,12 @@ Access :: enum {
     GENERIC_WRITE     :: 1073741824;
 }
 
-Win32_Offset :: struktur {
+Win32_Offset :: obj {
     Offset     : DWORD;
     OffsetHigh : DWORD;
 }
 
-Overlapped :: struktur {
+Overlapped :: obj {
     Internal       : PDWORD;
     InternalHigh   : PDWORD;
 
@@ -61,7 +61,7 @@ Device_Type :: enum {
     STD_ERROR_HANDLE  :: -12;
 }
 
-Security_Attributes :: struktur {
+Security_Attributes :: obj {
     nLength              : DWORD;
     lpSecurityDescriptor : PVOID;
     bInheritHandle       : bool;

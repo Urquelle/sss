@@ -6,22 +6,22 @@
 }
 
 ausgabe_zeile :: proc(fmt: string) {
-    ##ausgabe(fmt);
+    ausgabe(fmt);
     ##ausgabe("\n");
 }
 
-##(
 ausgabe :: proc(fmt: string, args: ...) {
     mit Win32;
 
     out := "";
+    ##(
     iter arg: args {
         type := typeof(arg);
     }
+    ##)
 
-    handle := get_std_handle(als(n32)Device_Type.STD_OUTPUT_HANDLE);
+    handle := get_std_handle(zu(n32)Device_Type.STD_OUTPUT_HANDLE);
     chars_written : n32;
-    write_console(handle, als(* void)fmt, als(n32)fmt.größe, @chars_written, 0);
+    write_console(handle, zu(* void)fmt, zu(n32)fmt.größe, *chars_written, 0);
 }
-##)
 

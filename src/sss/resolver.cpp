@@ -20,6 +20,7 @@ struct Sym : Loc {
     char      * foreign_name;
     Decl      * decl;
     Type      * type;
+    Decl_Var  * field;
 };
 
 enum Scope_Flags {
@@ -152,9 +153,6 @@ struct Type_Struct : Type {
     uint32_t  aggregate_size;
 };
 
-struct Type_String : Type {
-};
-
 struct Type_Enum : Type {
     Decl_Vars fields;
     uint32_t  num_fields;
@@ -200,7 +198,6 @@ Type *type_f32;
 Type *type_f64;
 Type *type_bool;
 Type *type_typeid;
-Type *type_string;
 Type *type_variadic;
 
 Sym * sym_get(char *name);
@@ -212,10 +209,6 @@ to_str(Type *type) {
     switch ( type->kind ) {
         case TYPE_ARRAY: {
             result = buf_printf(result, "[] %s", to_str(TARRAY(type)->base));
-        } break;
-
-        case TYPE_STRING: {
-            result = buf_printf(result, "string");
         } break;
 
         case TYPE_PTR: {
@@ -294,27 +287,6 @@ type_new( uint32_t size, Type_Kind kind, uint32_t flags = TYPE_FLAG_NONE ) {
     result->data_size = size;
 
     result->scope->flags = SCOPE_NON_GLOBAL;
-
-    buf_push(types, result);
-
-    return result;
-}
-
-Type_String *
-type_string_new() {
-    // @AUFGABE: zu TYPE_ARRAY(TYPE_CHAR) umwandeln
-
-    Type_String *result = urq_allocs(Type_String);
-
-    result->kind      = TYPE_STRING;
-    result->size      = PTR_SIZE;
-    result->id        = global_type_id++;
-    result->scope     = scope_new("string");
-
-    result->scope->flags = SCOPE_NON_GLOBAL;
-
-    sym_push_scope(&loc_none, result->scope, prop_size, type_u64);
-    sym_push_scope(&loc_none, result->scope, prop_num, type_u64);
 
     buf_push(types, result);
 
@@ -601,6 +573,7 @@ type_array(Type *base, uint32_t num_elems) {
     result->scope->flags = SCOPE_NON_GLOBAL;
 
     sym_push_scope(&loc_none, result->scope, prop_size, type_u64);
+    sym_push_scope(&loc_none, result->scope, prop_num, type_u64);
 
     return result;
 }
@@ -1838,7 +1811,8 @@ resolve_aggr_fields(Decl_Vars fields, uint32_t num_fields) {
         field->type = field_type;
         field->operand = operand;
 
-        sym_push_aggr_field(field, field->name, field_type);
+        Sym *sym = sym_push_aggr_field(field, field->name, field_type);
+        sym->field = field;
 
         if ( field->has_using ) {
             if ( field->type->kind != TYPE_STRUCT ) {
@@ -2199,9 +2173,8 @@ resolver_init() {
     type_f32      = type_new(4, TYPE_F32);
     type_f64      = type_new(8, TYPE_F64);
     type_bool     = type_new(1, TYPE_BOOL);
-    type_string   = type_string_new();
 
-    type_variadic = type_new(0, TYPE_VARIADIC);
+    type_variadic = type_new(8, TYPE_VARIADIC);
 
     sym_push_sys("void",   type_void);
     sym_push_sys("char",   type_char);
@@ -2216,7 +2189,7 @@ resolver_init() {
     sym_push_sys("r32",    type_f32);
     sym_push_sys("r64",    type_f64);
     sym_push_sys("bool",   type_bool);
-    sym_push_sys("string", type_string);
+    sym_push_sys("string", type_array(type_char, 0));
 
     resolver_load_sys_modules();
 }

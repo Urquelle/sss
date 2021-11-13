@@ -1,7 +1,5 @@
 namespace Vm {
 
-enum { STACK_SIZE = 1024 };
-
 struct Cpu;
 struct Operand;
 struct Mem;
@@ -331,55 +329,60 @@ reg_read8(Cpu *cpu, Reg_Kind reg) {
 uint64_t
 reg_read(Cpu *cpu, Operand *op) {
     assert(op->kind == OPERAND_REG);
+    uint64_t result = 0;
 
     switch ( op->reg.size ) {
         case 1: {
-            return reg_read8(cpu, op->reg.kind);
+            result = reg_read8(cpu, op->reg.kind);
         } break;
 
         case 2: {
-            return reg_read16(cpu, op->reg.kind);
+            result = reg_read16(cpu, op->reg.kind);
         } break;
 
         case 4: {
-            return reg_read32(cpu, op->reg.kind);
+            result = reg_read32(cpu, op->reg.kind);
         } break;
 
         case 8: {
-            return reg_read64(cpu, op->reg.kind);
+            result = reg_read64(cpu, op->reg.kind);
         } break;
 
         default: {
             ILLEGAL();
-            return 0;
         } break;
     }
+
+    return result;
 }
 
 uint64_t
 reg_read(Cpu *cpu, Reg_Kind reg, uint32_t size) {
+    uint64_t result = 0;
+
     switch ( size ) {
         case 1: {
-            return reg_read8(cpu, reg);
+            result = reg_read8(cpu, reg);
         } break;
 
         case 2: {
-            return reg_read16(cpu, reg);
+            result = reg_read16(cpu, reg);
         } break;
 
         case 4: {
-            return reg_read32(cpu, reg);
+            result = reg_read32(cpu, reg);
         } break;
 
         case 8: {
-            return reg_read64(cpu, reg);
+            result = reg_read64(cpu, reg);
         } break;
 
         default: {
             ILLEGAL();
-            return 0;
         } break;
     }
+
+    return result;
 }
 
 uint32_t
@@ -397,7 +400,7 @@ effective_addr(Cpu *cpu, Operand *op) {
     }
 
     uint64_t scale = op->addr.scale;
-    uint64_t displacement = op->addr.displacement;
+    int64_t displacement = op->addr.displacement;
     uint32_t result = (uint32_t)(base + index*scale + displacement);
 
     if ( op->addr.base == REG_NONE ) {
@@ -689,10 +692,13 @@ cpu_new(uint8_t *obj) {
     result->instrs     = (Instrs)obj_text_section(obj);
     result->num_instrs = obj_text_num_entries(obj);
     result->stack_size = STACK_SIZE;
+
+    /* @AUFGABE: wird hier der stack draufaddiert? */
     result->mem        = mem_new(obj + result->obj->rdata_offset, (uint32_t)result->obj->size);
 
     reg_write64(result, REG_RIP, result->obj->entry);
     reg_write64(result, REG_RSP, result->obj->size);
+    reg_write64(result, REG_RBP, result->obj->size);
 
     return result;
 }
@@ -1005,7 +1011,7 @@ stack_push(Cpu *cpu, uint64_t val, uint32_t size) {
         case 8: {
             rsp_dec(cpu, size);
             uint64_t addr = reg_read64(cpu, REG_RSP);
-            assert((cpu->mem->mem + addr) > (cpu->mem->mem + cpu->mem->size - cpu->stack_size));
+            // assert((cpu->mem->mem + addr) > (cpu->mem->mem + cpu->mem->size - cpu->stack_size));
             mem_write(cpu->mem, addr, val);
         } break;
 
@@ -1157,10 +1163,14 @@ vm_expr(Expr *expr, Vm *vm, bool assign) {
             vm_expr(ECALL(expr)->base, vm);
 
             if ( ECALL(expr)->base->type->flags & TYPE_FLAG_SYS_CALL ) {
-                report_error(expr, "syscalls werden in der vm noch nicht unterstützt");
+                assert(!"syscalls werden in der vm noch nicht unterstützt");
             } else {
                 vm_emit(vm, vm_instr(expr, OP_CALL, operand_reg(REG_RAX, 8)));
             }
+        } break;
+
+        case EXPR_CAST: {
+            assert(!"umwandlungen werden in der vm noch nicht unterstützt");
         } break;
 
         case EXPR_CHAR: {
@@ -1168,11 +1178,8 @@ vm_expr(Expr *expr, Vm *vm, bool assign) {
         } break;
 
         case EXPR_DEREF: {
-            vm_expr(EDEREF(expr)->base, vm);
-
-            if ( !assign ) {
-                vm_emit(vm, vm_instr(expr, OP_MOV, operand_reg(REG_RAX, 8), operand_addr(REG_RAX, 0, PTR_SIZE)));
-            }
+            vm_expr(EDEREF(expr)->base, vm, assign);
+            vm_emit(vm, vm_instr(expr, OP_MOV, operand_reg(REG_RAX, 8), operand_addr(REG_RAX, 0, EDEREF(expr)->base->type->size)));
         } break;
 
         case EXPR_FIELD: {
@@ -1184,59 +1191,42 @@ vm_expr(Expr *expr, Vm *vm, bool assign) {
                 vm_expr(EFIELD(expr)->base, vm, true);
             }
 
-            Expr      * base       = EFIELD(expr)->base;
-            Type      * type       = base->type;
-            int32_t     num_fields = 0;
-            Decl_Vars   fields     = NULL;
+            Expr * base = EFIELD(expr)->base;
+            Type * type = base->type;
 
-            if ( type->kind == TYPE_NAMESPACE ) {
-                //assert(!"namespace zugriff");
-                return;
-            }
-
-            if ( type->kind == TYPE_PTR ) {
+            if ( IS_TPTR(type) ) {
                 type = TPTR(type)->base;
             }
 
-            if ( type->kind == TYPE_STRUCT ) {
-                num_fields = (int32_t)TSTRUCT(type)->num_fields;
-                fields     = TSTRUCT(type)->fields;
-            } else if ( type->kind == TYPE_ENUM ) {
-                num_fields = (int32_t)TENUM(type)->num_fields;
-                fields     = TENUM(type)->fields;
-            } else if ( type->kind == TYPE_UNION ) {
-                num_fields = (int32_t)TENUM(type)->num_fields;
-                fields     = TENUM(type)->fields;
-            } else {
-                ILLEGAL();
-            }
+            Sym *sym = sym_get(type->scope, EFIELD(expr)->field);
 
-            Decl_Var *field = NULL;
-            for ( int i = 0; i < num_fields; ++i ) {
-                Decl_Var *f = fields[i];
+            assert(sym);
+            assert(sym->field);
 
-                if ( f->name == EFIELD(expr)->field ) {
-                    field = f;
-                    break;
+            Decl_Var *field = sym->field;
+
+            if ( IS_TNS(type) ) {
+                if ( sym->type->kind == TYPE_PROC ) {
+                    char *name = NULL;
+
+                    name = buf_printf(name, "%s.%s", sym->decl->module, sym->name);
+                    vm_emit(vm, vm_instr(expr, OP_LEA, operand_rax(sym->type->size), operand_label(name)));
+                } else {
+                    ILLEGAL();
                 }
-            }
 
-            assert(field);
-            if ( type->kind == TYPE_STRUCT ) {
-                vm_emit(vm, vm_instr(expr, OP_ADD, operand_rax(field->type->size), operand_imm(value((int64_t)field->offset, 4), 4)));
-
-                if ( !assign ) {
-                    vm_emit(vm, vm_instr(expr, OP_MOV, operand_rax(field->type->size), operand_addr(REG_RAX, 0, field->type->size)));
-                }
-            } else if ( type->kind == TYPE_ENUM ) {
+                return;
+            } else if ( IS_TENUM(type) ) {
                 assert(!assign);
                 vm_expr(field->expr, vm);
-            } else if ( type->kind == TYPE_UNION ) {
-                if ( !assign ) {
-                    vm_emit(vm, vm_instr(expr, OP_MOV, operand_rax(field->type->size), operand_addr(REG_RAX, 0, field->type->size)));
-                }
-            } else {
-                ILLEGAL();
+
+                return;
+            } else if ( IS_TSTRUCT(type) ) {
+                vm_emit(vm, vm_instr(expr, OP_ADD, operand_rax(field->type->size), operand_imm(value((int64_t)field->offset, 4), 4)));
+            }
+
+            if ( !assign ) {
+                vm_emit(vm, vm_instr(expr, OP_MOV, operand_rax(field->type->size), operand_addr(REG_RAX, 0, field->type->size)));
             }
         } break;
 
@@ -1254,7 +1244,7 @@ vm_expr(Expr *expr, Vm *vm, bool assign) {
             }
 
             if (sym->decl->is_global) {
-                if ( sym->decl->kind == DECL_PROC ) {
+                if ( IS_DPROC(sym->decl) ) {
                     if ( !(sym->decl->type->flags & TYPE_FLAG_SYS_CALL) ) {
                         if ( !sym->foreign_name && !sym->decl->module) {
                             vm_emit(vm, vm_instr(expr, OP_LEA, operand_rax(sym->type->size), operand_label(sym->name)));
@@ -1265,8 +1255,8 @@ vm_expr(Expr *expr, Vm *vm, bool assign) {
                         }
                     }
                 } else {
-                    if ( assign || expr->type->kind == TYPE_ARRAY ) {
-                        if ( sym->type->kind == TYPE_ARRAY ) {
+                    if ( assign || IS_TARRAY(expr->type) ) {
+                        if ( IS_TARRAY(sym->type) ) {
                             vm_emit(vm, vm_instr(expr, OP_MOV, operand_rax(sym->type->size), operand_addr(REG_NONE, sym->decl->offset, sym->type->size, SECTION_DATA)));
                         } else {
                             vm_emit(vm, vm_instr(expr, OP_LEA, operand_rax(sym->type->size), operand_addr(REG_NONE, sym->decl->offset, sym->type->size, SECTION_DATA)));
@@ -1276,8 +1266,8 @@ vm_expr(Expr *expr, Vm *vm, bool assign) {
                     }
                 }
             } else {
-                if ( assign || sym->type->kind == TYPE_ARRAY ) {
-                    if ( sym->type->kind == TYPE_ARRAY ) {
+                if ( assign || IS_TARRAY(sym->type) ) {
+                    if ( IS_TARRAY(sym->type) ) {
                         vm_emit(vm, vm_instr(expr, OP_MOV, operand_rax(sym->type->size), operand_addr(REG_RBP, sym->decl->ptr_offset, sym->type->size)));
                     } else {
                         vm_emit(vm, vm_instr(expr, OP_LEA, operand_rax(sym->type->size), operand_addr(REG_RBP, sym->decl->offset, sym->type->size)));
@@ -1303,7 +1293,7 @@ vm_expr(Expr *expr, Vm *vm, bool assign) {
             vm_emit(vm, vm_instr(expr, OP_POP, operand_rsi(index_size)));
             vm_emit(vm, vm_instr(expr, OP_ADD, operand_rax(index_size), operand_rsi(index_size)));
 
-            if ( !assign && TARRAY(EINDEX(expr)->base->type)->base->kind != TYPE_ARRAY ) {
+            if ( !assign && IS_TARRAY(TARRAY(EINDEX(expr)->base->type)->base) ) {
                 vm_emit(vm, vm_instr(expr, OP_MOV, operand_rax(index_size), operand_addr(REG_RAX, 0, elem_size)));
             }
         } break;
@@ -1325,9 +1315,21 @@ vm_expr(Expr *expr, Vm *vm, bool assign) {
             vm_expr(EPAREN(expr)->expr, vm, assign);
         } break;
 
+#if 0
         case EXPR_PTR: {
             vm_expr(EPTR(expr)->base, vm, true);
         } break;
+#else
+        case EXPR_PTR: {
+            vm_expr(EPTR(expr)->base, vm, true);
+
+#if 0
+            if ( !assign ) {
+                vm_emit(vm, vm_instr(expr, OP_MOV, operand_reg(REG_RAX, 8), operand_addr(REG_RAX, 0, PTR_SIZE)));
+            }
+#endif
+        } break;
+#endif
 
         case EXPR_STR: {
             uint32_t str_size = utf8_str_size(ESTR(expr)->val);
@@ -1385,7 +1387,11 @@ vm_decl(Decl *decl, Vm *vm) {
                 Decl_Var *param = DPROC(decl)->sign->params[i];
 
                 if ( i < 4 ) {
-                    vm_emit(vm, vm_instr(decl, OP_MOV, operand_rbp(param->type->size, param->offset), operand_args(param->type->size, reg++)));
+                    if ( param->type->kind == TYPE_ARRAY ) {
+                        vm_emit(vm, vm_instr(decl, OP_LEA, operand_rbp(param->type->size, param->ptr_offset), operand_args(param->type->size, reg++)));
+                    } else {
+                        vm_emit(vm, vm_instr(decl, OP_MOV, operand_rbp(param->type->size, param->offset), operand_args(param->type->size, reg++)));
+                    }
                 }
             }
 
@@ -1613,6 +1619,11 @@ vm_stmt(Stmt *stmt, Vm *vm) {
             vm_emit(vm, vm_instr(stmt, OP_RET));
         } break;
 
+        case STMT_USING: {
+            /* @AUFGABE: an dieser stelle müssen wie in DECL_VAR die zugehörigen variablen bekannt gemacht werden? */
+            report_error(stmt, "\"mit\" anweisungen werden in der vm noch nicht unterstützt");
+        } break;
+
         /* @INFO: while ist anders als üblich als "bis" implementiert. die schleife dauert also solange an, bis die bedingung
          * wahr wird.
          */
@@ -1738,6 +1749,11 @@ step(Cpu *cpu) {
 
         case OP_ENTER: {
             stack_push(cpu, reg_read64(cpu, REG_RBP), 8);
+
+            /* @INFO: totaler hack damit der RBP register nicht auf den vorher gepushten REG_RBP wert zeigt und
+             * von [rbp+0] angaben überschrieben wird. */
+            stack_push(cpu, 0, 8);
+
             reg_write64(cpu, REG_RBP, reg_read64(cpu, REG_RSP));
 
             if ( instr->operand1->val.u64 ) {
@@ -1872,6 +1888,10 @@ step(Cpu *cpu) {
 
         case OP_LEAVE: {
             reg_write64(cpu, REG_RSP, reg_read64(cpu, REG_RBP));
+
+            /* @INFO: zweimal in den RBP register popen, weil beim OP_ENTER wir einen platzhalter pushen */
+            stack_pop(cpu, REG_RBP, 8);
+
             stack_pop(cpu, REG_RBP, 8);
         } break;
 
@@ -2106,10 +2126,13 @@ compile(Parsed_File *file, Vm *vm, uint32_t flags) {
     }
 
     uint8_t *result = obj_create(
-            vm->rdata->mem, vm->rdata->used,
-            (uint8_t *)vm->text, buf_len(vm->text)*sizeof(Instr*),
-            vm->data->mem,  vm->data->used,
-            entry);
+                          vm->rdata->mem,
+                          vm->rdata->used,
+             (uint8_t *)  vm->text,
+                          buf_len(vm->text)*sizeof(Instr*),
+                          vm->data->mem,
+                          vm->data->used,
+                          entry);
 
     return result;
 }

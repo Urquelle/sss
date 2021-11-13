@@ -1,17 +1,14 @@
 master :: proc() -> n32 {
-    a : g32 = 5;
-    c : [3][3] n32;
+    v : n32 = 0;
 
-    zweig! a {
-        1: {
-            erg 20;
-        },
+    w := test(*v);
 
-        5: {
-            erg 13;
-        }
-    }
+    erg w;
+}
 
-    erg 15;
+test :: proc(x : *n32) -> n32 {
+    @x = 25;
+
+    erg @x;
 }
 
