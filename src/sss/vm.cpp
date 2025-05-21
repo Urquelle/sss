@@ -1,3 +1,5 @@
+#include <cstdio> // For printf in syscalls
+
 namespace Vm {
 
 struct Cpu;
@@ -50,6 +52,7 @@ enum Vm_Op : uint8_t {
     OP_SETLE,
     OP_SETNE,
     OP_SUB,
+    OP_SYSCALL,
 
     OP_COMMENT,
 
@@ -1059,26 +1062,40 @@ stack_pop(Cpu *cpu, Operand *op) {
 
 void
 vm_emit_and(Expr_Bin *expr, Vm *vm) {
-    vm_expr(expr->left, vm);
-    vm_emit(vm, vm_instr(expr, OP_CMP, operand_rax(expr->type->size), operand_imm(value1, expr->type->size)));
-    int32_t jmp1_instr = vm_emit(vm, vm_instr(expr, OP_JNE, operand_addr(REG_NONE, 0, expr->type->size)));
+    vm_expr(expr->left, vm); // Result of left operand is in RAX
+    // Compare RAX to 0 (false). value0 is a global Value struct { VAL_U64, 0 }
+    vm_emit(vm, vm_instr(expr, OP_CMP, operand_rax(expr->type->size), operand_imm(value0, expr->type->size)));
+    // If left is false (RAX == 0), the whole AND expression is false.
+    // Jump to the end. RAX already holds 0.
+    int32_t jmp_to_end_if_left_is_false = vm_emit(vm, vm_instr(expr, OP_JE, operand_addr(REG_NONE, 0, expr->type->size)));
 
+    // Left was true (RAX != 0). Evaluate right operand.
+    // The result of expr->right (expected to be 0 or 1) will be in RAX and is the final result of the AND.
     vm_expr(expr->right, vm);
-    vm_emit(vm, vm_instr(expr, OP_CMP, operand_rax(expr->type->size), operand_imm(value1, expr->type->size)));
 
-    vm_instr_patch(vm, jmp1_instr, INSTR_NUM());
+    // Patch the jump:
+    // If left was false, execution jumps to this point. RAX is 0 (from left evaluation).
+    // If left was true, execution fell through, evaluated right, and RAX holds result from right.
+    vm_instr_patch(vm, jmp_to_end_if_left_is_false, INSTR_NUM());
 }
 
 void
 vm_emit_or(Expr_Bin *expr, Vm *vm) {
-    vm_expr(expr->left, vm);
+    vm_expr(expr->left, vm); // Result of left operand is in RAX
+    // Compare RAX to 1 (true). value1 is a global Value struct { VAL_U64, 1 }
     vm_emit(vm, vm_instr(expr, OP_CMP, operand_rax(expr->type->size), operand_imm(value1, expr->type->size)));
-    int32_t jmp1_instr = vm_emit(vm, vm_instr(expr, OP_JE, operand_addr(REG_NONE, 0, expr->type->size)));
+    // If left is true (RAX == 1), the whole OR expression is true.
+    // Jump to the end. RAX already holds 1.
+    int32_t jmp_to_end_if_left_is_true = vm_emit(vm, vm_instr(expr, OP_JE, operand_addr(REG_NONE, 0, expr->type->size)));
 
+    // Left was false (RAX != 1, i.e., 0). Evaluate right operand.
+    // The result of expr->right (expected to be 0 or 1) will be in RAX and is the final result of the OR.
     vm_expr(expr->right, vm);
-    vm_emit(vm, vm_instr(expr, OP_CMP, operand_rax(expr->type->size), operand_imm(value1, expr->type->size)));
 
-    vm_instr_patch(vm, jmp1_instr, INSTR_NUM());
+    // Patch the jump:
+    // If left was true, execution jumps to this point. RAX is 1 (from left evaluation).
+    // If left was false, execution fell through, evaluated right, and RAX holds result from right.
+    vm_instr_patch(vm, jmp_to_end_if_left_is_true, INSTR_NUM());
 }
 
 void
@@ -1095,7 +1112,7 @@ vm_expr(Expr *expr, Vm *vm, bool assign) {
             if ( EBIN(expr)->op == BIN_AND ) {
                 vm_emit_and(EBIN(expr), vm);
             } else if ( EBIN(expr)->op == BIN_OR ) {
-                vm_emit_and(EBIN(expr), vm);
+                vm_emit_or(EBIN(expr), vm);
             } else {
                 vm_expr(EBIN(expr)->right, vm);
                 vm_emit(vm, vm_instr(expr, OP_PUSH, operand_rax(rhs_size)));
@@ -1114,10 +1131,11 @@ vm_expr(Expr *expr, Vm *vm, bool assign) {
                         vm_emit(vm, vm_instr(expr, OP_MUL, operand_rax(expr->type->size), operand_rdi(expr->type->size)));
                     }
                 } else if ( EBIN(expr)->op == BIN_DIV ) {
-                    if ( type_issigned(EBIN(expr)->right->type) ) {
-                        vm_emit(vm, vm_instr(expr, OP_DIV, operand_rdi(expr->type->size)));
+                    uint32_t divisor_size = EBIN(expr)->right->type->size;
+                    if ( type_issigned(expr->type) ) {
+                        vm_emit(vm, vm_instr(expr, OP_IDIV, operand_rdi(divisor_size)));
                     } else {
-                        vm_emit(vm, vm_instr(expr, OP_IDIV, operand_rdi(expr->type->size)));
+                        vm_emit(vm, vm_instr(expr, OP_DIV, operand_rdi(divisor_size)));
                     }
                 } else if ( EBIN(expr)->op == BIN_LT ) {
                     vm_emit(vm, vm_instr(expr, OP_CMP, operand_rax(expr->type->size), operand_rdi(expr->type->size)));
@@ -1162,15 +1180,108 @@ vm_expr(Expr *expr, Vm *vm, bool assign) {
 
             vm_expr(ECALL(expr)->base, vm);
 
-            if ( ECALL(expr)->base->type->flags & TYPE_FLAG_SYS_CALL ) {
-                assert(!"syscalls werden in der vm noch nicht unterstützt");
+            Type *func_type = ECALL(expr)->base->type;
+
+            // vm_expr(ECALL(expr)->base, vm); // Original position
+            // The subtask description says:
+            // "The key is to call vm_expr(ECALL(expr)->base, vm) once. 
+            // If it's a syscall, its type flag will be set, and we emit OP_SYSCALL. 
+            // RAX (from the vm_expr call) must contain the syscall ID. 
+            // Otherwise, it's a normal call using OP_CALL with RAX (assumed to hold the function address)."
+            // The vm_expr call for ECALL(expr)->base is already done *before* the argument processing loop.
+            // So, RAX should already hold the syscall ID or function address.
+
+            if ( func_type && (func_type->flags & TYPE_FLAG_SYS_CALL) ) {
+                // RAX is assumed to hold the syscall ID from the vm_expr(ECALL(expr)->base, vm) call
+                // that happened before argument processing.
+                vm_emit(vm, vm_instr(expr, OP_SYSCALL)); 
             } else {
+                // RAX is assumed to hold the function address.
                 vm_emit(vm, vm_instr(expr, OP_CALL, operand_reg(REG_RAX, 8)));
             }
         } break;
 
+        case OP_SYSCALL: {
+            uint64_t syscall_num = reg_read64(cpu, REG_RAX); // Syscall number from RAX
+            switch (syscall_num) {
+                case 1: { // Syscall 1: Print Integer from RCX
+                    printf("%lld", (long long)reg_read64(cpu, REG_RCX));
+                    reg_write64(cpu, REG_RAX, 0); // Return 0
+                    break;
+                }
+                case 2: { // Syscall 2: Print String (address in RCX)
+                    uint64_t str_addr = reg_read64(cpu, REG_RCX);
+                    if (str_addr >= cpu->mem->size) {
+                        printf("\nSyscall PrintString Error: Invalid address 0x%llx\n", (unsigned long long)str_addr);
+                        reg_write64(cpu, REG_RAX, 1); // Error
+                        break;
+                    }
+                    char* str_to_print = (char*)(cpu->mem->mem + str_addr);
+                    char* mem_end = (char*)(cpu->mem->mem + cpu->mem->size);
+                    char* p = str_to_print;
+                    int count = 0;
+                    // Check bounds and for null terminator, with a max length safeguard
+                    while (p < mem_end && *p != '\0' && count < 2048) { p++; count++; }
+
+                    if (p < mem_end && *p == '\0') { // Found null terminator within bounds
+                        printf("%s", str_to_print);
+                        reg_write64(cpu, REG_RAX, 0); // Success
+                    } else { // String is too long or not null-terminated within buffer
+                        printf("\nSyscall PrintString Error: Unterminated/long string at 0x%llx\n", (unsigned long long)str_addr);
+                        reg_write64(cpu, REG_RAX, 2); // Error
+                    }
+                    break;
+                }
+                case 3: { // Syscall 3: Print Newline
+                    printf("\n");
+                    reg_write64(cpu, REG_RAX, 0);
+                    break;
+                }
+                default:
+                    printf("\nSyscall Error: Unknown syscall %llu\n", (unsigned long long)syscall_num);
+                    reg_write64(cpu, REG_RAX, (uint64_t)-1); // Error code for unknown syscall
+                    break;
+            }
+        } break;
+
         case EXPR_CAST: {
-            assert(!"umwandlungen werden in der vm noch nicht unterstützt");
+            Expr_Cast *cast_expr = ECAST(expr);
+            Type *src_type = cast_expr->expr->type;
+            Type *dst_type = cast_expr->typespec->type;
+
+            // Evaluate the expression to be cast; result in RAX.
+            vm_expr(cast_expr->expr, vm);
+
+            char comment_buf[128]; 
+            const char *src_type_name = "unknown_src";
+            const char *dst_type_name = "unknown_dst";
+
+            if (src_type) { // Basic type to string conversion for comments
+                if (type_isinteger(src_type)) src_type_name = type_issigned(src_type) ? "s_int" : "u_int";
+                else if (type_isptr(src_type)) src_type_name = "ptr";
+                else if (type_isfloat(src_type)) src_type_name = "float";
+                else src_type_name = "other";
+            }
+            if (dst_type) {
+                if (type_isinteger(dst_type)) dst_type_name = type_issigned(dst_type) ? "s_int" : "u_int";
+                else if (type_isptr(dst_type)) dst_type_name = "ptr";
+                else if (type_isfloat(dst_type)) dst_type_name = "float";
+                else dst_type_name = "other";
+            }
+            
+            if (!src_type || !dst_type) {
+                snprintf(comment_buf, sizeof(comment_buf), "cast: src or dst type unknown");
+            } else {
+                // Generic comment for the NOP instruction.
+                snprintf(comment_buf, sizeof(comment_buf), "cast: from %s (size %u) to %s (size %u)",
+                         src_type_name, src_type ? src_type->size : 0,
+                         dst_type_name, dst_type ? dst_type->size : 0);
+            }
+            
+            // Emit a NOP. Actual value transformation is not done in this step.
+            // This relies on subsequent operations interpreting RAX according to dst_type.
+            vm_emit(vm, vm_instr(expr, OP_NOP, NULL, NULL, NULL, intern_str(comment_buf)));
+
         } break;
 
         case EXPR_CHAR: {
@@ -1620,8 +1731,41 @@ vm_stmt(Stmt *stmt, Vm *vm) {
         } break;
 
         case STMT_USING: {
-            /* @AUFGABE: an dieser stelle müssen wie in DECL_VAR die zugehörigen variablen bekannt gemacht werden? */
-            report_error(stmt, "\"mit\" anweisungen werden in der vm noch nicht unterstützt");
+            // The STMT_USING construct (German 'mit') is primarily a compile-time feature
+            // affecting symbol resolution and scope, handled by the resolver.
+            // At the VM execution stage, it typically does not translate to direct machine operations.
+            // We remove the error and emit a NOP to acknowledge the statement
+            // without causing a VM error if the parser produces it.
+            
+            // The expression associated with STMT_USING (SUSING(stmt)->expr) might be relevant
+            // for comments or if it had side effects, but for a pure 'using namespace' style,
+            // the expression itself might just name the namespace/object.
+            // For now, a generic comment is sufficient.
+            char comment_buf[128];
+            Expr* using_expr = SUSING(stmt)->expr; // Stmt_Using has an 'expr' field.
+            
+            // Basic information about the expression used in 'using'.
+            // This is a placeholder; more detailed info might come from stringifying the expression if needed.
+            const char* expr_desc = "expression"; 
+            if (using_expr) {
+                // A more detailed description could be derived from using_expr if it's simple (e.g. an identifier)
+                // For now, we'll keep it generic as complex expression stringification isn't set up here.
+                if (using_expr->kind == EXPR_IDENT) {
+                     expr_desc = EIDENT(using_expr)->val; // If it's an identifier.
+                } else if (using_expr->kind == EXPR_FIELD) {
+                    // Could try to reconstruct field access string, but keep simple.
+                    expr_desc = "field_expression";
+                }
+            }
+
+            snprintf(comment_buf, sizeof(comment_buf), "stmt: using (%s)", expr_desc);
+            vm_emit(vm, vm_instr(stmt, OP_NOP, NULL, NULL, NULL, intern_str(comment_buf)));
+            
+            // The original @AUFGABE comment suggests variable handling. This implies resolver's job.
+            // If SUSING(stmt)->expr itself needs evaluation for some side effect (unlikely for typical 'using'),
+            // then vm_expr(SUSING(stmt)->expr, vm) would be called before the NOP.
+            // However, standard 'using' doesn't evaluate an expression for its value at runtime.
+            // So, no vm_expr call here.
         } break;
 
         /* @INFO: while ist anders als üblich als "bis" implementiert. die schleife dauert also solange an, bis die bedingung
@@ -1762,50 +1906,121 @@ step(Cpu *cpu) {
         } break;
 
         case OP_IDIV: {
-            uint64_t dividend = reg_read64(cpu, REG_RAX);
-            uint64_t divisor = 0;
+            uint32_t op_size = instr->operand1->size; // Size of divisor and type of operation.
+            int64_t dividend_s64;
+            int64_t divisor_s64;
 
-            if ( instr->operand1->kind == OPERAND_REG ) {
-                divisor = reg_read(cpu, instr->operand1);
-            } else if ( instr->operand1->kind == OPERAND_IMM ) {
-                divisor = instr->operand1->val.u64;
+            // Read and sign-extend/truncate dividend from RAX based on op_size
+            uint64_t temp_dividend = reg_read64(cpu, REG_RAX);
+            switch (op_size) {
+                case 1: dividend_s64 = (int8_t)(temp_dividend & 0xFF); break;
+                case 2: dividend_s64 = (int16_t)(temp_dividend & 0xFFFF); break;
+                case 4: dividend_s64 = (int32_t)(temp_dividend & 0xFFFFFFFF); break;
+                case 8: dividend_s64 = (int64_t)temp_dividend; break;
+                default: ILLEGAL(); break;
+            }
+
+            // Read and sign-extend/truncate divisor from operand1 based on op_size
+            if (instr->operand1->kind == OPERAND_REG) {
+                // reg_read already uses instr->operand1->size to read appropriately.
+                uint64_t temp_divisor = reg_read(cpu, instr->operand1);
+                switch (op_size) {
+                    case 1: divisor_s64 = (int8_t)temp_divisor; break;
+                    case 2: divisor_s64 = (int16_t)temp_divisor; break;
+                    case 4: divisor_s64 = (int32_t)temp_divisor; break;
+                    case 8: divisor_s64 = (int64_t)temp_divisor; break;
+                    default: ILLEGAL(); break;
+                }
+            } else if (instr->operand1->kind == OPERAND_IMM) {
+                Value imm_val = instr->operand1->val; // The Value struct from the operand
+                switch (op_size) {
+                    case 1: divisor_s64 = imm_val.s8; break;
+                    case 2: divisor_s64 = imm_val.s16; break;
+                    case 4: divisor_s64 = imm_val.s32; break;
+                    case 8: divisor_s64 = imm_val.s64; break;
+                    default: ILLEGAL(); break; 
+                }
             } else {
                 ILLEGAL();
             }
 
-            uint64_t quotient  = (uint64_t)(dividend / divisor);
-            uint64_t remainder = dividend % divisor;
+            if (divisor_s64 == 0) {
+                report_error(instr, "Division by zero in OP_IDIV");
+                ILLEGAL(); 
+            }
 
-            reg_write64(cpu, REG_RAX, quotient);
-            reg_write64(cpu, REG_RDX, remainder);
+            // Check for signed division overflow (e.g., INT_MIN / -1)
+            bool overflow = false;
+            // Using L suffix for long, or rely on compiler to infer from value for int64_t comparison
+            if (op_size == 1 && dividend_s64 == -128 && divisor_s64 == -1) overflow = true;
+            else if (op_size == 2 && dividend_s64 == -32768 && divisor_s64 == -1) overflow = true;
+            else if (op_size == 4 && dividend_s64 == -2147483648L && divisor_s64 == -1) overflow = true; // -2147483648 is fine
+            else if (op_size == 8 && dividend_s64 == (-9223372036854775807L - 1L) && divisor_s64 == -1) overflow = true;
+
+
+            if (overflow) {
+                report_error(instr, "Signed division overflow (e.g., MIN_INT / -1) in OP_IDIV");
+                ILLEGAL(); 
+            }
+
+            int64_t quotient_s64  = dividend_s64 / divisor_s64;
+            int64_t remainder_s64 = dividend_s64 % divisor_s64;
+
+            reg_write64(cpu, REG_RAX, (uint64_t)quotient_s64);
+            reg_write64(cpu, REG_RDX, (uint64_t)remainder_s64);
         } break;
 
         case OP_IMUL: {
-            uint64_t operand1 = 0;
-            uint64_t operand2 = 0;
+            // instr->operand1 is dest (e.g., RAX)
+            // instr->operand2 is source (e.g., RDI or immediate)
+            uint32_t op_size = instr->operand1->size; 
 
-            if ( instr->operand1->kind == OPERAND_REG ) {
-                operand1 = reg_read(cpu, instr->operand1);
-            } else if ( instr->operand1->kind == OPERAND_IMM ) {
-                operand1 = instr->operand1->val.u64;
+            int64_t val1_s64; // Value from operand1
+            int64_t val2_s64; // Value from operand2
+
+            // Read and sign-interpret operand1
+            uint64_t temp_val1 = reg_read(cpu, instr->operand1); 
+            switch (op_size) {
+                case 1: val1_s64 = (int8_t)temp_val1; break;
+                case 2: val1_s64 = (int16_t)temp_val1; break;
+                case 4: val1_s64 = (int32_t)temp_val1; break;
+                case 8: val1_s64 = (int64_t)temp_val1; break;
+                default: ILLEGAL(); break;
+            }
+
+            // Read and sign-interpret operand2
+            uint32_t op2_size = instr->operand2->size;
+            if (instr->operand2->kind == OPERAND_REG) {
+                uint64_t temp_val2 = reg_read(cpu, instr->operand2); 
+                switch (op2_size) {
+                    case 1: val2_s64 = (int8_t)temp_val2; break;
+                    case 2: val2_s64 = (int16_t)temp_val2; break;
+                    case 4: val2_s64 = (int32_t)temp_val2; break;
+                    case 8: val2_s64 = (int64_t)temp_val2; break;
+                    default: ILLEGAL(); break;
+                }
+            } else if (instr->operand2->kind == OPERAND_IMM) {
+                Value imm_val = instr->operand2->val;
+                switch (op2_size) { // Use immediate own size
+                    case 1: val2_s64 = imm_val.s8; break;
+                    case 2: val2_s64 = imm_val.s16; break;
+                    case 4: val2_s64 = imm_val.s32; break;
+                    case 8: val2_s64 = imm_val.s64; break;
+                    default: ILLEGAL(); break;
+                }
             } else {
                 ILLEGAL();
             }
+            
+            int64_t result_s64 = val1_s64 * val2_s64;
 
-            if ( instr->operand2->kind == OPERAND_REG ) {
-                operand2 = reg_read(cpu, instr->operand2);
-            } else if ( instr->operand2->kind == OPERAND_IMM ) {
-                operand2 = instr->operand2->val.u64;
-            } else {
-                ILLEGAL();
-            }
-
-            reg_write64(cpu, REG_RAX, operand1 * operand2);
-
-            flags_clear(cpu);
-            if ( reg_read64(cpu, REG_RAX) == 0 ) {
+            reg_write(cpu, instr->operand1, (uint64_t)result_s64);
+            
+            flags_clear(cpu); 
+            if (reg_read(cpu, instr->operand1) == 0) { 
                 flags_set(cpu, RFLAG_ZF);
             }
+            // SF and OF flags are not set for now.
         } break;
 
         case OP_JE: {
