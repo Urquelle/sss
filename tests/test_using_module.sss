@@ -1,0 +1,49 @@
+// Test file for 'using' with a namespaced module
+
+// Assume 'print_n32' and 'print_string' are available globally for output,
+// or we will verify symbol resolution via compilation success/failure.
+// If not, results of calls can be assigned to variables that might be inspected by a test harness if possible.
+
+#import ModA = (*) aus "tests/test_module_a.sss"; // Import relative to where compiler runs
+
+main_test_proc :: proc() {
+    res_before_using : n32;
+    res_after_using : n32;
+    res_direct_const_after_using : n32;
+    
+    // 1. Access with prefix before 'using'
+    // print_string("Calling with prefix ModA.exported_proc(10):");
+    res_before_using = ModA.exported_proc(10); // Should be 10 + 42 = 52
+    // print_n32(res_before_using); 
+    // print_string("Accessing with prefix ModA.EXPORTED_CONST:");
+    // print_n32(ModA.EXPORTED_CONST);
+
+    mit ModA; // 'using ModA;'
+
+    // 2. Access directly after 'using'
+    // print_string("Calling directly exported_proc(20) after using:");
+    res_after_using = exported_proc(20); // Should be 20 + 42 = 62
+    // print_n32(res_after_using);
+    // print_string("Accessing directly EXPORTED_CONST after using:");
+    res_direct_const_after_using = EXPORTED_CONST; // Should be 42
+    // print_n32(res_direct_const_after_using);
+
+    // 3. Attempt to access non-exported symbol (should fail compilation if resolver prevents it,
+    //    or result in an error if accessed at runtime)
+    // print_string("Attempting to access ModA.internal_var (should fail):");
+    // test_non_exported_var = internal_var; // This should cause a compile error
+    // print_string("Attempting to call ModA.non_exported_proc (should fail):");
+    // test_non_exported_proc_res = non_exported_proc(); // This should cause a compile error
+
+    // For test harness purposes, if we can't print, assign to make sure they resolve:
+    val1 : n32 = res_before_using;       // Expected 52
+    val2 : n32 = res_after_using;       // Expected 62
+    val3 : n32 = res_direct_const_after_using; // Expected 42
+}
+
+// 4. Access with prefix after the scope of 'using' (if main_test_proc was not the whole file scope)
+//    This is implicitly tested by ModA.exported_proc above if it's in a different scope.
+//    If main_test_proc is global, then 'using' applies to its local scope.
+
+// Call the test procedure if possible (e.g. if this file is run directly)
+// main_test_proc();

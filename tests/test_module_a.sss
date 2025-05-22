@@ -1,0 +1,20 @@
+// Module for testing 'using' keyword
+
+#export {
+    exported_proc,
+    EXPORTED_CONST
+}
+
+EXPORTED_CONST :: 42;
+internal_var :: 100; // Not exported
+
+exported_proc :: proc(val : n32) -> n32 {
+    // For printing, we assume a global 'print_n32' procedure might exist,
+    // or this will just be for checking resolution.
+    // print_n32(val + EXPORTED_CONST + internal_var); 
+    erg val + EXPORTED_CONST;
+}
+
+non_exported_proc :: proc() -> n32 {
+    erg internal_var;
+}
